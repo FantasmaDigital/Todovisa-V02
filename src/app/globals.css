@@ -1,26 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;1,600&display=swap');
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* =========================================
+     TODOVISA 2.0 - COLOR PALETTE (Tailwind v4)
+     ========================================= */
+
+  /* 1. Fondos y Superficies */
+  --color-background-main: #FAFAFA;    /* Gris perla muy claro / Blanco roto */
+  --color-background-surface: #FFFFFF; /* Blanco puro */
+  --color-background-hover: #F3F4F6;   /* Gris claro sutil */
+
+  /* 2. Tipografía */
+  --color-text-primary: #111827;       /* Gris carbón casi negro (alta legibilidad) */
+  --color-text-secondary: #4B5563;     /* Gris pizarra / Gris medio */
+  --color-text-muted: #9CA3AF;         /* Gris plateado claro */
+  --color-text-inverse: #FFFFFF;       /* Blanco puro */
+
+  /* 3. Acentos y Marca */
+  --color-brand-primary: #113E5FCC;    /* Azul vibrante / Azul rey (Tu selección) */
+  --color-brand-hover: #0f3755;        /* Azul cobalto (más oscuro para interacción) */
+  --color-brand-light: #EFF6FF;        /* Azul hielo / Celeste muy pálido (casi blanco) */
+
+  /* 4. Líneas y Bordes (Diseño Plano 2D) */
+  --color-border-light: #E5E7EB;       /* Gris platino suave */
+  --color-border-focus: #3B82F6;       /* Azul claro brillante */
+
+  /* 5. Estados del Sistema */
+  --color-status-success: #10B981;     /* Verde esmeralda */
+  --color-status-warning: #F59E0B;     /* Ámbar / Naranja dorado */
+  --color-status-error: #EF4444;       /* Rojo intenso / Carmesí */
+
+  /* =========================================
+     TIPOGRAFÍA BASE ACTUALIZADA
+     ========================================= */
+  /* Aplicando Plus Jakarta Sans como fuente principal para todo el sitio */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Playfair Display', serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* =========================================
+   RESETEO BASE
+   ========================================= */
+@layer base {
+  body {
+    background-color: var(--color-background-main);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Eliminar outlines por defecto y usar el borde de focus personalizado sin volumen */
+  input:focus, button:focus, textarea:focus, select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-background-main), 0 0 0 4px var(--color-border-focus);
+  }
 }
