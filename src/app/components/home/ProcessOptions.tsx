@@ -69,7 +69,7 @@ export const ProcessSection = () => {
   const [active, setActive] = useState('servicioCompleto');
 
   return (
-    <section className="py-32 w-[95%] max-w-7xl m-auto font-sans">
+    <section id="como-funciona" className="py-32 w-[95%] max-w-7xl m-auto font-sans">
       <div className="text-center mb-16">
         <p className="text-sm font-bold tracking-widest text-gray-500 uppercase mb-4">
           CÓMO FUNCIONA EL PROCESO
