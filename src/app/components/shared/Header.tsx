@@ -1,4 +1,5 @@
 import Image from "next/image"
+import Link from "next/link"
 
 export const Header = ({ headerRef }: { headerRef: any }) => {
     return (
@@ -10,13 +11,15 @@ export const Header = ({ headerRef }: { headerRef: any }) => {
             <div className="flex flex-col w-full py-3">
                 <nav className="w-[88%] m-auto flex flex-row items-center">
                     <div className="flex-shrink-0">
-                        <Image
-                            src="/images/todovisa.png"
-                            alt="Logo TODOVISA"
-                            width={72}
-                            height={72}
-                            className="object-contain"
-                        />
+                        <a href="/">
+                            <Image
+                                src="/images/todovisa.png"
+                                alt="Logo TODOVISA"
+                                width={72}
+                                height={72}
+                                className="object-contain"
+                            />
+                        </a>
                     </div>
 
                     <div className="hidden md:flex flex-row items-center gap-10 ml-10 text-sm font-medium text-text-secondary">
@@ -61,14 +64,15 @@ export const Header = ({ headerRef }: { headerRef: any }) => {
                     </div>
 
                     <div className="flex flex-row items-center gap-4 ml-auto">
-                        <button className="hidden sm:block text-sm font-medium text-text-secondary hover:text-text-primary transition-colors">
+                        <Link href="/auth/signin" className="hidden sm:block text-sm font-medium text-text-secondary hover:text-text-primary transition-colors">
                             Iniciar Sesión
-                        </button>
-                        <button
+                        </Link>
+                        <Link
+                            href="/auth/signup"
                             className="bg-brand-primary text-white font-semibold px-5 py-2 rounded-sm w-max h-min flex justify-center items-center hover:bg-brand-hover transition-colors duration-200 border-none text-sm"
                         >
                             Comenzar
-                        </button>
+                        </Link>
                     </div>
 
                 </nav>
