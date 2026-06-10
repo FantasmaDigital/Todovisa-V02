@@ -1,5 +1,9 @@
 "use client"
 import { useForm, SubmitHandler } from 'react-hook-form';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AuthService } from '../../service/AuthService';
+import { useAuthStore } from '../../store/authStore';
 
 type SignInInputs = {
     Email: string;
@@ -8,7 +12,48 @@ type SignInInputs = {
 
 export default function SignInForm() {
     const { register, handleSubmit, formState: { errors } } = useForm<SignInInputs>();
-    const onSubmit: SubmitHandler<SignInInputs> = (data) => console.log(data);
+    const [authError, setAuthError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const router = useRouter();
+    const setUser = useAuthStore((state) => state.setUser);
+
+    const onSubmit: SubmitHandler<SignInInputs> = async (data) => {
+        setIsLoading(true);
+        setAuthError(null);
+        
+        try {
+            const result = await AuthService.signIn(data.Email, data.Password);
+            
+            if (result.data?.user) {
+                const userObj = result.data.user;
+                const metadata = userObj.user_metadata || {};
+                setUser({
+                    id: userObj.id,
+                    email: userObj.email || '',
+                    firstName: metadata.first_name || '',
+                    lastName: metadata.last_name || '',
+                    phone: metadata.phone || '',
+                    country: metadata.country || ''
+                });
+            }
+
+            router.push('/');
+        } catch (error: any) {
+            setAuthError(error.message || 'Error de red al iniciar sesión');
+            setIsLoading(false);
+        }
+    };
+
+    const handleGoogleSignIn = async () => {
+        try {
+            const result = await AuthService.googleSignIn(`${window.location.origin}/`);
+            if (result.url) {
+                window.location.href = result.url;
+            }
+        } catch (error: any) {
+            setAuthError(error.message || 'Error de red al iniciar sesión con Google');
+        }
+    };
 
     return (
         <div className="w-full md:w-1/2 flex items-center justify-center p-4 sm:p-8">
@@ -61,11 +106,13 @@ export default function SignInForm() {
                     <a href="#" className="text-sm text-brand-primary hover:underline font-medium transition-all">¿Olvidaste tu contraseña?</a>
                 </div>
                 <div className="w-full">
+                    {authError && <div className="text-red-500 text-sm mb-4 text-center">{authError}</div>}
                     <button
-                        className="w-full border-[1px] border-brand-primary bg-brand-primary hover:bg-brand-hover cursor-pointer transition-colors text-white font-medium rounded-md px-4 py-2.5 text-md mt-2"
+                        className="w-full border-[1px] border-brand-primary bg-brand-primary hover:bg-brand-hover cursor-pointer transition-colors text-white font-medium rounded-md px-4 py-2.5 text-md mt-2 disabled:opacity-50"
                         type="submit"
+                        disabled={isLoading}
                     >
-                        Iniciar sesión
+                        {isLoading ? 'Iniciando sesión...' : 'Iniciar sesión'}
                     </button>
 
                     <div className="flex items-center w-full my-4">
@@ -76,6 +123,7 @@ export default function SignInForm() {
 
                     <button
                         type="button"
+                        onClick={handleGoogleSignIn}
                         className="w-full flex items-center justify-center gap-2 border-[1px] border-gray-300 bg-white hover:bg-gray-50 transition-colors text-gray-700 font-medium rounded-md px-4 py-2.5 text-md cursor-pointer"
                     >
                         <svg className="w-5 h-5" viewBox="0 0 24 24">

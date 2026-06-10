@@ -90,7 +90,7 @@ const Section2 = ({ scrollYProgress }) => {
           <p className="text-lg text-text-secondary mb-10 leading-relaxed max-w-lg font-medium">
             Completa nuestro Formulario VIPRO para evaluar tu perfil en minutos. Al finalizar, recibirás un diagnóstico preliminar y un 25% de descuento para tu asesoría personalizada.
           </p>
-          <button className="bg-brand-primary text-white font-semibold px-8 py-3 rounded-sm hover:bg-[#0f3755] transition-colors text-sm">
+          <button onClick={() => window.location.href = '/vipro-form'} className="bg-brand-primary text-white font-semibold px-8 py-3 rounded-sm hover:bg-[#0f3755] transition-colors text-sm">
             Iniciar evaluación VIPRO
           </button>
         </div>

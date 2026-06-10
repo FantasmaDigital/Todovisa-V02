@@ -2,6 +2,9 @@
 import React, { useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { countries } from 'countries-list';
+import { useRouter } from 'next/navigation';
+import { AuthService } from '../../service/AuthService';
+import { useAuthStore } from '../../store/authStore';
 
 // 1. Interfaz actualizada con ConfirmPassword
 type SignUpInputs = {
@@ -25,15 +28,60 @@ const countriesArray = Object.entries(countries)
 export default function SignUpForm() {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [authError, setAuthError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const router = useRouter();
+    const setUser = useAuthStore((state) => state.setUser);
 
     const { register, handleSubmit, watch, formState: { errors } } = useForm<SignUpInputs>({
         defaultValues: { Pais: 'SV' }
     });
 
-    const onSubmit: SubmitHandler<SignUpInputs> = (data) => {
+    const onSubmit: SubmitHandler<SignUpInputs> = async (data) => {
+        setIsLoading(true);
+        setAuthError(null);
         const selectedCountry = countriesArray.find(c => c.code === data.Pais);
         const fullPhone = `${selectedCountry?.dial} ${data.Telefono}`;
-        console.log({ ...data, TelefonoCompleto: fullPhone });
+
+        try {
+            const result = await AuthService.signUp({
+                email: data.Email,
+                password: data.Password,
+                first_name: data.Nombre,
+                last_name: data.Apellido,
+                phone: fullPhone,
+                country: data.Pais
+            });
+
+            if (result.data?.user) {
+                const userObj = result.data.user;
+                const metadata = userObj.user_metadata || {};
+                setUser({
+                    id: userObj.id,
+                    email: userObj.email || '',
+                    firstName: metadata.first_name || '',
+                    lastName: metadata.last_name || '',
+                    phone: metadata.phone || '',
+                    country: metadata.country || ''
+                });
+            }
+
+            router.push('/');
+        } catch (error: any) {
+            setAuthError(error.message || 'Error de red al crear la cuenta');
+            setIsLoading(false);
+        }
+    };
+
+    const handleGoogleSignUp = async () => {
+        try {
+            const result = await AuthService.googleSignIn(`${window.location.origin}/`);
+            if (result.url) {
+                window.location.href = result.url;
+            }
+        } catch (error: any) {
+            setAuthError(error.message || 'Error de red al iniciar sesión con Google');
+        }
     };
 
     const selectedCountryCode = watch("Pais");
@@ -188,11 +236,13 @@ export default function SignUpForm() {
                         </div>
 
                         <div className="w-full mt-2">
+                            {authError && <div className="text-red-500 text-sm mb-4 text-center">{authError}</div>}
                             <button
-                                className="w-full border-[1px] border-brand-primary bg-brand-primary hover:bg-brand-hover cursor-pointer transition-colors text-white font-medium rounded-md px-4 py-2.5 text-md"
+                                className="w-full border-[1px] border-brand-primary bg-brand-primary hover:bg-brand-hover cursor-pointer transition-colors text-white font-medium rounded-md px-4 py-2.5 text-md disabled:opacity-50"
                                 type="submit"
+                                disabled={isLoading}
                             >
-                                Crear cuenta
+                                {isLoading ? 'Creando cuenta...' : 'Crear cuenta'}
                             </button>
 
                             <div className="flex items-center w-full my-4">
@@ -203,6 +253,7 @@ export default function SignUpForm() {
 
                             <button
                                 type="button"
+                                onClick={handleGoogleSignUp}
                                 className="w-full flex items-center justify-center gap-2 border-[1px] border-gray-300 bg-white hover:bg-gray-50 transition-colors text-gray-700 font-medium rounded-md px-4 py-2.5 text-md cursor-pointer"
                             >
                                 <svg className="w-5 h-5" viewBox="0 0 24 24">
