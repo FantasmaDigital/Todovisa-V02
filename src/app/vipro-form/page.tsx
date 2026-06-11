@@ -3,11 +3,13 @@
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function ViproFormPage() {
     const headerRef = useRef(null);
     const [_, setHeaderHeight] = useState<number | null>(null);
     const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+    const router = useRouter();
 
     const handleSelectCountry = (country: string) => {
         setSelectedCountry(country);
@@ -68,7 +70,7 @@ export default function ViproFormPage() {
                         </div>
 
                         <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
-                            <button disabled={!selectedCountry} className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg">
+                            <button disabled={!selectedCountry} onClick={() => router.push(`/vipro-form/evaluation`)} className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg">
                                 Empezar Evaluación <span className="pl-2">{selectedCountry}</span>
                             </button>
                             {/* <a href="#" className="text-sm text-brand-primary font-medium hover:underline text-center">
