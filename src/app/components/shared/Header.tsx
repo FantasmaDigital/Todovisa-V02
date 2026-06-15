@@ -103,7 +103,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                     </svg>
                                 </button>
                                 <div className="absolute left-1/2 -translate-x-1/2 mt-2 w-56 bg-white border border-border-light rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 p-1.5 flex flex-col gap-0.5">
-                                    <a href="#buscar-agentes" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
+                                    <Link href="/agents" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
                                         <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.637 10.637z" />
@@ -113,8 +113,19 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             <span className="font-semibold text-xs leading-none">Buscar agentes</span>
                                             <span className="text-[10px] text-text-secondary mt-1">Encuentra tu experto</span>
                                         </div>
-                                    </a>
-                                    <a href="#unirte-red" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
+                                    </Link>
+                                    <Link href="/profile?tab=asesor" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
+                                        <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 10.742h.01m5.624 0h.01m-5.632 4.41h5.631M12 21a9 9 0 100-18 9 9 0 000 18z" />
+                                            </svg>
+                                        </span>
+                                        <div className="flex flex-col text-left">
+                                            <span className="font-semibold text-xs leading-none">Mi asesor asignado</span>
+                                            <span className="text-[10px] text-text-secondary mt-1">Acceso directo al chat</span>
+                                        </div>
+                                    </Link>
+                                    <Link href="/agents/apply" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
                                         <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
@@ -124,7 +135,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             <span className="font-semibold text-xs leading-none">Unirte a la red</span>
                                             <span className="text-[10px] text-text-secondary mt-1">Aplica como experto</span>
                                         </div>
-                                    </a>
+                                    </Link>
                                 </div>
                             </div>
 
@@ -135,15 +146,47 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                             !isMounted ? (
                                 <div className="flex flex-row items-center gap-4 ml-auto min-h-[36px] min-w-[150px]"></div>
                             ) : userData?.id ? (
-                                <div className="flex flex-row items-center gap-4 ml-auto">
-                                    <div className="flex flex-row items-center gap-4">
+                                <div className="flex flex-row items-center gap-4 ml-auto relative group py-2">
+                                    <button className="flex flex-row items-center gap-4 cursor-pointer hover:opacity-95 transition-opacity text-left focus:outline-none">
                                         <div className="flex flex-col">
                                             <span className="text-brand-dark font-bold text-sm">{userData.firstName + " " + userData.lastName}</span>
-                                        <span className="text-brand-primary font-semibold text-xs">{userData.email}</span>
+                                            <span className="text-brand-primary font-semibold text-xs">{userData.email}</span>
                                         </div>
-                                        <div className="w-12 h-12 bg-brand-light rounded-full flex items-center justify-center">
+                                        <div className="w-12 h-12 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/10 group-hover:border-brand-primary/30 transition-colors">
                                             <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
                                         </div>
+                                    </button>
+                                    
+                                    {/* Dropdown Menu on hover/group-hover */}
+                                    <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-border-light rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 p-1.5 flex flex-col gap-0.5">
+                                        <Link href="/profile" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
+                                            <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                                                </svg>
+                                            </span>
+                                            <div className="flex flex-col text-left">
+                                                <span className="font-semibold text-xs leading-none">Mi perfil</span>
+                                                <span className="text-[10px] text-text-secondary mt-1">Gestiona tu cuenta y trámites</span>
+                                            </div>
+                                        </Link>
+                                        <button 
+                                            onClick={() => {
+                                                useAuthStore.getState().clearUser();
+                                                window.location.href = "/";
+                                            }}
+                                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-status-error hover:bg-red-50 hover:text-red-700 transition-all duration-200 text-left cursor-pointer focus:outline-none"
+                                        >
+                                            <span className="p-1.5 bg-red-50 rounded-sm text-status-error">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                                                </svg>
+                                            </span>
+                                            <div className="flex flex-col text-left">
+                                                <span className="font-semibold text-xs leading-none">Cerrar sesión</span>
+                                                <span className="text-[10px] text-red-500/80 mt-1">Salir de tu cuenta segura</span>
+                                            </div>
+                                        </button>
                                     </div>
                                 </div>
                             ) : (

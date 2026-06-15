@@ -27,10 +27,11 @@ export default function VisaDetailPage() {
             <Header headerRef={headerRef} />
 
             {/* Hero Banner */}
-            <div className="w-full bg-[#1A1A3A] px-6 py-16">
-                <div className="max-w-5xl mx-auto flex flex-col md:flex-row gap-10 items-center">
+            <div className="w-full bg-brand-primary px-6 py-16 relative overflow-hidden">
+                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                <div className="w-[80%] mx-auto flex flex-col md:flex-row gap-10 items-center relative z-10">
                     {/* Flag */}
-                    <div className="w-40 h-28 rounded-xl overflow-hidden shadow-xl flex-shrink-0">
+                    <div className="w-40 h-28 rounded-xl overflow-hidden shadow-xl flex-shrink-0 border border-white/20">
                         {country.flag ? (
                             <img src={country.flag} alt={country.name} className="w-full h-full object-cover" />
                         ) : (
@@ -41,16 +42,16 @@ export default function VisaDetailPage() {
                     </div>
                     {/* Text */}
                     <div>
-                        <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/50 mb-2">Guía de Visa</p>
-                        <h1 className="text-4xl md:text-5xl font-serif text-white leading-tight mb-3">
+                        <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-2">Guía de Visa</p>
+                        <h1 className="text-4xl md:text-5xl font-semibold font-serif italic text-white leading-tight mb-3">
                             {country.name}
                         </h1>
-                        <p className="text-white/70 text-base max-w-2xl leading-relaxed">
+                        <p className="text-white/95 text-base max-w-2xl leading-relaxed">
                             {country.heroDescription}
                         </p>
                         <Link
                             href={`/vipro-form?country=${country.code}`}
-                            className="inline-block mt-6 bg-white text-[#1A1A3A] text-sm font-bold px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors shadow-md"
+                            className="inline-block mt-6 bg-white text-brand-primary text-sm font-bold px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors shadow-md"
                         >
                             Iniciar Evaluación VIPRO →
                         </Link>
@@ -58,7 +59,7 @@ export default function VisaDetailPage() {
                 </div>
             </div>
 
-            <main className="w-full max-w-5xl mx-auto px-6 py-16 flex flex-col gap-16">
+            <main className="w-[80%] mx-auto py-16 flex flex-col gap-16">
 
                 {/* Requirements */}
                 <section>
@@ -189,14 +190,15 @@ export default function VisaDetailPage() {
                 )}
 
                 {/* CTA */}
-                <div className="bg-[#1A1A3A] rounded-2xl p-10 flex flex-col md:flex-row items-center justify-between gap-6">
-                    <div>
-                        <h3 className="text-2xl font-serif text-white mb-2">¿Listo para comenzar?</h3>
-                        <p className="text-white/70 text-sm">Realiza tu Evaluación VIPRO y obtén un diagnóstico de tu perfil migratorio.</p>
+                <div className="bg-brand-primary rounded-2xl p-10 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                    <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                    <div className="relative z-10">
+                        <h3 className="text-2xl font-semibold font-serif italic text-white mb-2">¿Listo para comenzar?</h3>
+                        <p className="text-white/90 text-sm">Realiza tu Evaluación VIPRO y obtén un diagnóstico de tu perfil migratorio.</p>
                     </div>
                     <Link
                         href={`/vipro-form?country=${country.code}`}
-                        className="flex-shrink-0 bg-white text-[#1A1A3A] text-sm font-bold px-8 py-4 rounded-xl hover:bg-gray-100 transition-colors shadow-lg whitespace-nowrap"
+                        className="relative z-10 flex-shrink-0 bg-white text-brand-primary text-sm font-bold px-8 py-4 rounded-xl hover:bg-gray-100 transition-colors shadow-lg whitespace-nowrap"
                     >
                         Iniciar Evaluación VIPRO →
                     </Link>

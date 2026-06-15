@@ -82,20 +82,21 @@ export default function VisasPage() {
         <div className="min-h-screen w-full flex flex-col bg-background-main">
             <Header headerRef={headerRef} />
 
-            <div className="w-full bg-brand-primary py-14 px-6">
-                <div className="max-w-[1400px] mx-auto">
-                    <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/60 mb-3">Asesoría de Visas</p>
-                    <h1 className="text-4xl md:text-5xl text-white leading-tight mb-4 font-semibold">
+            <div className="w-full bg-brand-primary py-14 px-6 relative overflow-hidden">
+                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                <div className="w-[80%] mx-auto relative z-10">
+                    <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-3">Asesoría de Visas</p>
+                    <h1 className="text-4xl md:text-5xl text-white leading-tight mb-4 font-semibold font-serif italic">
                         Asesoría de visas para todo el mundo
                     </h1>
-                    <p className="text-white/90 text-base md:text-lg max-w-2xl leading-relaxed">
+                    <p className="text-white/95 text-base md:text-lg max-w-2xl leading-relaxed">
                         En TodoVisa te ofrecemos asesoría integral para la obtención de visas. Nos encargamos del llenado de formularios,
                         pago de derechos, perfilamiento, programación de citas y seguimiento de tu proceso.
                     </p>
                 </div>
             </div>
 
-            <main className="w-full max-w-[1400px] mx-auto px-6 py-14 flex-1">
+            <main className="w-[80%] mx-auto py-14 flex-1">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
                     {countries.map((country) => (
                         <div

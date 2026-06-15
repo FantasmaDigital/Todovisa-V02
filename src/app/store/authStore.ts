@@ -8,6 +8,8 @@ export interface UserData {
   lastName: string;
   phone: string;
   country: string;
+  hasPaidAdvisor?: boolean;
+  assignedAgentId?: string | null;
 }
 
 interface AuthState {

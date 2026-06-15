@@ -24,7 +24,7 @@ export default function ViproFormPage() {
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
             <Header headerRef={headerRef} />
-            <main className="w-full max-w-[1400px] mx-auto px-6 py-12 md:py-20 flex flex-col gap-24 flex-1">
+            <main className="w-[80%] mx-auto py-12 md:py-20 flex flex-col gap-24 flex-1">
                 <div className="flex flex-col md:flex-row items-center gap-20">
                     <div className="w-full md:w-1/2 flex flex-col items-start gap-6">
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-text-primary leading-tight tracking-tight">
