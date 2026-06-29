@@ -189,20 +189,58 @@ function ViproEvaluationContent() {
                         setTimeout(() => setUser(updatedUser), 0);
 
                         try {
-                            await supabase.auth.updateUser({
-                                data: {
-                                    vipro_score: finalScore,
-                                    vipro_completed: true,
-                                    vipro_destination: countryCode,
-                                    vipro_recommendations: recommendations,
-                                    vipro_progress_answers: null,
-                                    vipro_progress_step: null,
-                                    vipro_progress_destination: null
+                            // Check if a draft exists for this user + country
+                            const { data: existing } = await supabase
+                                .from("vipro_evaluations")
+                                .select("id")
+                                .eq("user_id", user.id)
+                                .eq("destination_country", countryCode)
+                                .eq("is_completed", false)
+                                .maybeSingle();
+
+                            if (existing) {
+                                // Update the draft row to mark it as completed
+                                const { error: dbError } = await supabase
+                                    .from("vipro_evaluations")
+                                    .update({
+                                        answers: answers,
+                                        score: finalScore,
+                                        recommendations: recommendations,
+                                        destination_analysis: results.destination_analysis || "",
+                                        is_completed: true,
+                                        completed_at: new Date().toISOString()
+                                    })
+                                    .eq("id", existing.id);
+
+                                if (dbError) {
+                                    console.error("Failed to mark vipro_evaluations record as completed:", dbError.message);
+                                } else {
+                                    console.log("Evaluation successfully updated to completed in public.vipro_evaluations table.");
                                 }
-                            });
-                            console.log("VIPRO results successfully persisted in Supabase Auth user metadata.");
+                            } else {
+                                // No draft found; insert a fresh completed record
+                                const { error: dbError } = await supabase
+                                    .from("vipro_evaluations")
+                                    .insert([{
+                                        user_id: user.id,
+                                        destination_country: countryCode,
+                                        answers: answers,
+                                        score: finalScore,
+                                        recommendations: recommendations,
+                                        destination_analysis: results.destination_analysis || "",
+                                        current_step: 0,
+                                        is_completed: true,
+                                        completed_at: new Date().toISOString()
+                                    }]);
+
+                                if (dbError) {
+                                    console.error("Failed to insert completed record into vipro_evaluations:", dbError.message);
+                                } else {
+                                    console.log("Evaluation successfully saved to public.vipro_evaluations table.");
+                                }
+                            }
                         } catch (err) {
-                            console.error("Failed to persist VIPRO results to Supabase:", err);
+                            console.error("Failed to persist VIPRO results to vipro_evaluations table:", err);
                         }
                     }
                 } catch (err) {
@@ -238,6 +276,21 @@ function ViproEvaluationContent() {
                             viproDestination: countryCode
                         };
                         setTimeout(() => setUser(updatedUser), 0);
+
+                        try {
+                            await supabase.from("vipro_evaluations").insert([
+                                {
+                                    user_id: user.id,
+                                    destination_country: countryCode,
+                                    answers: answers,
+                                    score: finalScore,
+                                    recommendations: fallbackRecs,
+                                    destination_analysis: "Análisis básico de viabilidad consular (Simulado/Offline)."
+                                }
+                            ]);
+                        } catch (dbErr) {
+                            console.error("Failed to insert fallback record in vipro_evaluations:", dbErr);
+                        }
                     }
                 } finally {
                     setIsEvaluating(false);
@@ -247,31 +300,51 @@ function ViproEvaluationContent() {
         }
     }, [completed, answers, countryCode, user, setUser, evaluationResult, isEvaluating]);
 
-    // Auto-save progress as the user answers questions
-    useEffect(() => {
-        if (started && !completed && Object.keys(answers).length > 0) {
-            localStorage.setItem("vipro_progress_answers", JSON.stringify(answers));
-            localStorage.setItem("vipro_progress_step", String(currentStep));
+    // Sync helper to save progress when user clicks Next or Back
+    const saveEvaluationProgress = async (updatedAnswers: Record<number, string>, nextStepIndex: number) => {
+        if (started && !completed && user) {
+            // Save locally
+            localStorage.setItem("vipro_progress_answers", JSON.stringify(updatedAnswers));
+            localStorage.setItem("vipro_progress_step", String(nextStepIndex));
             localStorage.setItem("vipro_progress_destination", countryCode);
 
-            const saveProgressToSupabase = async () => {
-                if (user) {
-                    try {
-                        await supabase.auth.updateUser({
-                            data: {
-                                vipro_progress_answers: answers,
-                                vipro_progress_step: currentStep,
-                                vipro_progress_destination: countryCode
+            try {
+                // Check if a record already exists for this country-user pair
+                const { data: existing } = await supabase
+                    .from("vipro_evaluations")
+                    .select("id")
+                    .eq("user_id", user.id)
+                    .eq("destination_country", countryCode)
+                    .eq("is_completed", false)
+                    .maybeSingle();
+
+                if (existing) {
+                    await supabase
+                        .from("vipro_evaluations")
+                        .update({
+                            answers: updatedAnswers,
+                            current_step: nextStepIndex,
+                            is_completed: false
+                        })
+                        .eq("id", existing.id);
+                } else {
+                    await supabase
+                        .from("vipro_evaluations")
+                        .insert([
+                            {
+                                user_id: user.id,
+                                destination_country: countryCode,
+                                answers: updatedAnswers,
+                                current_step: nextStepIndex,
+                                is_completed: false
                             }
-                        });
-                    } catch (err) {
-                        console.error("Error auto-saving progress to Supabase:", err);
-                    }
+                        ]);
                 }
-            };
-            saveProgressToSupabase();
+            } catch (err) {
+                console.error("Error auto-saving progress to Supabase vipro_evaluations:", err);
+            }
         }
-    }, [answers, currentStep, started, completed, countryCode, user]);
+    };
 
     // Load auto-saved progress on mount/start
     useEffect(() => {
@@ -282,23 +355,29 @@ function ViproEvaluationContent() {
             let savedStep = 0;
             let hasSavedProgress = false;
 
-            // 1. Try to load from Supabase user metadata first if logged in
+            // 1. Try to load from Supabase vipro_evaluations table first if logged in
             if (user) {
                 try {
-                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-                    const metadata = supabaseUser?.user_metadata || {};
-                    if (metadata.vipro_progress_answers && metadata.vipro_progress_destination === countryCode) {
-                        savedAnswers = metadata.vipro_progress_answers;
-                        savedStep = metadata.vipro_progress_step || 0;
+                    const { data: dbProgress, error } = await supabase
+                        .from("vipro_evaluations")
+                        .select("*")
+                        .eq("user_id", user.id)
+                        .eq("destination_country", countryCode)
+                        .eq("is_completed", false)
+                        .maybeSingle();
+
+                    if (!error && dbProgress && dbProgress.answers) {
+                        savedAnswers = dbProgress.answers;
+                        savedStep = dbProgress.current_step || 0;
                         hasSavedProgress = true;
-                        console.log("Restored VIPRO progress from Supabase Auth user metadata.");
+                        console.log("Restored VIPRO progress from vipro_evaluations database table.");
                     }
                 } catch (err) {
-                    console.error("Error fetching progress from Supabase:", err);
+                    console.error("Error fetching progress from vipro_evaluations table:", err);
                 }
             }
 
-            // 2. Fallback to localStorage if no Supabase data was found or offline
+            // 2. Fallback to localStorage if no Supabase database progress was found or offline
             if (!hasSavedProgress && typeof window !== "undefined") {
                 const localDest = localStorage.getItem("vipro_progress_destination");
                 if (localDest === countryCode) {
@@ -461,8 +540,10 @@ function ViproEvaluationContent() {
     const declarationInfo = info.filter(item => item.category.endsWith("DECLARACIÓN Y FIRMA"));
 
     const handleNext = () => {
+        const nextStep = currentStep + 1;
+        saveEvaluationProgress(answers, currentStep); // Save current state
         if (currentStep < questions.length - 1) {
-            setCurrentStep(prev => prev + 1);
+            setCurrentStep(nextStep);
         } else {
             setCompleted(true);
             console.log(`Respuestas finales (${countryCode}):`, answers);
@@ -470,8 +551,10 @@ function ViproEvaluationContent() {
     };
 
     const handleBack = () => {
+        const prevStep = currentStep - 1;
         if (currentStep > 0) {
-            setCurrentStep(prev => prev - 1);
+            saveEvaluationProgress(answers, prevStep);
+            setCurrentStep(prevStep);
         } else {
             setStarted(false);
         }

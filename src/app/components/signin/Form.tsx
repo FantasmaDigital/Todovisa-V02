@@ -80,15 +80,55 @@ export function SignInForm() {
             if (result.data?.user) {
                 const userObj = result.data.user;
                 const metadata = userObj.user_metadata || {};
+                const userId = userObj.id;
                 
-                let viproScore = metadata.vipro_score || null;
-                let viproCompleted = metadata.vipro_completed || false;
-                let viproDestination = metadata.vipro_destination || null;
-                const hasPaidAdvisor = metadata.has_paid_advisor || false;
-                const assignedAgentId = metadata.assigned_agent_id || null;
+                // Defaults — will be overridden from SQL tables below
+                let viproScore: number | null = null;
+                let viproCompleted = false;
+                let viproDestination: string | null = null;
+                let hasPaidVipro = false;
+                let hasPaidAdvisor = false;
+                let assignedAgentId: string | null = null;
 
-                // Sync local guest VIPRO evaluation to Supabase if it wasn't saved in Supabase yet
-                if (typeof window !== "undefined" && !viproCompleted) {
+                // 1. Load payment status from user_purchases table
+                try {
+                    const { data: purchases } = await supabase
+                        .from("user_purchases")
+                        .select("*")
+                        .eq("user_id", userId)
+                        .eq("status", "completed");
+
+                    if (purchases && purchases.length > 0) {
+                        hasPaidVipro = purchases.some((p: any) => p.product_type === "vipro" || p.product_type === "advisor");
+                        hasPaidAdvisor = purchases.some((p: any) => p.product_type === "advisor");
+                        const advisorPurchase = purchases.find((p: any) => p.product_type === "advisor");
+                        assignedAgentId = advisorPurchase?.agent_id || null;
+                    }
+                } catch (err) {
+                    console.error("Failed to load user_purchases on sign-in:", err);
+                }
+
+                // 2. Load VIPRO completion status from vipro_evaluations table
+                try {
+                    const { data: completedEval } = await supabase
+                        .from("vipro_evaluations")
+                        .select("*")
+                        .eq("user_id", userId)
+                        .eq("is_completed", true)
+                        .order("completed_at", { ascending: false })
+                        .maybeSingle();
+
+                    if (completedEval) {
+                        viproCompleted = true;
+                        viproScore = completedEval.score;
+                        viproDestination = completedEval.destination_country;
+                    }
+                } catch (err) {
+                    console.error("Failed to load vipro_evaluations on sign-in:", err);
+                }
+
+                // 3. Sync local guest evaluation to DB if it was done offline and user just logged in
+                if (!viproCompleted && typeof window !== "undefined") {
                     const localCompleted = localStorage.getItem("vipro_completed") === "true";
                     if (localCompleted) {
                         const localScoreStr = localStorage.getItem("vipro_score");
@@ -100,17 +140,21 @@ export function SignInForm() {
                         viproDestination = localDestination;
 
                         try {
-                            // Update user metadata in Supabase Auth
-                            await supabase.auth.updateUser({
-                                data: {
-                                    vipro_score: localScore,
-                                    vipro_completed: true,
-                                    vipro_destination: localDestination
-                                }
-                            });
-                            console.log("Synced local guest VIPRO to Supabase on Sign-in.");
+                            // Persist local evaluation to the physical table
+                            await supabase.from("vipro_evaluations").insert([{
+                                user_id: userId,
+                                destination_country: localDestination || "US",
+                                answers: {},
+                                score: localScore,
+                                recommendations: [],
+                                destination_analysis: "Evaluación realizada sin sesión activa.",
+                                current_step: 0,
+                                is_completed: true,
+                                completed_at: new Date().toISOString()
+                            }]);
+                            console.log("Synced local guest VIPRO evaluation to vipro_evaluations table on Sign-in.");
                         } catch (err) {
-                            console.error("Failed to sync local VIPRO to Supabase on sign-in:", err);
+                            console.error("Failed to sync local VIPRO to vipro_evaluations on sign-in:", err);
                         }
                     }
                 }
@@ -125,11 +169,19 @@ export function SignInForm() {
                     viproScore: viproScore,
                     viproCompleted: viproCompleted,
                     viproDestination: viproDestination,
+                    hasPaidVipro: hasPaidVipro,
                     hasPaidAdvisor: hasPaidAdvisor,
                     assignedAgentId: assignedAgentId,
                     photoUrl: metadata.photo_url || null,
                     avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-                    lastAvatarChangeMonth: metadata.last_avatar_change_month || ''
+                    lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
+                    ds160FullName: metadata.ds160_full_name || null,
+                    ds160PassportNum: metadata.ds160_passport_num || null,
+                    ds160BirthDate: metadata.ds160_birth_date || null,
+                    ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
+                    ds160HasAssets: metadata.ds160_has_assets ?? true,
+                    ds160Confirmed: metadata.ds160_confirmed || false,
+                    expedienteStatus: metadata.expediente_status || 'draft',
                 });
             }
 

@@ -129,7 +129,14 @@ export default function SignUpForm() {
                     assignedAgentId: metadata.assigned_agent_id || null,
                     photoUrl: metadata.photo_url || null,
                     avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-                    lastAvatarChangeMonth: metadata.last_avatar_change_month || ''
+                    lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
+                    ds160FullName: metadata.ds160_full_name || null,
+                    ds160PassportNum: metadata.ds160_passport_num || null,
+                    ds160BirthDate: metadata.ds160_birth_date || null,
+                    ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
+                    ds160HasAssets: metadata.ds160_has_assets ?? true,
+                    ds160Confirmed: metadata.ds160_confirmed || false,
+                    expedienteStatus: metadata.expediente_status || 'draft',
                 });
             }
 

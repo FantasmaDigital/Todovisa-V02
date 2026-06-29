@@ -57,17 +57,28 @@ export default function PerfilUsuarioPage() {
     bankStatements?: string;
   }>({});
 
-  const [ds160Confirmed, setDs160Confirmed] = useState(false);
-  const [expedienteStatus, setExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>('draft');
+  const [ds160Confirmed, setDs160Confirmed] = useState(user?.ds160Confirmed || false);
+  const [expedienteStatus, setExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>(user?.expedienteStatus || 'draft');
   const [isDs160ModalOpen, setIsDs160ModalOpen] = useState(false);
+  const [isDs160Closing, setIsDs160Closing] = useState(false);
+  const [dbPurchases, setDbPurchases] = useState<any[]>([]);
 
-  // Mock form values for DS-160
+  // Closes the DS-160 panel with an exit animation before unmounting
+  const closeDs160Panel = () => {
+    setIsDs160Closing(true);
+    setTimeout(() => {
+      setIsDs160ModalOpen(false);
+      setIsDs160Closing(false);
+    }, 280);
+  };
+
+  // DS-160 form values — seeded from Supabase Auth metadata
   const [ds160Data, setDs160Data] = useState({
-    fullName: "",
-    passportNum: "A12345678",
-    birthDate: "1994-05-12",
-    purposeOfTrip: "Turismo B1/B2",
-    hasAssets: true
+    fullName: user?.ds160FullName || "",
+    passportNum: user?.ds160PassportNum || "",
+    birthDate: user?.ds160BirthDate || "",
+    purposeOfTrip: user?.ds160PurposeOfTrip || "Turismo B1/B2",
+    hasAssets: user?.ds160HasAssets ?? true
   });
 
   // Toast state
@@ -249,10 +260,16 @@ export default function PerfilUsuarioPage() {
             assignedAgentId: metadata.assigned_agent_id || null,
             photoUrl: metadata.photo_url || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-            lastAvatarChangeMonth: metadata.last_avatar_change_month || ''
+            lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
+            ds160FullName: metadata.ds160_full_name || null,
+            ds160PassportNum: metadata.ds160_passport_num || null,
+            ds160BirthDate: metadata.ds160_birth_date || null,
+            ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
+            ds160HasAssets: metadata.ds160_has_assets ?? true,
+            ds160Confirmed: metadata.ds160_confirmed || false,
+            expedienteStatus: metadata.expediente_status || 'draft',
           };
 
-          // Compare with current user state to avoid unnecessary loops
           if (
             !user ||
             user.id !== updatedUser.id ||
@@ -265,11 +282,24 @@ export default function PerfilUsuarioPage() {
             user.lastName !== updatedUser.lastName ||
             user.photoUrl !== updatedUser.photoUrl ||
             user.avatarChangesThisMonth !== updatedUser.avatarChangesThisMonth ||
-            user.lastAvatarChangeMonth !== updatedUser.lastAvatarChangeMonth
+            user.lastAvatarChangeMonth !== updatedUser.lastAvatarChangeMonth ||
+            user.ds160Confirmed !== updatedUser.ds160Confirmed ||
+            user.expedienteStatus !== updatedUser.expedienteStatus
           ) {
             console.log("Syncing auth store state with Supabase Auth user metadata.");
-            // Defer store update to avoid react-hooks/set-state-in-effect warning
-            setTimeout(() => setUser(updatedUser), 0);
+            setTimeout(() => {
+              setUser(updatedUser);
+              // Hydrate local DS-160 state from remote metadata
+              setDs160Data({
+                fullName: updatedUser.ds160FullName || `${updatedUser.firstName} ${updatedUser.lastName}`.trim(),
+                passportNum: updatedUser.ds160PassportNum || '',
+                birthDate: updatedUser.ds160BirthDate || '',
+                purposeOfTrip: updatedUser.ds160PurposeOfTrip || 'Turismo B1/B2',
+                hasAssets: updatedUser.ds160HasAssets ?? true,
+              });
+              setDs160Confirmed(updatedUser.ds160Confirmed || false);
+              setExpedienteStatus(updatedUser.expedienteStatus || 'draft');
+            }, 0);
           }
         }
       } catch (err) {
@@ -315,6 +345,43 @@ export default function PerfilUsuarioPage() {
       }
     }
   }, []);
+
+  // Fetch real physical purchases and VIPRO evaluations from SQL tables
+  useEffect(() => {
+    if (!user) return;
+    const fetchDbRecords = async () => {
+      try {
+        const { data: purchases, error: purchaseError } = await supabase
+          .from("user_purchases")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+
+        if (!purchaseError && purchases) {
+          setDbPurchases(purchases);
+        }
+
+        // If records exist, dynamically sync store flags too
+        if (purchases && purchases.length > 0) {
+          const hasViproPaid = purchases.some(p => p.product_type === "vipro" && p.status === "completed");
+          const hasAdvisorPaid = purchases.some(p => p.product_type === "advisor" && p.status === "completed");
+          const activeAdvisor = purchases.find(p => p.product_type === "advisor" && p.status === "completed");
+
+          if (hasViproPaid !== user.hasPaidVipro || hasAdvisorPaid !== user.hasPaidAdvisor) {
+            setUser({
+              ...user,
+              hasPaidVipro: hasViproPaid || hasAdvisorPaid,
+              hasPaidAdvisor: hasAdvisorPaid,
+              assignedAgentId: activeAdvisor?.agent_id || user.assignedAgentId
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load user purchases from DB:", err);
+      }
+    };
+    fetchDbRecords();
+  }, [user?.id, activeTab]);
 
   // Load messages from Supabase (or use default mock if database is not configured)
   const [isSupabaseDbAvailable, setIsSupabaseDbAvailable] = useState<boolean | null>(null);
@@ -433,11 +500,13 @@ export default function PerfilUsuarioPage() {
         {
           event: "INSERT",
           schema: "public",
-          table: "messages",
-          filter: `user_id=eq.${user.id}`,
+          table: "messages"
         },
         (payload) => {
           const newMsg = payload.new;
+          // Filter messages belonging to this user
+          if (newMsg.user_id !== user.id) return;
+
           // Avoid duplicate messages
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -447,7 +516,7 @@ export default function PerfilUsuarioPage() {
                 id: newMsg.id,
                 sender: newMsg.sender,
                 text: newMsg.text,
-                timestamp: new Date(newMsg.timestamp),
+                timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
               },
             ];
           });
@@ -561,10 +630,13 @@ export default function PerfilUsuarioPage() {
     const tempId = `msg-${Date.now()}`;
     const newUserMsg = {
       id: tempId,
-      sender: "user",
+      sender: "user" as const,
       text: textToSend,
       timestamp: new Date(),
     };
+
+    // Optimistically add the message to the screen immediately for zero lag
+    setMessages((prev) => [...prev, newUserMsg]);
 
     const localKey = `mock_messages_${user.id}`;
 
@@ -578,22 +650,17 @@ export default function PerfilUsuarioPage() {
         });
       } catch (err: any) {
         console.error("Failed to send message via API:", err.message);
-        setMessages((prev) => {
-          const updated = [...prev, newUserMsg];
-          if (typeof window !== "undefined") {
-            localStorage.setItem(localKey, JSON.stringify(updated));
-          }
-          return updated;
-        });
+        // Save to local backup in case of server failures
+        if (typeof window !== "undefined") {
+          const stored = localStorage.getItem(localKey);
+          const current = stored ? JSON.parse(stored) : [];
+          localStorage.setItem(localKey, JSON.stringify([...current, newUserMsg]));
+        }
       }
     } else {
-      setMessages((prev) => {
-        const updated = [...prev, newUserMsg];
-        if (typeof window !== "undefined") {
-          localStorage.setItem(localKey, JSON.stringify(updated));
-        }
-        return updated;
-      });
+      if (typeof window !== "undefined") {
+        localStorage.setItem(localKey, JSON.stringify([...messages, newUserMsg]));
+      }
     }
 
     setIsTyping(true);
@@ -976,7 +1043,7 @@ export default function PerfilUsuarioPage() {
                         <>
                           <p className="text-xs text-text-secondary mb-3">Has habilitado tu Evaluación VIPRO. Complétala ahora para conocer tu puntaje de perfilamiento consular y permitir a tu asesor comenzar a auditar tu caso.</p>
                           <button
-                            onClick={() => router.push("/vipro-form/evaluation")}
+                            onClick={() => router.push("/vipro-form")}
                             className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
                           >
                             Comenzar Evaluación VIPRO
@@ -1599,93 +1666,149 @@ export default function PerfilUsuarioPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border-light text-xs">
-                      {/* Fila 1: VIPRO Evaluation */}
-                      <tr className={user.hasPaidVipro || user.hasPaidAdvisor ? "" : "opacity-90"}>
-                        <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-VIPRO-8429</td>
-                        <td className="py-4 px-4">
-                          <div>
-                            <p className="font-bold text-text-primary">Evaluación VIPRO Diagnóstica</p>
-                            <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                        <td className="py-4 px-4 font-bold text-text-primary">$19.99 USD</td>
-                        <td className="py-4 px-4">
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                            user.hasPaidVipro || user.hasPaidAdvisor
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                              : "bg-amber-50 text-amber-800 border-amber-100"
-                          }`}>
-                            {user.hasPaidVipro || user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          {user.hasPaidVipro || user.hasPaidAdvisor ? (
-                            <button
-                              onClick={() => showToast("Generando PDF de factura...", "info")}
-                              className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
-                            >
-                              Descargar
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setCheckoutProduct("vipro");
-                                setCheckoutAgent(null);
-                                setIsCheckoutOpen(true);
-                              }}
-                              className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                            >
-                              Pagar
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                      
-                      {/* Fila 2: Premium Advisory (Depende de hasPaidAdvisor) */}
-                      <tr className={user.hasPaidAdvisor ? "" : "opacity-90"}>
-                        <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-ASES-3820</td>
-                        <td className="py-4 px-4">
-                          <div>
-                            <p className="font-bold text-text-primary">Asesoría de Visa Premium (Completa)</p>
-                            <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                        <td className="py-4 px-4 font-bold text-text-primary">
-                          {user.hasPaidAdvisor ? "$112.50 USD" : "$150.00 USD"}
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                            user.hasPaidAdvisor 
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-100" 
-                              : "bg-amber-50 text-amber-800 border-amber-100"
-                          }`}>
-                            {user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          {user.hasPaidAdvisor ? (
-                            <button
-                              onClick={() => setActiveTab("asesor")}
-                              className="text-brand-primary hover:underline font-semibold"
-                            >
-                              Ver Chat
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setCheckoutAgent(assignedAgent);
-                                setCheckoutProduct("advisor");
-                                setIsCheckoutOpen(true);
-                              }}
-                              className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                            >
-                              Pagar
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                      {dbPurchases.length > 0 ? (
+                        dbPurchases.map((purchase) => {
+                          const isViproItem = purchase.product_type === "vipro";
+                          return (
+                            <tr key={purchase.id} className="hover:bg-background-main/20 transition-colors">
+                              <td className="py-4 px-4 font-mono font-medium text-text-primary">{purchase.reference_id}</td>
+                              <td className="py-4 px-4">
+                                <div>
+                                  <p className="font-bold text-text-primary">
+                                    {isViproItem ? "Evaluación VIPRO Diagnóstica" : "Asesoría de Visa Premium (Completa)"}
+                                  </p>
+                                  <p className="text-[10px] text-text-secondary">Método: {purchase.payment_method}</p>
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 text-text-secondary">
+                                {new Date(purchase.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                              </td>
+                              <td className="py-4 px-4 font-bold text-text-primary">
+                                ${parseFloat(purchase.amount).toFixed(2)} USD
+                              </td>
+                              <td className="py-4 px-4">
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                  purchase.status === "completed"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                    : "bg-amber-50 text-amber-800 border-amber-100"
+                                }`}>
+                                  {purchase.status.toUpperCase()}
+                                </span>
+                              </td>
+                              <td className="py-4 px-4 text-right">
+                                {purchase.status === "completed" ? (
+                                  isViproItem ? (
+                                    <button
+                                      onClick={() => showToast("Generando PDF de factura...", "info")}
+                                      className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
+                                    >
+                                      Descargar
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => setActiveTab("asesor")}
+                                      className="text-brand-primary hover:underline font-semibold"
+                                    >
+                                      Ver Chat
+                                    </button>
+                                  )
+                                ) : (
+                                  <span className="text-text-muted italic">Pendiente</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <>
+                          {/* Fallback mock UI when DB has no purchases registered */}
+                          <tr className={user.hasPaidVipro || user.hasPaidAdvisor ? "" : "opacity-90"}>
+                            <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-VIPRO-8429</td>
+                            <td className="py-4 px-4">
+                              <div>
+                                <p className="font-bold text-text-primary">Evaluación VIPRO Diagnóstica</p>
+                                <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
+                            <td className="py-4 px-4 font-bold text-text-primary">$19.99 USD</td>
+                            <td className="py-4 px-4">
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                user.hasPaidVipro || user.hasPaidAdvisor
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                  : "bg-amber-50 text-amber-800 border-amber-100"
+                              }`}>
+                                {user.hasPaidVipro || user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4 text-right">
+                              {user.hasPaidVipro || user.hasPaidAdvisor ? (
+                                <button
+                                  onClick={() => showToast("Generando PDF de factura...", "info")}
+                                  className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
+                                >
+                                  Descargar
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setCheckoutProduct("vipro");
+                                    setCheckoutAgent(null);
+                                    setIsCheckoutOpen(true);
+                                  }}
+                                  className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
+                                >
+                                  Pagar
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          
+                          <tr className={user.hasPaidAdvisor ? "" : "opacity-90"}>
+                            <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-ASES-3820</td>
+                            <td className="py-4 px-4">
+                              <div>
+                                <p className="font-bold text-text-primary">Asesoría de Visa Premium (Completa)</p>
+                                <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
+                            <td className="py-4 px-4 font-bold text-text-primary">
+                              {user.hasPaidAdvisor ? "$112.50 USD" : "$150.00 USD"}
+                            </td>
+                            <td className="py-4 px-4">
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                user.hasPaidAdvisor 
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100" 
+                                  : "bg-amber-50 text-amber-800 border-amber-100"
+                              }`}>
+                                {user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4 text-right">
+                              {user.hasPaidAdvisor ? (
+                                <button
+                                  onClick={() => setActiveTab("asesor")}
+                                  className="text-brand-primary hover:underline font-semibold"
+                                >
+                                  Ver Chat
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setCheckoutAgent(assignedAgent);
+                                    setCheckoutProduct("advisor");
+                                    setIsCheckoutOpen(true);
+                                  }}
+                                  className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
+                                >
+                                  Pagar
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        </>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1722,8 +1845,8 @@ export default function PerfilUsuarioPage() {
             setIsCheckoutOpen(false);
             setCheckoutAgent(null);
             if (checkoutProduct === "vipro") {
-              showToast("¡Evaluación VIPRO adquirida con éxito! Redireccionando...", "success");
-              router.push(`/vipro-form/evaluation?country=${user?.viproDestination || "US"}`);
+              showToast("¡Evaluación VIPRO adquirida con éxito! Selecciona tu destino para comenzar.", "success");
+              router.push("/vipro-form");
             } else {
               setActiveTab("proceso"); // Redirect to tracking so they see Step 4 workspace
               showToast("¡Asesor contratado y expediente de trámite activado con éxito!", "success");
@@ -1732,110 +1855,190 @@ export default function PerfilUsuarioPage() {
         />
       )}
 
-      {/* MODAL DS-160 */}
+      {/* DS-160 SIDE PANEL */}
       {isDs160ModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-lg border border-border-light max-w-lg w-full overflow-hidden shadow-2xl animate-in scale-in duration-300">
-            {/* Modal Header */}
-            <div className="bg-[#0a2336] text-white px-6 py-4 flex justify-between items-center">
-              <div>
-                <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400">Auditoría de Formulario Consular</span>
-                <h3 className="text-md font-bold font-serif italic text-white">Borrador de Formulario DS-160</h3>
+        <div
+          className={`fixed inset-0 z-[300] flex ${
+            isDs160Closing ? 'pointer-events-none' : ''
+          }`}
+          onClick={closeDs160Panel}
+        >
+          {/* Backdrop */}
+          <div
+            className={`flex-1 bg-black/50 backdrop-blur-sm ${
+              isDs160Closing
+                ? 'animate-out fade-out duration-[280ms]'
+                : 'animate-in fade-in duration-200'
+            }`}
+          />
+
+          {/* Side Panel */}
+          <div
+            className={`w-full max-w-md bg-white flex flex-col shadow-2xl ${
+              isDs160Closing
+                ? 'animate-out slide-out-to-right duration-[280ms]'
+                : 'animate-in slide-in-from-right duration-300'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Panel Header */}
+            <div className="bg-[#0a2336] px-6 py-5 flex-shrink-0">
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="text-[9px] uppercase font-bold tracking-[0.2em] text-emerald-400">Auditoría Consular</span>
+                  <h2 className="text-lg font-bold text-white mt-0.5">Formulario DS-160</h2>
+                  <p className="text-[11px] text-white/50 mt-1 leading-relaxed">Datos que deben coincidir exactamente con tu pasaporte para evitar rechazos en la embajada.</p>
+                </div>
+                <button
+                  onClick={closeDs160Panel}
+                  className="ml-4 mt-0.5 flex-shrink-0 w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-colors cursor-pointer text-sm font-bold"
+                >
+                  ✕
+                </button>
               </div>
-              <button 
-                onClick={() => setIsDs160ModalOpen(false)}
-                className="text-white/70 hover:text-white text-xl font-bold focus:outline-none cursor-pointer"
-              >
-                ✕
-              </button>
+
+              {/* Status pill */}
+              <div className={`mt-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold border ${
+                ds160Confirmed
+                  ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
+                  : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${ ds160Confirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                {ds160Confirmed ? 'DATOS CONFIRMADOS EN SUPABASE' : 'PENDIENTE DE CONFIRMACIÓN'}
+              </div>
             </div>
 
-            {/* Modal Content */}
-            <div className="p-6 space-y-4 max-h-[400px] overflow-y-auto">
-              <p className="text-xs text-text-secondary leading-relaxed">
-                Verifica detalladamente los datos de tu postulación consular. Esta información debe ser idéntica a tus documentos oficiales para evitar rechazos en la ventanilla de la embajada.
-              </p>
+            {/* Panel Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-              <div className="space-y-3 pt-2">
+              {/* Full Name */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Nombre Completo <span className="text-brand-primary">(como aparece en pasaporte)</span></label>
+                <input
+                  type="text"
+                  value={ds160Data.fullName}
+                  onChange={(e) => setDs160Data({ ...ds160Data, fullName: e.target.value })}
+                  placeholder="Ej. Juan Carlos Pérez García"
+                  className="w-full px-3.5 py-2.5 bg-background-main border border-border-light rounded-sm text-sm text-text-primary focus:border-brand-primary focus:outline-none transition-colors"
+                />
+              </div>
+
+              {/* Passport & Birth Date */}
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Nombre Completo (Como aparece en Pasaporte)</label>
-                  <input 
-                    type="text" 
-                    value={ds160Data.fullName}
-                    onChange={(e) => setDs160Data({...ds160Data, fullName: e.target.value})}
-                    className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">N° de Pasaporte</label>
+                  <input
+                    type="text"
+                    value={ds160Data.passportNum}
+                    onChange={(e) => setDs160Data({ ...ds160Data, passportNum: e.target.value })}
+                    placeholder="A12345678"
+                    className="w-full px-3.5 py-2.5 bg-background-main border border-border-light rounded-sm text-sm text-text-primary focus:border-brand-primary focus:outline-none font-mono tracking-wider transition-colors"
                   />
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Número de Pasaporte</label>
-                    <input 
-                      type="text" 
-                      value={ds160Data.passportNum}
-                      onChange={(e) => setDs160Data({...ds160Data, passportNum: e.target.value})}
-                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Fecha de Nacimiento</label>
-                    <input 
-                      type="date" 
-                      value={ds160Data.birthDate}
-                      onChange={(e) => setDs160Data({...ds160Data, birthDate: e.target.value})}
-                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Fecha de Nacimiento</label>
+                  <input
+                    type="date"
+                    value={ds160Data.birthDate}
+                    onChange={(e) => setDs160Data({ ...ds160Data, birthDate: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-background-main border border-border-light rounded-sm text-sm text-text-primary focus:border-brand-primary focus:outline-none transition-colors"
+                  />
                 </div>
+              </div>
 
+              {/* Purpose of Trip */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Propósito Principal del Viaje</label>
+                <select
+                  value={ds160Data.purposeOfTrip}
+                  onChange={(e) => setDs160Data({ ...ds160Data, purposeOfTrip: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-background-main border border-border-light rounded-sm text-sm text-text-primary focus:border-brand-primary focus:outline-none transition-colors"
+                >
+                  <option value="Turismo B1/B2">Turismo B1/B2</option>
+                  <option value="Estudios F1">Estudios F1</option>
+                  <option value="Negocios B1">Negocios B1</option>
+                  <option value="Trabajo H1B/H2A">Trabajo H1B/H2A</option>
+                  <option value="Residencia">Residencia Permanente</option>
+                </select>
+              </div>
+
+              {/* Has Assets — toggle buttons */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">¿Posees Arraigo / Solvencia Económica?</label>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Propósito del Viaje</label>
-                    <select 
-                      value={ds160Data.purposeOfTrip}
-                      onChange={(e) => setDs160Data({...ds160Data, purposeOfTrip: e.target.value})}
-                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
+                  {[{ label: 'Sí — Trabajo o Negocio Propio', value: true }, { label: 'No — Patrocinador Externo', value: false }].map(opt => (
+                    <button
+                      key={String(opt.value)}
+                      type="button"
+                      onClick={() => setDs160Data({ ...ds160Data, hasAssets: opt.value })}
+                      className={`py-2.5 px-3 rounded-sm text-xs font-semibold border transition-all text-left ${
+                        ds160Data.hasAssets === opt.value
+                          ? 'bg-brand-primary text-white border-brand-primary'
+                          : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/40'
+                      }`}
                     >
-                      <option value="Turismo B1/B2">Turismo B1/B2</option>
-                      <option value="Estudios F1">Estudios F1</option>
-                      <option value="Negocios B1">Negocios B1</option>
-                      <option value="Trabajo H1B/H2A">Trabajo H1B/H2A</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">¿Posees Arraigo de Solvencia?</label>
-                    <select 
-                      value={ds160Data.hasAssets ? "true" : "false"}
-                      onChange={(e) => setDs160Data({...ds160Data, hasAssets: e.target.value === "true"})}
-                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
-                    >
-                      <option value="true">Sí (Trabajo/Negocio propio)</option>
-                      <option value="false">No / Patrocinador externo</option>
-                    </select>
-                  </div>
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              {/* Warning banner */}
+              <div className="bg-amber-50 border border-amber-200 rounded-sm p-3 flex gap-2.5">
+                <span className="text-base flex-shrink-0">⚠️</span>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Estos datos son enviados directamente al consulado. Cualquier discrepancia con tu pasaporte puede resultar en rechazo inmediato. Verifica dos veces antes de confirmar.
+                </p>
               </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="bg-background-main/30 border-t border-border-light px-6 py-4 flex justify-end gap-2">
-              <button 
+            {/* Panel Footer */}
+            <div className="flex-shrink-0 border-t border-border-light bg-background-main/30 px-6 py-4 flex items-center justify-between gap-3">
+              <button
                 type="button"
-                onClick={() => setIsDs160ModalOpen(false)}
-                className="px-4 py-2 border border-border-light text-text-secondary hover:text-text-primary hover:bg-background-hover text-xs font-semibold rounded-sm transition-colors cursor-pointer"
+                onClick={closeDs160Panel}
+                className="px-4 py-2 border border-border-light text-text-secondary hover:text-text-primary text-xs font-semibold rounded-sm transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
-              <button 
+              <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   setDs160Confirmed(true);
-                  setIsDs160ModalOpen(false);
-                  showToast("¡Datos de formulario DS-160 confirmados para auditoría!", "success");
+                  closeDs160Panel();
+                  const updatedUser = {
+                    ...user!,
+                    ds160FullName: ds160Data.fullName,
+                    ds160PassportNum: ds160Data.passportNum,
+                    ds160BirthDate: ds160Data.birthDate,
+                    ds160PurposeOfTrip: ds160Data.purposeOfTrip,
+                    ds160HasAssets: ds160Data.hasAssets,
+                    ds160Confirmed: true,
+                    expedienteStatus: expedienteStatus,
+                  };
+                  setUser(updatedUser);
+                  try {
+                    const { error } = await supabase.auth.updateUser({
+                      data: {
+                        ds160_full_name: ds160Data.fullName,
+                        ds160_passport_num: ds160Data.passportNum,
+                        ds160_birth_date: ds160Data.birthDate,
+                        ds160_purpose_of_trip: ds160Data.purposeOfTrip,
+                        ds160_has_assets: ds160Data.hasAssets,
+                        ds160_confirmed: true,
+                        expediente_status: expedienteStatus,
+                      }
+                    });
+                    if (error) console.warn('Could not persist DS-160 to Supabase:', error.message);
+                  } catch (err) {
+                    console.error('Error saving DS-160:', err);
+                  }
+                  showToast('Datos DS-160 guardados en tu perfil.', 'success');
                 }}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-sm transition-colors shadow-sm cursor-pointer"
+                className="flex-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Confirmar y Cerrar
+                <span>✓</span>
+                <span>Confirmar y Guardar</span>
               </button>
             </div>
           </div>
@@ -1844,18 +2047,27 @@ export default function PerfilUsuarioPage() {
 
       {/* Toast Alert Component */}
       {toast && (
-        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${
-          toast.type === 'success' 
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-            : toast.type === 'error' 
-            ? 'bg-red-50 border-red-200 text-red-800' 
-            : 'bg-blue-50 border-blue-200 text-blue-850'
+        <div className={`fixed bottom-6 right-6 z-[400] flex items-center gap-3 px-5 py-4 rounded-lg shadow-2xl border animate-in slide-in-from-bottom-4 duration-300 max-w-sm ${
+          toast.type === 'success'
+            ? 'bg-white border-emerald-200'
+            : toast.type === 'error'
+            ? 'bg-white border-red-200'
+            : 'bg-white border-blue-200'
         }`}>
-          <span className="text-base select-none">
-            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
-          </span>
-          <span className="text-xs font-semibold">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="ml-2 text-text-muted hover:text-text-primary font-bold focus:outline-none cursor-pointer">✕</button>
+          <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm ${
+            toast.type === 'success' ? 'bg-emerald-100 text-emerald-600' : toast.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
+          }`}>
+            {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : 'i'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-semibold leading-snug ${
+              toast.type === 'success' ? 'text-emerald-800' : toast.type === 'error' ? 'text-red-800' : 'text-blue-800'
+            }`}>{toast.message}</p>
+          </div>
+          <button
+            onClick={() => setToast(null)}
+            className="flex-shrink-0 text-text-muted hover:text-text-primary font-bold focus:outline-none cursor-pointer text-sm ml-1"
+          >✕</button>
         </div>
       )}
     </div>

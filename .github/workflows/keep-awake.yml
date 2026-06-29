@@ -1,0 +1,31 @@
+name: Supabase Keep-Awake Ping
+
+on:
+  schedule:
+    # Se ejecuta todos los lunes, miércoles y viernes a las 08:00 UTC
+    - cron: '0 8 * * 1,3,5'
+  workflow_dispatch: # Permite ejecución manual desde la pestaña de GitHub Actions
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Database via API
+        run: |
+          echo "Iniciando ping a la base de datos de Supabase..."
+          
+          # Realizamos una consulta directa al REST API de Supabase para mantenerla despierta
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/agent_applications?select=application_id&limit=1")
+          
+          echo "Petición HTTP completada con código de respuesta: $STATUS_CODE"
+          
+          if [ "$STATUS_CODE" -eq 200 ] || [ "$STATUS_CODE" -eq 201 ] || [ "$STATUS_CODE" -eq 204 ]; then
+            echo "✓ Éxito: La base de datos de Supabase está activa y respondiendo."
+          else
+            echo "⚠️ Advertencia: Código de respuesta inusual ($STATUS_CODE). Por favor verifique sus secretos de GitHub."
+            # No fallamos el workflow para evitar alertas molestas si es un error de permisos temporales,
+            # pero notificamos claramente en los logs.
+          fi

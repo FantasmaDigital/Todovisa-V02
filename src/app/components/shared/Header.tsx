@@ -3,6 +3,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
+import supabase from "@/app/lib/supabase"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
     const user = useAuthStore((state) => state.user);
@@ -19,7 +20,6 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
     const userData = isMounted ? user : null;
 
-    console.log(userData?.id);
     return (
         <>
             {showLoader && (
@@ -171,7 +171,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             </div>
                                         </Link>
                                         <button 
-                                            onClick={() => {
+                                            onClick={async () => {
+                                                await supabase.auth.signOut();
                                                 useAuthStore.getState().clearUser();
                                                 window.location.href = "/";
                                             }}

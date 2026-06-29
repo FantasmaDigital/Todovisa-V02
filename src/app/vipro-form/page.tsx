@@ -24,38 +24,47 @@ function ViproFormContent() {
 
     useEffect(() => {
         const checkActiveProgress = async () => {
+            // If user is not logged in or has not paid, do not show active progress
+            if (!user || (!user.hasPaidVipro && !user.hasPaidAdvisor)) {
+                setActiveProgressCountry(null);
+                setIsLoadingProgress(false);
+                return;
+            }
+
             let activeCountry: string | null = null;
             
-            // 1. Check local storage
-            if (typeof window !== "undefined") {
+            // 1. Check vipro_evaluations table for in-progress row
+            try {
+                const { data: draftRow } = await supabase
+                    .from("vipro_evaluations")
+                    .select("destination_country")
+                    .eq("user_id", user.id)
+                    .eq("is_completed", false)
+                    .order("created_at", { ascending: false })
+                    .maybeSingle();
+
+                if (draftRow?.destination_country) {
+                    activeCountry = draftRow.destination_country;
+                }
+            } catch (err) {
+                console.error("Error checking active progress from vipro_evaluations:", err);
+            }
+            
+            // 2. Fallback: check localStorage if DB is unavailable or no draft found
+            if (!activeCountry && typeof window !== "undefined") {
                 const localDest = localStorage.getItem("vipro_progress_destination");
                 if (localDest) {
                     activeCountry = localDest;
                 }
             }
             
-            // 2. Check Supabase user metadata
-            if (user) {
-                try {
-                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-                    const metadata = supabaseUser?.user_metadata || {};
-                    if (metadata.vipro_progress_destination) {
-                        activeCountry = metadata.vipro_progress_destination;
-                    }
-                } catch (err) {
-                    console.error("Error checking active progress from Supabase:", err);
-                }
+            // 3. Check user store destination (from completed evaluation)
+            if (!activeCountry && !user.viproCompleted && user.viproDestination) {
+                activeCountry = user.viproDestination;
             }
             
-            // 3. Check if user already has paid vipro or assigned agent and a destination
-            if (!activeCountry && user && !user.viproCompleted) {
-                if (user.viproDestination) {
-                    activeCountry = user.viproDestination;
-                }
-            }
-            
-            // If the user has already completed VIPRO, we don't have an active pending one
-            if (user?.viproCompleted) {
+            // If the user has already completed VIPRO, no active pending one
+            if (user.viproCompleted) {
                 activeCountry = null;
             }
             
@@ -118,14 +127,12 @@ function ViproFormContent() {
 
 
     useEffect(() => {
-        const countryParam = searchParams.get("country")?.toUpperCase();
+        // Accept both ?country=XX (internal links) and ?destination=XX (from hero search)
+        const countryParam = (searchParams.get("country") || searchParams.get("destination"))?.toUpperCase();
         if (countryParam && countryMap[countryParam]) {
-            const isAvailable = availableCountries.some(([code]) => code === countryParam);
-            if (isAvailable) {
-                handleSelectCountry(countryParam);
-            }
+            handleSelectCountry(countryParam);
         }
-    }, [searchParams, availableCountries]);
+    }, [searchParams]);
 
     useEffect(() => {
         if (headerRef.current) {
@@ -179,7 +186,13 @@ function ViproFormContent() {
 
                                 <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
                                     <button 
-                                        onClick={() => router.push(`/vipro-form/evaluation?country=${activeProgressCountry}`)} 
+                                        onClick={() => {
+                                            if (!user) {
+                                                router.push(`/auth/signin?redirect=/vipro-form/evaluation?country=${activeProgressCountry}`);
+                                                return;
+                                            }
+                                            router.push(`/vipro-form/evaluation?country=${activeProgressCountry}`);
+                                        }} 
                                         className="cursor-pointer w-full bg-brand-primary text-white font-bold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg flex items-center justify-center gap-2 border-0"
                                     >
                                         Continuar Evaluación {countryMap[activeProgressCountry] && <span className="pl-1">{countryMap[activeProgressCountry].emoji}</span>}

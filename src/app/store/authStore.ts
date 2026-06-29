@@ -18,6 +18,13 @@ export interface UserData {
   photoUrl?: string | null;
   avatarChangesThisMonth?: number;
   lastAvatarChangeMonth?: string;
+  ds160FullName?: string | null;
+  ds160PassportNum?: string | null;
+  ds160BirthDate?: string | null;
+  ds160PurposeOfTrip?: string | null;
+  ds160HasAssets?: boolean;
+  ds160Confirmed?: boolean;
+  expedienteStatus?: 'draft' | 'submitted' | 'approved';
 }
 
 interface AuthState {

@@ -95,20 +95,29 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     setTimeout(async () => {
       if (user) {
         const assignedAgentId = agent ? agent.id : user.assignedAgentId || "agent-1";
+        const referenceId = `TV-${isVipro ? "VIPRO" : "ASES"}-${Math.floor(100000 + Math.random() * 900000)}`;
         
         try {
-          await supabase.auth.updateUser({
-            data: isVipro 
-              ? { has_paid_vipro: true }
-              : {
-                  has_paid_advisor: true,
-                  has_paid_vipro: true,
-                  assigned_agent_id: assignedAgentId
-                }
-          });
-          console.log("Payment status successfully saved to Supabase user metadata.");
+          // Write to physical table user_purchases
+          const { error: purchaseError } = await supabase.from("user_purchases").insert([
+            {
+              user_id: user.id,
+              reference_id: referenceId,
+              product_type: product,
+              amount: finalPrice,
+              payment_method: "Visa/Mastercard (Simulada)",
+              status: "completed",
+              agent_id: isVipro ? null : assignedAgentId
+            }
+          ]);
+
+          if (purchaseError) {
+            console.error("Failed to insert record into user_purchases:", purchaseError.message);
+          } else {
+            console.log("Transaction saved to user_purchases table successfully.");
+          }
         } catch (err) {
-          console.error("Failed to save payment status to Supabase:", err);
+          console.error("Failed to save payment to user_purchases table:", err);
         }
 
         if (isVipro) {
