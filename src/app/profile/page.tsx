@@ -88,6 +88,64 @@ export default function PerfilUsuarioPage() {
     showToast(`Archivo "${fileName}" cargado con éxito.`, "success");
   };
 
+  const handleAvatarUpload = async (e: any) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showToast("Por favor selecciona un archivo de imagen válido.", "error");
+      return;
+    }
+
+    const now = new Date();
+    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+    let changesThisMonth = user?.avatarChangesThisMonth || 0;
+    const lastChangeMonth = user?.lastAvatarChangeMonth || "";
+
+    if (lastChangeMonth === currentMonthStr) {
+      if (changesThisMonth >= 3) {
+        showToast("Límite alcanzado: Máximo 3 cambios de foto de perfil por mes.", "error");
+        return;
+      }
+      changesThisMonth += 1;
+    } else {
+      changesThisMonth = 1;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+
+      const updatedUser = {
+        ...user!,
+        photoUrl: base64String,
+        avatarChangesThisMonth: changesThisMonth,
+        lastAvatarChangeMonth: currentMonthStr,
+      };
+
+      setUser(updatedUser);
+
+      try {
+        const { error } = await supabase.auth.updateUser({
+          data: {
+            photo_url: base64String,
+            avatar_changes_this_month: changesThisMonth,
+            last_avatar_change_month: currentMonthStr,
+          }
+        });
+        if (error) {
+          console.warn("Could not save avatar to Supabase, saved locally:", error.message);
+        }
+      } catch (err) {
+        console.error("Error saving avatar to Supabase:", err);
+      }
+
+      showToast(`Foto de perfil actualizada. Cambios este mes: ${changesThisMonth}/3`, "success");
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmitExpediente = () => {
     if (!clientDocs.passport || !clientDocs.dui || !clientDocs.workCert || !clientDocs.bankStatements) {
       showToast("Por favor carga los 4 documentos requeridos para auditar tu expediente.", "info");
@@ -153,7 +211,10 @@ export default function PerfilUsuarioPage() {
             viproCompleted: metadata.vipro_completed || false,
             viproDestination: metadata.vipro_destination || null,
             hasPaidAdvisor: metadata.has_paid_advisor || false,
-            assignedAgentId: metadata.assigned_agent_id || null
+            assignedAgentId: metadata.assigned_agent_id || null,
+            photoUrl: metadata.photo_url || null,
+            avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
+            lastAvatarChangeMonth: metadata.last_avatar_change_month || ''
           };
 
           // Compare with current user state to avoid unnecessary loops
@@ -166,7 +227,10 @@ export default function PerfilUsuarioPage() {
             user.hasPaidAdvisor !== updatedUser.hasPaidAdvisor ||
             user.assignedAgentId !== updatedUser.assignedAgentId ||
             user.firstName !== updatedUser.firstName ||
-            user.lastName !== updatedUser.lastName
+            user.lastName !== updatedUser.lastName ||
+            user.photoUrl !== updatedUser.photoUrl ||
+            user.avatarChangesThisMonth !== updatedUser.avatarChangesThisMonth ||
+            user.lastAvatarChangeMonth !== updatedUser.lastAvatarChangeMonth
           ) {
             console.log("Syncing auth store state with Supabase Auth user metadata.");
             // Defer store update to avoid react-hooks/set-state-in-effect warning
@@ -611,9 +675,36 @@ export default function PerfilUsuarioPage() {
             
             {/* Info rápida */}
             <div className="p-6 text-center border-b border-border-light bg-background-main/30">
-              <div className="w-16 h-16 bg-brand-primary text-white rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-xl">
-                {firstName.charAt(0).toUpperCase()}
+              <div className="relative w-16 h-16 mx-auto mb-3 group">
+                {user?.photoUrl ? (
+                  <img
+                    src={user.photoUrl}
+                    alt="Foto de Perfil"
+                    className="w-16 h-16 rounded-full object-cover border border-brand-primary/30 shadow-sm"
+                  />
+                ) : (
+                  <div className="w-16 h-16 bg-brand-primary text-white rounded-full flex items-center justify-center font-bold text-xl shadow-sm">
+                    {firstName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                {/* Upload button overlay */}
+                <label className="absolute inset-0 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer text-[9px] font-bold leading-normal">
+                  <span className="text-xs">📸</span>
+                  <span>CAMBIAR</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarUpload}
+                    className="hidden"
+                  />
+                </label>
               </div>
+              
+              {/* Profile Image monthly changes status */}
+              <p className="text-[9px] text-text-secondary mb-3">
+                Cambios de foto este mes: <span className="font-semibold text-text-primary">{user?.avatarChangesThisMonth || 0}/3</span>
+              </p>
+
               <h3 className="font-bold text-text-primary text-md leading-snug">{firstName} {lastName}</h3>
               <p className="text-xs text-text-secondary mt-1">{user.email}</p>
               

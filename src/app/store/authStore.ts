@@ -15,6 +15,9 @@ export interface UserData {
   viproScore?: number | null;
   viproCompleted?: boolean;
   viproDestination?: string | null;
+  photoUrl?: string | null;
+  avatarChangesThisMonth?: number;
+  lastAvatarChangeMonth?: string;
 }
 
 interface AuthState {

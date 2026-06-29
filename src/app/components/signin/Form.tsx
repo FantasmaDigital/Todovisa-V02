@@ -126,7 +126,10 @@ export function SignInForm() {
                     viproCompleted: viproCompleted,
                     viproDestination: viproDestination,
                     hasPaidAdvisor: hasPaidAdvisor,
-                    assignedAgentId: assignedAgentId
+                    assignedAgentId: assignedAgentId,
+                    photoUrl: metadata.photo_url || null,
+                    avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
+                    lastAvatarChangeMonth: metadata.last_avatar_change_month || ''
                 });
             }
 

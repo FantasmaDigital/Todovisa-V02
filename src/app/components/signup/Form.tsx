@@ -126,7 +126,10 @@ export default function SignUpForm() {
                     viproCompleted: metadata.vipro_completed || false,
                     viproDestination: metadata.vipro_destination || null,
                     hasPaidAdvisor: metadata.has_paid_advisor || false,
-                    assignedAgentId: metadata.assigned_agent_id || null
+                    assignedAgentId: metadata.assigned_agent_id || null,
+                    photoUrl: metadata.photo_url || null,
+                    avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
+                    lastAvatarChangeMonth: metadata.last_avatar_change_month || ''
                 });
             }
 
