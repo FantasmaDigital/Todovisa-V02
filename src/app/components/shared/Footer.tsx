@@ -38,7 +38,7 @@ export function Footer() {
             className="object-contain"
           />
           <p className="text-sm text-white/60 leading-relaxed max-w-xs">
-            Simplificamos tu proceso de visado con tecnología, asesoría experta y el respaldo de agentes certificados IATA.
+            Simplificamos tu proceso de visado con tecnología, asesoría experta y el respaldo de agentes certificados.
           </p>
           {/* Social icons */}
           <div className="flex gap-4 mt-2">
@@ -106,10 +106,6 @@ export function Footer() {
       {/* Bottom bar */}
       <div className="w-[88%] max-w-7xl mx-auto py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/30">
         <span>© {new Date().getFullYear()} TODOVISA. Todos los derechos reservados.</span>
-        <span className="flex items-center gap-2">
-          Agente Acreditado
-          <span className="font-bold text-white/50">IATA</span>
-        </span>
       </div>
     </footer>
   );

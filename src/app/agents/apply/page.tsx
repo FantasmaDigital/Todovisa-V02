@@ -584,7 +584,7 @@ export default function AgentApplyPage() {
 
                   {([
                     { key: "dui", label: "Documento Único de Identidad (DUI / INE / Pasaporte)", required: true, hint: "Página principal con foto y datos visibles" },
-                    { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. IATA, RCIC, CSIC, consulado acreditante" },
+                    { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. RCIC, CSIC, consulado acreditante" },
                     { key: "antecedentes", label: "Carta de No Antecedentes Penales", required: false, hint: "Emitida en los últimos 6 meses" },
                     { key: "domicilio", label: "Comprobante de Domicilio", required: false, hint: "Recibo de luz, agua o estado de cuenta (máx. 3 meses)" },
                     { key: "titulo", label: "Título o Diploma Profesional", required: false, hint: "Derecho, Relaciones Internacionales, Administración, etc." },

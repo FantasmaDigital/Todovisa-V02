@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import agentsData from "../dummies/agents.json";
+import supabase from "../lib/supabase";
 
 function ViproFormContent() {
     const headerRef = useRef(null);
@@ -17,6 +18,53 @@ function ViproFormContent() {
     const { user } = useAuthStore();
     const router = useRouter();
     const searchParams = useSearchParams();
+
+    const [activeProgressCountry, setActiveProgressCountry] = useState<string | null>(null);
+    const [isLoadingProgress, setIsLoadingProgress] = useState(true);
+
+    useEffect(() => {
+        const checkActiveProgress = async () => {
+            let activeCountry: string | null = null;
+            
+            // 1. Check local storage
+            if (typeof window !== "undefined") {
+                const localDest = localStorage.getItem("vipro_progress_destination");
+                if (localDest) {
+                    activeCountry = localDest;
+                }
+            }
+            
+            // 2. Check Supabase user metadata
+            if (user) {
+                try {
+                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+                    const metadata = supabaseUser?.user_metadata || {};
+                    if (metadata.vipro_progress_destination) {
+                        activeCountry = metadata.vipro_progress_destination;
+                    }
+                } catch (err) {
+                    console.error("Error checking active progress from Supabase:", err);
+                }
+            }
+            
+            // 3. Check if user already has paid vipro or assigned agent and a destination
+            if (!activeCountry && user && !user.viproCompleted) {
+                if (user.viproDestination) {
+                    activeCountry = user.viproDestination;
+                }
+            }
+            
+            // If the user has already completed VIPRO, we don't have an active pending one
+            if (user?.viproCompleted) {
+                activeCountry = null;
+            }
+            
+            setActiveProgressCountry(activeCountry);
+            setIsLoadingProgress(false);
+        };
+        
+        checkActiveProgress();
+    }, [user]);
 
     const countryMap: Record<string, { emoji: string; name: string }> = {
         US: { emoji: "🇺🇸", name: "Estados Unidos" },
@@ -100,44 +148,86 @@ function ViproFormContent() {
                             Selecciona una de las opciones disponibles para continuar con tu evaluación VIPRO. Te ofrecemos una asesoría experta y una amplia variedad de servicios adaptados a las exigencias de cada país. Tómate tu tiempo para revisar las opciones y da el siguiente paso hacia tus metas.
                         </p>
 
-                        <div className="w-full flex flex-col gap-2 mt-2">
-                            <label className="text-sm font-semibold text-text-primary">Destino de viaje:</label>
-                            <select 
-                                value={selectedCountryCode}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    handleSelectCountry(val);
-                                }}
-                                className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm font-medium"
-                            >
-                                <option value="">🌎 Selecciona un país...</option>
-                                {availableCountries.map(([code, details]) => (
-                                    <option key={code} value={code}>
-                                        {details.emoji} {details.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="mt-2 flex flex-col gap-4">
-                            <div className="flex items-end gap-3">
-                                <span className="text-5xl font-bold text-text-primary">$19.99</span>
-                                <span className="text-sm text-text-secondary mb-1">USD</span>
+                        {isLoadingProgress ? (
+                            <div className="w-full max-w-sm flex items-center justify-center py-10">
+                                <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
                             </div>
-                            <span className="text-sm font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
-                                🎉 Recibirás un 25% de descuento en tu asesoría
-                            </span>
-                        </div>
+                        ) : activeProgressCountry ? (
+                            <>
+                                <div className="w-full flex flex-col gap-2 mt-2">
+                                    <label className="text-sm font-semibold text-text-primary">Destino de viaje:</label>
+                                    <div className="w-full max-w-sm border border-brand-primary/20 bg-brand-light/35 rounded-xl p-4 flex items-center gap-3 shadow-sm font-medium bg-white">
+                                        <span className="text-2xl">{countryMap[activeProgressCountry]?.emoji || "🌎"}</span>
+                                        <div>
+                                            <p className="text-xs font-bold text-brand-primary">Evaluación Activa en Progreso</p>
+                                            <p className="text-xs text-text-primary font-semibold mt-0.5">
+                                                Destino: {countryMap[activeProgressCountry]?.name || activeProgressCountry}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
 
-                        <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
-                            <button 
-                                disabled={!selectedCountryCode} 
-                                onClick={handleStartEvaluation} 
-                                className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg"
-                            >
-                                Empezar Evaluación {selectedCountry && <span className="pl-2">{selectedCountry}</span>}
-                            </button>
-                        </div>
+                                <div className="mt-2 flex flex-col gap-2">
+                                    <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm">
+                                        <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                                        <span>Servicio Habilitado</span>
+                                    </div>
+                                    <p className="text-xs text-text-secondary leading-relaxed max-w-sm">
+                                        Ya tienes una evaluación VIPRO en curso para este destino. Puedes continuar respondiendo el cuestionario para obtener tu calificación.
+                                    </p>
+                                </div>
+
+                                <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
+                                    <button 
+                                        onClick={() => router.push(`/vipro-form/evaluation?country=${activeProgressCountry}`)} 
+                                        className="cursor-pointer w-full bg-brand-primary text-white font-bold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg flex items-center justify-center gap-2 border-0"
+                                    >
+                                        Continuar Evaluación {countryMap[activeProgressCountry] && <span className="pl-1">{countryMap[activeProgressCountry].emoji}</span>}
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-full flex flex-col gap-2 mt-2">
+                                    <label className="text-sm font-semibold text-text-primary">Destino de viaje:</label>
+                                    <select 
+                                        value={selectedCountryCode}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            handleSelectCountry(val);
+                                        }}
+                                        className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm font-medium"
+                                    >
+                                        <option value="">🌎 Selecciona un país...</option>
+                                        {availableCountries.map(([code, details]) => (
+                                            <option key={code} value={code}>
+                                                {details.emoji} {details.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="mt-2 flex flex-col gap-4">
+                                    <div className="flex items-end gap-3">
+                                        <span className="text-5xl font-bold text-text-primary">$19.99</span>
+                                        <span className="text-sm text-text-secondary mb-1">USD</span>
+                                    </div>
+                                    <span className="text-sm font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
+                                        🎉 Recibirás un 25% de descuento en tu asesoría
+                                    </span>
+                                </div>
+
+                                <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
+                                    <button 
+                                        disabled={!selectedCountryCode} 
+                                        onClick={handleStartEvaluation} 
+                                        className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg"
+                                    >
+                                        Empezar Evaluación {selectedCountry && <span className="pl-2">{selectedCountry}</span>}
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     <div className="w-full md:w-1/2 h-[450px] md:h-[650px] relative rounded-[2rem] overflow-hidden shadow-2xl">
