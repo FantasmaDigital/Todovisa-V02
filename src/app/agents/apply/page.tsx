@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import Link from "next/link";
@@ -23,20 +23,35 @@ interface FormData {
 
 export default function AgentApplyPage() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState<FormData>({
-    fullName: "",
-    email: "",
-    phone: "",
-    countryResidence: "",
-    experienceYears: "",
-    linkedin: "",
-    specialties: [],
-    targetCountries: [],
-    languages: [],
-    biography: "",
-    termsAccepted: false,
+  const [step, setStep] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent_apply_step");
+      return saved ? parseInt(saved, 10) : 1;
+    }
+    return 1;
   });
+
+  const [formData, setFormData] = useState<FormData>(() => {
+    const defaultData = {
+      fullName: "",
+      email: "",
+      phone: "",
+      countryResidence: "",
+      experienceYears: "",
+      linkedin: "",
+      specialties: [],
+      targetCountries: [],
+      languages: [],
+      biography: "",
+      termsAccepted: false,
+    };
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent_apply_form_data");
+      return saved ? JSON.parse(saved) : defaultData;
+    }
+    return defaultData;
+  });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -45,14 +60,74 @@ export default function AgentApplyPage() {
 
   // Document uploads: key -> { name, progress }
   type DocFile = { name: string; progress: number | null };
-  const [docs, setDocs] = useState<Record<string, DocFile | null>>({
-    dui: null,
-    certificacion: null,
-    antecedentes: null,
-    domicilio: null,
-    titulo: null,
-    cv: null,
+  const [docs, setDocs] = useState<Record<string, DocFile | null>>(() => {
+    const defaultDocs = {
+      dui: null,
+      certificacion: null,
+      antecedentes: null,
+      domicilio: null,
+      titulo: null,
+      cv: null,
+    };
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent_apply_docs");
+      return saved ? JSON.parse(saved) : defaultDocs;
+    }
+    return defaultDocs;
   });
+
+  const [progressRestored, setProgressRestored] = useState(false);
+
+  // Auto-save form progress to local storage
+  useEffect(() => {
+    if (typeof window !== "undefined" && !isSubmitted) {
+      localStorage.setItem("agent_apply_form_data", JSON.stringify(formData));
+      localStorage.setItem("agent_apply_step", String(step));
+      localStorage.setItem("agent_apply_docs", JSON.stringify(docs));
+    }
+  }, [formData, step, docs, isSubmitted]);
+
+  // Show status banner if progress was restored
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedStep = localStorage.getItem("agent_apply_step");
+      const savedForm = localStorage.getItem("agent_apply_form_data");
+      if (savedStep || savedForm) {
+        setProgressRestored(true);
+      }
+    }
+  }, []);
+
+  const handleRestartApplication = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("agent_apply_form_data");
+      localStorage.removeItem("agent_apply_step");
+      localStorage.removeItem("agent_apply_docs");
+    }
+    setFormData({
+      fullName: "",
+      email: "",
+      phone: "",
+      countryResidence: "",
+      experienceYears: "",
+      linkedin: "",
+      specialties: [],
+      targetCountries: [],
+      languages: [],
+      biography: "",
+      termsAccepted: false,
+    });
+    setDocs({
+      dui: null,
+      certificacion: null,
+      antecedentes: null,
+      domicilio: null,
+      titulo: null,
+      cv: null,
+    });
+    setStep(1);
+    setProgressRestored(false);
+  };
 
   const handleDocUpload = (key: string, file: File) => {
     setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 0 } }));
@@ -186,6 +261,11 @@ export default function AgentApplyPage() {
         throw new Error(error.message);
       }
 
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("agent_apply_form_data");
+        localStorage.removeItem("agent_apply_step");
+        localStorage.removeItem("agent_apply_docs");
+      }
       setApplicationId(randomId);
       setIsSubmitted(true);
     } catch (err: any) {
@@ -218,6 +298,11 @@ export default function AgentApplyPage() {
           created_at: new Date().toISOString()
         };
         localStorage.setItem(`agent_app_${randomId}`, JSON.stringify(localData));
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("agent_apply_form_data");
+          localStorage.removeItem("agent_apply_step");
+          localStorage.removeItem("agent_apply_docs");
+        }
         setApplicationId(randomId);
         setIsSubmitted(true);
       } else {
@@ -243,6 +328,22 @@ export default function AgentApplyPage() {
                 Completa el proceso de postulación en 6 sencillos pasos para unirte a nuestra red nacional de expertos.
               </p>
             </div>
+
+            {progressRestored && (
+              <div className="bg-brand-light/35 border border-brand-primary/20 rounded-md p-4 mb-8 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top duration-300 max-w-xl mx-auto">
+                <div className="flex items-center gap-2 text-xs font-semibold text-brand-primary">
+                  <span className="text-sm">🔄</span>
+                  <span>Se ha restaurado tu progreso guardado automáticamente hasta el Paso {step}.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRestartApplication}
+                  className="text-xs text-brand-primary hover:underline font-bold cursor-pointer border-0 bg-transparent"
+                >
+                  Empezar de Nuevo
+                </button>
+              </div>
+            )}
 
             {/* Stepper Progress Bar */}
             <div className="mb-10">
