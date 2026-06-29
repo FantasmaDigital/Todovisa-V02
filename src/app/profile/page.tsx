@@ -115,21 +115,56 @@ export default function PerfilUsuarioPage() {
 
     const reader = new FileReader();
     reader.onloadend = async () => {
-      const base64String = reader.result as string;
+      const base64Original = reader.result as string;
 
-      const updatedUser = {
-        ...user!,
-        photoUrl: base64String,
-        avatarChangesThisMonth: changesThisMonth,
-        lastAvatarChangeMonth: currentMonthStr,
+      // Client-side resizing helper using canvas
+      const resizeImage = (base64Str: string): Promise<string> => {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.src = base64Str;
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const MAX_WIDTH = 120;
+            const MAX_HEIGHT = 120;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+              if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+              }
+            } else {
+              if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            ctx?.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL("image/jpeg", 0.7)); // compress to JPEG with 70% quality
+          };
+        });
       };
 
-      setUser(updatedUser);
-
       try {
+        const compressedBase64 = await resizeImage(base64Original);
+
+        const updatedUser = {
+          ...user!,
+          photoUrl: compressedBase64,
+          avatarChangesThisMonth: changesThisMonth,
+          lastAvatarChangeMonth: currentMonthStr,
+        };
+
+        setUser(updatedUser);
+
         const { error } = await supabase.auth.updateUser({
           data: {
-            photo_url: base64String,
+            photo_url: compressedBase64,
             avatar_changes_this_month: changesThisMonth,
             last_avatar_change_month: currentMonthStr,
           }
@@ -138,7 +173,7 @@ export default function PerfilUsuarioPage() {
           console.warn("Could not save avatar to Supabase, saved locally:", error.message);
         }
       } catch (err) {
-        console.error("Error saving avatar to Supabase:", err);
+        console.error("Error processing avatar upload:", err);
       }
 
       showToast(`Foto de perfil actualizada. Cambios este mes: ${changesThisMonth}/3`, "success");
@@ -701,9 +736,23 @@ export default function PerfilUsuarioPage() {
               </div>
               
               {/* Profile Image monthly changes status */}
-              <p className="text-[9px] text-text-secondary mb-3">
+              <p className="text-[9px] text-text-secondary mb-2">
                 Cambios de foto este mes: <span className="font-semibold text-text-primary">{user?.avatarChangesThisMonth || 0}/3</span>
               </p>
+
+              {/* Upload button */}
+              <div className="mb-4">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-border-light hover:border-brand-primary/30 hover:bg-brand-light/10 rounded-full text-[10px] font-bold text-brand-primary cursor-pointer transition-all shadow-sm">
+                  <span>📸</span>
+                  <span>Seleccionar Imagen</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
 
               <h3 className="font-bold text-text-primary text-md leading-snug">{firstName} {lastName}</h3>
               <p className="text-xs text-text-secondary mt-1">{user.email}</p>

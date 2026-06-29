@@ -35,6 +35,14 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage', // Nombre para el localStorage
+      partialize: (state) => ({
+        user: state.user
+          ? {
+              ...state.user,
+              photoUrl: null, // Exclude heavy image from localStorage to prevent QuotaExceededError
+            }
+          : null,
+      }),
     }
   )
 );
