@@ -3,12 +3,18 @@
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "../../store/authStore";
 
 import { VIPROQuestions } from "../../constants/vipro/data";
 
 export default function ViproEvaluationPage() {
     const headerRef = useRef(null);
     const [_, setHeaderHeight] = useState<number | null>(null);
+    const { user, setUser } = useAuthStore();
+    const router = useRouter();
+    const [isMounted, setIsMounted] = useState(false);
+    const [selectedCountryData, setSelectedCountryData] = useState<{ name: string; emoji: string }>({ name: "Estados Unidos", emoji: "🇺🇸" });
 
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -16,9 +22,26 @@ export default function ViproEvaluationPage() {
     const question = VIPROQuestions[currentStep];
 
     useEffect(() => {
+        setIsMounted(true);
         if (headerRef.current) {
             const height = (headerRef.current as HTMLElement).offsetHeight;
             setHeaderHeight(height);
+        }
+
+        // Parse country from URL search params safely
+        if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search);
+            const countryParam = params.get("country") || "US";
+            const countryMap: Record<string, { name: string; emoji: string }> = {
+                US: { name: "Estados Unidos", emoji: "🇺🇸" },
+                CA: { name: "Canadá", emoji: "🇨🇦" },
+                MX: { name: "México", emoji: "🇲🇽" },
+                UK: { name: "Inglaterra", emoji: "🇬🇧" },
+                CN: { name: "China", emoji: "🇨🇳" },
+                AU: { name: "Australia", emoji: "🇦🇺" },
+                IN: { name: "India", emoji: "🇮🇳" },
+            };
+            setSelectedCountryData(countryMap[countryParam.toUpperCase()] || countryMap.US);
         }
     }, []);
 
@@ -28,6 +51,14 @@ export default function ViproEvaluationPage() {
         } else {
             alert("¡Evaluación completada! Procesando resultados...");
             console.log("Respuestas finales:", answers);
+            if (user) {
+                setUser({
+                    ...user,
+                    hasCompletedVipro: true,
+                    country: selectedCountryData.name
+                });
+            }
+            router.push("/profile?tab=proceso");
         }
     };
 
@@ -36,6 +67,92 @@ export default function ViproEvaluationPage() {
             setCurrentStep(prev => prev - 1);
         }
     };
+
+    if (!isMounted) {
+        return (
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+                <Header headerRef={headerRef} />
+                <div className="flex-1 flex items-center justify-center">
+                    <div className="w-12 h-12 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin"></div>
+                </div>
+                <Footer />
+            </div>
+        );
+    }
+
+    if (!user) {
+        return (
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+                <Header headerRef={headerRef} />
+                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-md mx-auto my-12">
+                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center mb-6 text-2xl font-bold">
+                        🔒
+                    </div>
+                    <h2 className="text-2xl font-bold text-text-primary mb-3">Acceso Restringido</h2>
+                    <p className="text-sm text-text-secondary mb-8 leading-relaxed">
+                        Debes iniciar sesión con tu cuenta para acceder a la Evaluación VIPRO.
+                    </p>
+                    <button
+                        onClick={() => router.push("/auth/signin")}
+                        className="w-full bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm shadow-sm"
+                    >
+                        Iniciar Sesión
+                    </button>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
+
+    if (!user.hasPaidVipro && !user.hasPaidAdvisor) {
+        return (
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+                <Header headerRef={headerRef} />
+                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-xl mx-auto gap-6 my-12">
+                    <div className="w-20 h-20 bg-amber-50 border border-amber-200 text-amber-600 rounded-full flex items-center justify-center text-3xl shadow-sm">
+                        ⚠️
+                    </div>
+                    <div className="space-y-3">
+                        <h2 className="text-3xl font-bold text-text-primary tracking-tight font-serif italic">Requiere Pago Habilitado</h2>
+                        <p className="text-base text-text-secondary max-w-md mx-auto leading-relaxed">
+                            La Evaluación VIPRO no es gratuita. Para completar este cuestionario especializado y recibir tu calificación detallada con diagnóstico consular, debes adquirir una opción de servicio.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full mt-4">
+                        <div className="bg-white border border-border-light p-6 rounded-xl flex flex-col justify-between items-center text-center shadow-sm">
+                            <div>
+                                <h3 className="font-bold text-lg text-text-primary mb-1">Evaluación Express</h3>
+                                <p className="text-2xl font-black text-brand-primary mb-3">$19.99 <span className="text-xs text-text-secondary font-normal">USD</span></p>
+                                <p className="text-xs text-text-secondary leading-relaxed mb-6">Analiza tu perfil automáticamente con recomendaciones personalizadas.</p>
+                            </div>
+                            <button
+                                onClick={() => router.push("/vipro-form")}
+                                className="w-full bg-brand-primary text-white font-semibold py-2.5 rounded-sm hover:bg-brand-hover transition-all text-xs focus:outline-none"
+                            >
+                                Adquirir Evaluación
+                            </button>
+                        </div>
+
+                        <div className="bg-white border border-border-light p-6 rounded-xl flex flex-col justify-between items-center text-center shadow-sm">
+                            <div>
+                                <h3 className="font-bold text-lg text-text-primary mb-1">Servicio Completo</h3>
+                                <p className="text-2xl font-black text-brand-primary mb-3">$150.00 <span className="text-xs text-text-secondary font-normal">USD</span></p>
+                                <p className="text-xs text-text-secondary leading-relaxed mb-6">VIPRO + Citas de preparación y llenado con un Asesor Certificado de la red.</p>
+                            </div>
+                            <button
+                                onClick={() => router.push("/agents")}
+                                className="w-full bg-white border border-brand-primary text-brand-primary font-semibold py-2.5 rounded-sm hover:bg-brand-light transition-all text-xs focus:outline-none"
+                            >
+                                Contratar con Asesor
+                            </button>
+                        </div>
+                    </div>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
@@ -56,9 +173,12 @@ export default function ViproEvaluationPage() {
                 </div>
 
                 <div className="w-full max-w-3xl mx-auto bg-[#F9F8F6] rounded-[2rem] p-8 md:p-14 shadow-sm border border-[#EBEBEB]">
-                    <div className="flex items-center mb-8">
+                    <div className="flex items-center mb-8 gap-3 flex-wrap">
                         <span className="text-[10px] font-bold tracking-widest text-text-primary uppercase border border-text-primary/20 rounded-md px-3 py-1.5 bg-transparent">
                             {question.category}
+                        </span>
+                        <span className="text-[10px] font-bold tracking-widest text-brand-primary uppercase border border-brand-primary/20 rounded-md px-3 py-1.5 bg-brand-light">
+                            Destino: {selectedCountryData.name} {selectedCountryData.emoji}
                         </span>
                     </div>
 

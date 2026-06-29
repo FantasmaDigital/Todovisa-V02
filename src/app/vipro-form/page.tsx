@@ -4,15 +4,55 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuthStore } from "../store/authStore";
+import { CheckoutModal } from "../components/shared/CheckoutModal";
+import agentsData from "../dummies/agents.json";
+
+const ALL_COUNTRIES = [
+    { code: "US", name: "Estados Unidos", emoji: "🇺🇸", label: "🇺🇸 Estados Unidos" },
+    { code: "CA", name: "Canadá", emoji: "🇨🇦", label: "🇨🇦 Canadá" },
+    { code: "MX", name: "México", emoji: "🇲🇽", label: "🇲🇽 México" },
+    { code: "UK", name: "Inglaterra", emoji: "🇬🇧", label: "🇬🇧 Inglaterra" },
+    { code: "CN", name: "China", emoji: "🇨🇳", label: "🇨🇳 China" },
+    { code: "AU", name: "Australia", emoji: "🇦🇺", label: "🇦🇺 Australia" },
+    { code: "IN", name: "India", emoji: "🇮🇳", label: "🇮🇳 India" }
+];
 
 export default function ViproFormPage() {
     const headerRef = useRef(null);
     const [_, setHeaderHeight] = useState<number | null>(null);
+    const [selectedCountryCode, setSelectedCountryCode] = useState<string>("");
     const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+    const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+    const { user } = useAuthStore();
     const router = useRouter();
 
-    const handleSelectCountry = (country: string) => {
-        setSelectedCountry(country);
+    // Determine available countries based on assigned agent if hasPaidAdvisor is true
+    const assignedAgent = user?.assignedAgentId 
+        ? (agentsData as any[]).find(a => a.id === user.assignedAgentId)
+        : (user?.hasPaidAdvisor ? agentsData[0] : null);
+
+    const availableCountries = (user?.hasPaidAdvisor && assignedAgent)
+        ? ALL_COUNTRIES.filter(c => assignedAgent.countries.includes(c.name))
+        : ALL_COUNTRIES;
+
+    const handleStartEvaluation = () => {
+        if (!user) {
+            alert("Por favor, inicia sesión para poder realizar tu evaluación VIPRO.");
+            router.push("/auth/signin");
+            return;
+        }
+
+        if (!selectedCountryCode) {
+            alert("Por favor, selecciona un país de destino.");
+            return;
+        }
+
+        if (user.hasPaidVipro || user.hasPaidAdvisor) {
+            router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`);
+        } else {
+            setIsCheckoutOpen(true);
+        }
     };
 
     useEffect(() => {
@@ -38,24 +78,21 @@ export default function ViproFormPage() {
                         <div className="w-full flex flex-col gap-2 mt-2">
                             <label className="text-sm font-semibold text-text-primary">Destino de viaje:</label>
                             <select 
+                                value={selectedCountryCode}
                                 onChange={(e) => {
                                     const val = e.target.value;
-                                    console.log(val);
-                                    const emojiMap: Record<string, string> = {
-                                        US: "🇺🇸", CA: "🇨🇦", MX: "🇲🇽", UK: "🇬🇧", CN: "🇨🇳", AU: "🇦🇺", IN: "🇮🇳"
-                                    };
-                                    handleSelectCountry(emojiMap[val] || "");
+                                    setSelectedCountryCode(val);
+                                    const countryObj = ALL_COUNTRIES.find(c => c.code === val);
+                                    setSelectedCountry(countryObj ? countryObj.emoji : null);
                                 }}
-                                className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm"
+                                className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm font-medium"
                             >
                                 <option value="">🌎 Selecciona un país...</option>
-                                <option value="US">🇺🇸 Estados Unidos</option>
-                                <option value="CA">🇨🇦 Canadá</option>
-                                <option value="MX">🇲🇽 México</option>
-                                <option value="UK">🇬🇧 Inglaterra</option>
-                                <option value="CN">🇨🇳 China</option>
-                                <option value="AU">🇦🇺 Australia</option>
-                                <option value="IN">🇮🇳 India</option>
+                                {availableCountries.map((c) => (
+                                    <option key={c.code} value={c.code}>
+                                        {c.label}
+                                    </option>
+                                ))}
                             </select>
                         </div>
 
@@ -70,12 +107,9 @@ export default function ViproFormPage() {
                         </div>
 
                         <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
-                            <button disabled={!selectedCountry} onClick={() => router.push(`/vipro-form/evaluation`)} className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg">
-                                Empezar Evaluación <span className="pl-2">{selectedCountry}</span>
+                            <button disabled={!selectedCountryCode} onClick={handleStartEvaluation} className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg">
+                                Empezar Evaluación {selectedCountry && <span className="pl-2">{selectedCountry}</span>}
                             </button>
-                            {/* <a href="#" className="text-sm text-brand-primary font-medium hover:underline text-center">
-                            ¿Cómo realizo una compra?
-                        </a> */}
                         </div>
                     </div>
 
@@ -114,6 +148,16 @@ export default function ViproFormPage() {
                 </div>
             </main>
             <Footer />
+            {isCheckoutOpen && (
+                <CheckoutModal
+                    product="vipro"
+                    onClose={() => setIsCheckoutOpen(false)}
+                    onSuccess={() => {
+                        setIsCheckoutOpen(false);
+                        router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`);
+                    }}
+                />
+            )}
         </div>
     );
-};
+}

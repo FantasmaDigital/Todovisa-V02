@@ -9,7 +9,9 @@ export interface UserData {
   phone: string;
   country: string;
   hasPaidAdvisor?: boolean;
+  hasPaidVipro?: boolean;
   assignedAgentId?: string | null;
+  hasCompletedVipro?: boolean;
 }
 
 interface AuthState {

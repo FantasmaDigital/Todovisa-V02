@@ -1,4 +1,8 @@
+"use client";
+
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuthStore } from '../../store/authStore';
 
 const processOptions = {
   servicioCompleto: {
@@ -67,6 +71,32 @@ const timeLabels = ["Fase 1", "Fase 2", "Fase 3"];
 
 export const ProcessSection = () => {
   const [active, setActive] = useState('servicioCompleto');
+  const router = useRouter();
+  const { user } = useAuthStore();
+
+  const planInfo = {
+    servicioCompleto: {
+      price: user?.hasPaidVipro ? "$112.50 USD" : "$150.00 USD",
+      promo: user?.hasPaidVipro ? "¡Descuento VIPRO del 25% aplicado!" : "Obtén acompañamiento integral",
+      description: "La solución completa que incluye la evaluación diagnóstica VIPRO, el llenado del formulario DS-160 y simulacros de entrevista con un asesor asignado.",
+      buttonText: "Explorar Agentes y Contratar",
+      action: () => router.push("/agents")
+    },
+    autonomia: {
+      price: "$19.99 USD",
+      promo: "25% de reembolso si contratas Asesoría VIP después",
+      description: "Accede de forma independiente a la Evaluación Diagnóstica VIPRO para obtener un escaneo automatizado de tus fortalezas y debilidades perfiladas.",
+      buttonText: "Adquirir Evaluación Express",
+      action: () => router.push("/vipro-form")
+    },
+    presencial: {
+      price: "Cita Presencial",
+      promo: "Visítanos en nuestras oficinas físicas",
+      description: "Reunión cara a cara en Polanco (CDMX), Providencia (GDL), San Pedro (MTY) o San Salvador con un asesor certificado.",
+      buttonText: "Agendar Cita Presencial",
+      action: () => router.push("/citas")
+    }
+  };
 
   return (
     <section id="como-funciona" className="py-32 w-[95%] max-w-7xl m-auto font-sans">
@@ -125,6 +155,35 @@ export const ProcessSection = () => {
               
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Plan Details Card */}
+      <div className="max-w-3xl mx-auto mt-20 bg-white border border-border-light rounded-3xl p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-center gap-8 animate-fadeIn">
+        <div className="flex-1 space-y-4 text-center md:text-left">
+          <span className="inline-block text-xs font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+            {planInfo[active as keyof typeof planInfo].promo}
+          </span>
+          <h4 className="text-2xl font-bold text-gray-900 font-serif italic">
+            {processOptions[active as keyof typeof processOptions].title}
+          </h4>
+          <p className="text-sm text-gray-600 leading-relaxed max-w-md">
+            {planInfo[active as keyof typeof planInfo].description}
+          </p>
+        </div>
+        <div className="flex flex-col items-center md:items-end justify-center gap-4 flex-shrink-0 w-full md:w-auto">
+          <div className="text-center md:text-right">
+            <p className="text-3xl font-black text-gray-900">
+              {planInfo[active as keyof typeof planInfo].price}
+            </p>
+            <p className="text-xs text-gray-400">Pago único y seguro</p>
+          </div>
+          <button
+            onClick={planInfo[active as keyof typeof planInfo].action}
+            className="w-full md:w-auto px-8 py-3.5 bg-brand-primary text-white font-bold text-sm rounded-xl hover:bg-brand-hover shadow-md hover:shadow-lg transition-all focus:outline-none cursor-pointer text-center"
+          >
+            {planInfo[active as keyof typeof planInfo].buttonText}
+          </button>
         </div>
       </div>
     </section>
