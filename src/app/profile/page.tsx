@@ -865,41 +865,31 @@ export default function PerfilUsuarioPage() {
                   </div>
 
                   {/* Paso 3 */}
-                  <div className={`flex gap-4 relative transition-all ${user.viproCompleted ? "" : "opacity-60"}`}>
+                  <div className="flex gap-4 relative transition-all">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      !user.viproCompleted
-                        ? "bg-gray-200 text-text-muted"
-                        : user.hasPaidAdvisor
+                      user.hasPaidAdvisor
                         ? "bg-brand-primary text-white"
                         : "bg-amber-500 text-white animate-pulse"
                     }`}>
-                      {user.viproCompleted && user.hasPaidAdvisor ? "✓" : "3"}
+                      {user.hasPaidAdvisor ? "✓" : "3"}
                     </div>
                     <div className={`flex-1 rounded-md p-4 border ${
-                      !user.viproCompleted
-                        ? "bg-background-main/50 border-border-light"
-                        : user.hasPaidAdvisor
+                      user.hasPaidAdvisor
                         ? "bg-background-main/30 border-border-light"
                         : "bg-white border-amber-200 shadow-sm"
                     }`}>
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className="text-sm font-bold text-text-primary">Paso 3: Asignación de Agente Consular</h4>
-                        {user.viproCompleted && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                            user.hasPaidAdvisor 
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
-                              : "bg-amber-50 text-amber-800 border-amber-200"
-                          }`}>
-                            {user.hasPaidAdvisor ? "COMPLETADO" : "ACCION REQUERIDA"}
-                          </span>
-                        )}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          user.hasPaidAdvisor 
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                            : "bg-amber-50 text-amber-800 border-amber-200"
+                        }`}>
+                          {user.hasPaidAdvisor ? "COMPLETADO" : "ACCION REQUERIDA"}
+                        </span>
                       </div>
                       
-                      {!user.viproCompleted ? (
-                        <p className="text-xs text-text-muted">
-                          Estará disponible una vez que completes tu Evaluación Diagnóstica VIPRO.
-                        </p>
-                      ) : user.hasPaidAdvisor ? (
+                      {user.hasPaidAdvisor ? (
                         <div>
                           <p className="text-xs text-text-secondary">
                             Has asignado correctamente a tu asesor: <span className="font-semibold text-text-primary">{assignedAgent.name}</span>.
@@ -1199,8 +1189,8 @@ export default function PerfilUsuarioPage() {
                 </div>
 
                 {user.hasPaidAdvisor ? (
-                  !user.viproCompleted ? (
-                    // Cuestionario VIPRO no completado todavía
+                  false ? (
+                    // Cuestionario VIPRO no completado todavía (puenteado para permitir hablar con el asesor en todo el proceso)
                     <div className="bg-white rounded-[2rem] border border-amber-200 p-8 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
                       <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
                         📊
@@ -1219,8 +1209,28 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
                   ) : (
-                    // CHAT APARTADO: Chat con el Asesor (ya tiene viproCompleted)
+                    // CHAT APARTADO: Chat con el Asesor (ya tiene viproCompleted o no)
                     <div className="space-y-6 animate-fade-in">
+                      {/* Banner showing VIPRO is pending */}
+                      {!user.viproCompleted && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top duration-300">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl">📊</span>
+                            <div>
+                              <h4 className="text-xs font-bold text-amber-800">Evaluación VIPRO Pendiente</h4>
+                              <p className="text-[11px] text-amber-700 leading-normal">
+                                Para que <strong>{assignedAgent.name}</strong> pueda preparar tu expediente y agendar la llamada por Zoom, te sugerimos completar tu evaluación diagnóstica.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => router.push("/vipro-form")}
+                            className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-md transition-colors shadow-sm whitespace-nowrap cursor-pointer"
+                          >
+                            Completar VIPRO Ahora
+                          </button>
+                        </div>
+                      )}
                       <style dangerouslySetInnerHTML={{ __html: `
                         .custom-scrollbar::-webkit-scrollbar {
                           width: 6px;
