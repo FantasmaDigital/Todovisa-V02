@@ -129,6 +129,121 @@ export default function AgentApplyPage() {
     setProgressRestored(false);
   };
 
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4500);
+  };
+
+  const saveDraftToSupabase = async (updatedData: FormData, updatedDocs: any, targetStep: number) => {
+    if (!updatedData.email || !updatedData.fullName) return;
+
+    const draftId = applicationId || "TDA-DRAFT-" + Math.floor(100000 + Math.random() * 900000);
+    if (!applicationId) {
+      setApplicationId(draftId);
+    }
+
+    try {
+      const { error } = await supabase.from("agent_applications").upsert({
+        application_id: draftId,
+        full_name: updatedData.fullName,
+        email: updatedData.email,
+        phone: updatedData.phone || "",
+        country_residence: updatedData.countryResidence || "",
+        experience_years: updatedData.experienceYears || "1",
+        linkedin: updatedData.linkedin || "",
+        specialties: updatedData.specialties || [],
+        target_countries: updatedData.targetCountries || [],
+        languages: updatedData.languages || [],
+        biography: updatedData.biography || "",
+        terms_accepted: updatedData.termsAccepted || false,
+        status: "draft",
+        documents: {
+          dui: updatedDocs.dui?.name || null,
+          certificacion: updatedDocs.certificacion?.name || null,
+          antecedentes: updatedDocs.antecedentes?.name || null,
+          domicilio: updatedDocs.domicilio?.name || null,
+          titulo: updatedDocs.titulo?.name || null,
+          cv: updatedDocs.cv?.name || null,
+          last_saved_step: targetStep,
+        }
+      }, { onConflict: "email" });
+
+      if (error) {
+        console.warn("Could not auto-save draft to Supabase:", error.message);
+      } else {
+        console.log("Auto-saved draft progress to Supabase.");
+      }
+    } catch (err) {
+      console.error("Failed to auto-save draft:", err);
+    }
+  };
+
+  const checkAndLoadDraft = async (email: string) => {
+    if (!email.trim() || !/\S+@\S+\.\S+/.test(email)) return true;
+
+    try {
+      const { data, error } = await supabase
+        .from("agent_applications")
+        .select("*")
+        .eq("email", email)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        console.warn("Error checking draft:", error.message);
+        return true;
+      }
+
+      if (data) {
+        if (data.status === "draft") {
+          setFormData({
+            fullName: data.full_name,
+            email: data.email,
+            phone: data.phone,
+            countryResidence: data.country_residence,
+            experienceYears: data.experience_years,
+            linkedin: data.linkedin || "",
+            specialties: data.specialties || [],
+            targetCountries: data.target_countries || [],
+            languages: data.languages || [],
+            biography: data.biography || "",
+            termsAccepted: data.terms_accepted || false,
+          });
+
+          const dbDocs = data.documents || {};
+          setDocs({
+            dui: dbDocs.dui ? { name: dbDocs.dui, progress: null } : null,
+            certificacion: dbDocs.certificacion ? { name: dbDocs.certificacion, progress: null } : null,
+            antecedentes: dbDocs.antecedentes ? { name: dbDocs.antecedentes, progress: null } : null,
+            domicilio: dbDocs.domicilio ? { name: dbDocs.domicilio, progress: null } : null,
+            titulo: dbDocs.titulo ? { name: dbDocs.titulo, progress: null } : null,
+            cv: dbDocs.cv ? { name: dbDocs.cv, progress: null } : null,
+          });
+
+          const lastSavedStep = dbDocs.last_saved_step || 3;
+          setStep(lastSavedStep);
+          setApplicationId(data.application_id);
+          setProgressRestored(true);
+
+          showToast("Hemos recuperado tu postulación en borrador guardada en la base de datos.", "info");
+          return false; // Loaded draft, do not auto-advance to step 3 in the same click
+        } else {
+          setErrors((prev) => ({
+            ...prev,
+            email: `Ya existe una postulación activa o completada (${data.status}) vinculada a este correo.`,
+          }));
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error("Error loading draft:", err);
+    }
+    return true;
+  };
+
   const handleDocUpload = (key: string, file: File) => {
     setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 0 } }));
     if (errors[`doc_${key}`]) setErrors((prev) => ({ ...prev, [`doc_${key}`]: "" }));
@@ -137,14 +252,26 @@ export default function AgentApplyPage() {
       p += 20;
       if (p >= 100) {
         clearInterval(iv);
-        setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null } }));
+        setDocs((prev) => {
+          const nextDocs = { ...prev, [key]: { name: file.name, progress: null } };
+          if (step > 2) {
+            saveDraftToSupabase(formData, nextDocs, step);
+          }
+          return nextDocs;
+        });
       } else {
         setDocs((prev) => (prev[key] ? { ...prev, [key]: { name: prev[key]!.name, progress: p } } : prev));
       }
     }, 120);
   };
 
-  const removeDoc = (key: string) => setDocs((prev) => ({ ...prev, [key]: null }));
+  const removeDoc = (key: string) => setDocs((prev) => {
+    const nextDocs = { ...prev, [key]: null };
+    if (step > 2) {
+      saveDraftToSupabase(formData, nextDocs, step);
+    }
+    return nextDocs;
+  });
 
   const countriesList = ["Estados Unidos", "Canadá", "México", "Reino Unido", "Australia", "España", "Otro"];
   const specialtiesList = ["Visas de Turista", "Visas de Estudiante", "Visas de Trabajo", "Residencia Permanente", "Visas de Negocios / Inversión", "Renovación de Visa"];
@@ -211,14 +338,33 @@ export default function AgentApplyPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const nextStep = () => {
-    if (validateStep()) {
+  const nextStep = async () => {
+    if (step === 2) {
+      if (!validateStep()) return;
+      setIsSubmitting(true);
+      const canProceed = await checkAndLoadDraft(formData.email);
+      setIsSubmitting(false);
+      if (!canProceed) return;
+      
       setStep((prev) => prev + 1);
+      saveDraftToSupabase(formData, docs, 3);
+    } else {
+      if (validateStep()) {
+        const next = step + 1;
+        setStep(next);
+        if (step > 2) {
+          saveDraftToSupabase(formData, docs, next);
+        }
+      }
     }
   };
 
   const prevStep = () => {
-    setStep((prev) => prev - 1);
+    const prev = step - 1;
+    setStep(prev);
+    if (step > 2) {
+      saveDraftToSupabase(formData, docs, prev);
+    }
   };
 
 
@@ -230,10 +376,10 @@ export default function AgentApplyPage() {
     setIsSubmitting(true);
     setErrors({});
 
-    const randomId = "TDA-" + Math.floor(100000 + Math.random() * 900000);
+    const randomId = applicationId || "TDA-" + Math.floor(100000 + Math.random() * 900000);
 
     try {
-      const { error } = await supabase.from("agent_applications").insert({
+      const { error } = await supabase.from("agent_applications").upsert({
         application_id: randomId,
         full_name: formData.fullName,
         email: formData.email,
@@ -255,7 +401,7 @@ export default function AgentApplyPage() {
           titulo: docs.titulo?.name || null,
           cv: docs.cv?.name || null,
         }
-      });
+      }, { onConflict: "email" });
 
       if (error) {
         throw new Error(error.message);
@@ -1035,6 +1181,13 @@ export default function AgentApplyPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-[200] px-4 py-3 rounded shadow-md text-white font-semibold text-xs transition-all duration-300 animate-in slide-in-from-bottom-5 ${
+          toast.type === "success" ? "bg-emerald-600" : toast.type === "error" ? "bg-rose-600" : "bg-blue-600"
+        }`}>
+          {toast.message}
         </div>
       )}
     </div>
