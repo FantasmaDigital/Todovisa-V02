@@ -1,23 +1,55 @@
 "use client"
+
 import React, { useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { countries } from 'countries-list';
 import { useRouter } from 'next/navigation';
-import { AuthService } from '../../service/AuthService';
+// Removed AuthService dependency as logic is moved to API routes
 import { useAuthStore } from '../../store/authStore';
+import Link from 'next/link';
 
-// 1. Interfaz actualizada con ConfirmPassword
-type SignUpInputs = {
-    Nombre: string;
-    Apellido: string;
-    Email: string;
-    Pais: string;
-    Telefono: string;
-    Password: string;
-    ConfirmPassword: string;
+// Helper function to handle API call for Google OAuth redirect. 
+const handleGoogleSignUpApi = async (redirectTo: string) => {
+    try {
+        console.log("Initiating Google Sign-Up flow...");
+        // Reuse the standard google sign-in endpoint as it handles both login and signup contexts in Supabase
+        const response = await fetch('/api/auth/google', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ redirectTo }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Error al intentar registrarse con Google.');
+        }
+
+        const result = await response.json();
+        if (result.data?.url) {
+            window.location.href = result.data.url;
+        }
+    } catch (error: unknown) {
+        const errMessage = error instanceof Error ? error.message : String(error);
+        console.error("Google Sign-Up API redirect error:", errMessage);
+        throw error;
+    }
 };
 
+
+interface SignUpInputs {
+    Nombre?: string;
+    Apellido?: string;
+    Email?: string;
+    Telefono?: string;
+    Pais?: string;
+    Password?: string;
+    ConfirmPassword?: string;
+}
+
 const countriesArray = Object.entries(countries)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map(([code, data]: [string, any]) => ({
         code,
         name: data.name,
@@ -37,21 +69,48 @@ export default function SignUpForm() {
         defaultValues: { Pais: 'SV' }
     });
 
+    // Handles standard email/password registration by calling a presumed /api/auth/signup endpoint
     const onSubmit: SubmitHandler<SignUpInputs> = async (data) => {
         setIsLoading(true);
         setAuthError(null);
-        const selectedCountry = countriesArray.find(c => c.code === data.Pais);
-        const fullPhone = `${selectedCountry?.dial} ${data.Telefono}`;
+
+        // Check if there are local guest VIPRO evaluation results to sync upon signup
+        let guestViproScore = null;
+        let guestViproCompleted = false;
+        let guestViproDestination = null;
+
+        if (typeof window !== "undefined") {
+            guestViproCompleted = localStorage.getItem("vipro_completed") === "true";
+            const scoreStr = localStorage.getItem("vipro_score");
+            guestViproScore = scoreStr ? parseInt(scoreStr, 10) : null;
+            guestViproDestination = localStorage.getItem("vipro_destination");
+        }
+
+        const payload = {
+            ...data,
+            vipro_score: guestViproScore,
+            vipro_completed: guestViproCompleted,
+            vipro_destination: guestViproDestination,
+        };
 
         try {
-            const result = await AuthService.signUp({
-                email: data.Email,
-                password: data.Password,
-                first_name: data.Nombre,
-                last_name: data.Apellido,
-                phone: fullPhone,
-                country: data.Pais
+            // NOTE: This assumes an API route handler at /api/auth/signup exists 
+            // to handle manual credential sign-up with Supabase.
+            const response = await fetch('/api/auth/signup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
             });
+
+             if (!response.ok) {
+                 const errorData = await response.json();
+                 throw new Error(errorData.error || 'Error al registrarse con credenciales.');
+             }
+
+            const result = await response.json();
+
 
             if (result.data?.user) {
                 const userObj = result.data.user;
@@ -62,25 +121,30 @@ export default function SignUpForm() {
                     firstName: metadata.first_name || '',
                     lastName: metadata.last_name || '',
                     phone: metadata.phone || '',
-                    country: metadata.country || ''
+                    country: metadata.country || '',
+                    viproScore: metadata.vipro_score || null,
+                    viproCompleted: metadata.vipro_completed || false,
+                    viproDestination: metadata.vipro_destination || null,
+                    hasPaidAdvisor: metadata.has_paid_advisor || false,
+                    assignedAgentId: metadata.assigned_agent_id || null
                 });
             }
 
             router.push('/');
-        } catch (error: any) {
-            setAuthError(error.message || 'Error de red al crear la cuenta');
+        } catch (error: unknown) {
+            const errMessage = error instanceof Error ? error.message : String(error);
+            setAuthError(errMessage || 'Error de red al registrarse');
             setIsLoading(false);
         }
     };
 
+
     const handleGoogleSignUp = async () => {
         try {
-            const result = await AuthService.googleSignIn(`${window.location.origin}/`);
-            if (result.url) {
-                window.location.href = result.url;
-            }
-        } catch (error: any) {
-            setAuthError(error.message || 'Error de red al iniciar sesión con Google');
+            await handleGoogleSignUpApi(`${window.location.origin}/`); 
+        } catch (error: unknown) {
+            const errMessage = error instanceof Error ? error.message : String(error);
+            setAuthError(errMessage || 'Error de red al registrarse con Google');
         }
     };
 
@@ -95,12 +159,12 @@ export default function SignUpForm() {
 
                     <section className='flex flex-col gap-2 items-center'>
                         <h1 className="text-4xl font-bold mb-1 text-center text-gray-800">Crea tu cuenta</h1>
-                        <a href="/"><img src="/images/todovisa.png" alt="Logo de TodoVisa" className='w-32 mb-4' /></a>
+                        <Link href="/"><img src="/images/todovisa.png" alt="Logo de TodoVisa" className='w-32 mb-4' /></Link>
                         <p className="text-md text-gray-600 mb-4 text-center">Ingresa tus datos para registrarte</p>
                     </section>
 
                     <section className='flex flex-col gap-4 w-full'>
-
+                        
                         {/* Fila: Nombre y Apellido */}
                         <div className="flex gap-4 w-full">
                             <div className="flex flex-col w-1/2">
@@ -199,9 +263,9 @@ export default function SignUpForm() {
                                         </svg>
                                     )}
                                 </button>
-                            </div>
+                            </div >
                             {errors.Password && <span className="text-red-500 text-xs mt-1">{errors.Password.message}</span>}
-                        </div>
+                        </div >
 
                         {/* Campo: Confirmar Contraseña (Con botón para ver) */}
                         <div className="flex flex-col relative">
@@ -233,12 +297,12 @@ export default function SignUpForm() {
                                 </button>
                             </div>
                             {errors.ConfirmPassword && <span className="text-red-500 text-xs mt-1">{errors.ConfirmPassword.message}</span>}
-                        </div>
+                        </div >
 
                         <div className="w-full mt-2">
                             {authError && <div className="text-red-500 text-sm mb-4 text-center">{authError}</div>}
                             <button
-                                className="w-full border-[1px] border-brand-primary bg-brand-primary hover:bg-brand-hover cursor-pointer transition-colors text-white font-medium rounded-md px-4 py-2.5 text-md disabled:opacity-50"
+                                className="w-full border-[1px] border-brand-primary bg-brand-primary hover:bg-brand-hover cursor-pointer transition-colors text-white font-medium rounded-md px-4 py-2.5 text-md mt-2 disabled:opacity-50"
                                 type="submit"
                                 disabled={isLoading}
                             >
@@ -265,7 +329,7 @@ export default function SignUpForm() {
                                 </svg>
                                 Registrarse con Google
                             </button>
-                        </div>
+                        </div >
 
                         <div className="flex justify-center w-full mt-1">
                             <p className="text-sm text-gray-600">

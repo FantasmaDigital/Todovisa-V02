@@ -5,6 +5,7 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import supabase from "@/app/lib/supabase";
 
 interface FormData {
   fullName: string;
@@ -147,20 +148,84 @@ export default function AgentApplyPage() {
 
 
   // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateStep()) return;
 
     setIsSubmitting(true);
+    setErrors({});
 
-    // Simulate database insertion and processing
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setIsSubmitted(true);
-      // Generate a dynamic app ID
-      const randomId = "TDA-" + Math.floor(100000 + Math.random() * 900000);
+    const randomId = "TDA-" + Math.floor(100000 + Math.random() * 900000);
+
+    try {
+      const { error } = await supabase.from("agent_applications").insert({
+        application_id: randomId,
+        full_name: formData.fullName,
+        email: formData.email,
+        phone: formData.phone,
+        country_residence: formData.countryResidence,
+        experience_years: formData.experienceYears,
+        linkedin: formData.linkedin,
+        specialties: formData.specialties,
+        target_countries: formData.targetCountries,
+        languages: formData.languages,
+        biography: formData.biography,
+        terms_accepted: formData.termsAccepted,
+        status: "pending",
+        documents: {
+          dui: docs.dui?.name || null,
+          certificacion: docs.certificacion?.name || null,
+          antecedentes: docs.antecedentes?.name || null,
+          domicilio: docs.domicilio?.name || null,
+          titulo: docs.titulo?.name || null,
+          cv: docs.cv?.name || null,
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
       setApplicationId(randomId);
-    }, 2000);
+      setIsSubmitted(true);
+    } catch (err: any) {
+      console.error("Error submitting agent application:", err);
+      const isOffline = err.message?.includes('fetch failed') || err.message?.includes('ENOTFOUND') || err.message?.includes('fetch');
+      if (isOffline) {
+        console.warn("⚠️ Supabase no disponible. Guardando postulación localmente.");
+        const localData = {
+          application_id: randomId,
+          full_name: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          country_residence: formData.countryResidence,
+          experience_years: formData.experienceYears,
+          linkedin: formData.linkedin,
+          specialties: formData.specialties,
+          target_countries: formData.targetCountries,
+          languages: formData.languages,
+          biography: formData.biography,
+          terms_accepted: formData.termsAccepted,
+          status: "pending",
+          documents: {
+            dui: docs.dui?.name || null,
+            certificacion: docs.certificacion?.name || null,
+            antecedentes: docs.antecedentes?.name || null,
+            domicilio: docs.domicilio?.name || null,
+            titulo: docs.titulo?.name || null,
+            cv: docs.cv?.name || null,
+          },
+          created_at: new Date().toISOString()
+        };
+        localStorage.setItem(`agent_app_${randomId}`, JSON.stringify(localData));
+        setApplicationId(randomId);
+        setIsSubmitted(true);
+      } else {
+        setErrors({ submit: err.message || "Error al enviar la postulación. Por favor intente de nuevo." });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -659,6 +724,12 @@ export default function AgentApplyPage() {
                 </div>
               )}
 
+              {errors.submit && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-sm text-sm">
+                  ⚠️ {errors.submit}
+                </div>
+              )}
+
               {/* Navigation Action Buttons */}
               <div className="flex justify-between pt-6 border-t border-border-light">
                 {step > 1 ? (
@@ -736,20 +807,18 @@ export default function AgentApplyPage() {
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
               <Link
+                href={`/agents/portal?id=${applicationId}`}
+                className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 text-white text-xs font-bold rounded-sm hover:bg-emerald-700 transition-colors text-center inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Ver Contrato y Estado</span>
+                <span>&rarr;</span>
+              </Link>
+              <Link
                 href="/"
-                className="w-full sm:w-auto px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors text-center"
+                className="w-full sm:w-auto px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors text-center cursor-pointer"
               >
                 Volver al Inicio
               </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  alert("Detalles de postulación descargados en formato digital.");
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 border border-border-light text-text-secondary text-xs font-bold rounded-sm hover:bg-background-hover transition-colors text-center"
-              >
-                Descargar Comprobante
-              </button>
             </div>
           </div>
         )}

@@ -12,6 +12,9 @@ export interface UserData {
   hasPaidVipro?: boolean;
   assignedAgentId?: string | null;
   hasCompletedVipro?: boolean;
+  viproScore?: number | null;
+  viproCompleted?: boolean;
+  viproDestination?: string | null;
 }
 
 interface AuthState {

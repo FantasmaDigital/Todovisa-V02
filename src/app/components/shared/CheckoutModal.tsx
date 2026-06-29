@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useAuthStore } from "../../store/authStore";
+import supabase from "../../lib/supabase";
 
 interface Agent {
   id: string;
@@ -91,21 +92,36 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     setStep("processing");
     
     // Simulate API call to bank/stripe
-    setTimeout(() => {
+    setTimeout(async () => {
       if (user) {
+        const assignedAgentId = agent ? agent.id : user.assignedAgentId || "agent-1";
+        
+        try {
+          await supabase.auth.updateUser({
+            data: isVipro 
+              ? { has_paid_vipro: true }
+              : {
+                  has_paid_advisor: true,
+                  has_paid_vipro: true,
+                  assigned_agent_id: assignedAgentId
+                }
+          });
+          console.log("Payment status successfully saved to Supabase user metadata.");
+        } catch (err) {
+          console.error("Failed to save payment status to Supabase:", err);
+        }
+
         if (isVipro) {
-          // Update user state for VIPRO purchase
           setUser({
             ...user,
             hasPaidVipro: true,
           });
         } else {
-          // Update user state for Advisor purchase (which also unlocks VIPRO)
           setUser({
             ...user,
             hasPaidAdvisor: true,
-            hasPaidVipro: true, // Complete service also grants VIPRO
-            assignedAgentId: agent ? agent.id : user.assignedAgentId || "agent-1",
+            hasPaidVipro: true,
+            assignedAgentId: assignedAgentId,
           });
         }
       }
@@ -318,40 +334,75 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               </svg>
             </div>
             
-            <div className="space-y-2">
-              <h4 className="text-xl font-bold text-text-primary">¡Pago Realizado con Éxito!</h4>
-              <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                {isVipro ? (
-                  <>Has adquirido la <span className="font-semibold text-text-primary">Evaluación VIPRO</span>. Hemos habilitado el acceso para que completes tu formulario digital de inmediato.</>
-                ) : (
-                  <>Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name || "tu asesor asignado"}</span>. Hemos habilitado el chat de soporte interno de TodoVisa para que te comuniques de inmediato y tu formulario VIPRO.</>
-                )}
-              </p>
-            </div>
-
-            <div className="w-full bg-brand-light/35 border border-brand-primary/10 rounded p-4 text-left flex items-center gap-3">
-              <span className="text-xl">{isVipro ? "📋" : "💬"}</span>
-              <div>
-                <p className="text-xs font-bold text-brand-primary">
-                  {isVipro ? "Evaluación Habilitada" : "Chat Habilitado"}
-                </p>
-                <p className="text-[10px] text-text-secondary leading-normal">
-                  {isVipro ? (
-                    "Puedes acceder a completar tu evaluación desde la sección de VIPRO o tu panel de control."
+            {isVipro ? (
+              <>
+                <div className="space-y-2">
+                  <h4 className="text-xl font-bold text-text-primary">¡Pago Realizado con Éxito!</h4>
+                  <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
+                    Has adquirido la <span className="font-semibold text-text-primary">Evaluación VIPRO</span>. Hemos habilitado el acceso para que completes tu formulario digital de inmediato.
+                  </p>
+                </div>
+                <div className="w-full bg-brand-light/35 border border-brand-primary/10 rounded p-4 text-left flex items-center gap-3">
+                  <span className="text-xl">📋</span>
+                  <div>
+                    <p className="text-xs font-bold text-brand-primary">Evaluación Habilitada</p>
+                    <p className="text-[10px] text-text-secondary leading-normal">
+                      Puedes acceder a completar tu evaluación desde la sección de VIPRO o tu panel de control.
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <h4 className="text-xl font-bold text-text-primary">¡Pago Realizado con Éxito!</h4>
+                  {user?.viproCompleted ? (
+                    <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
+                      Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name || "tu asesor asignado"}</span>. Hemos habilitado el chat de soporte interno de TodoVisa para que te comuniques de inmediato.
+                    </p>
                   ) : (
-                    "Puedes acceder a la conversación desde la pestaña \"Mi Asesor Asignado\" en tu perfil."
+                    <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
+                      Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name || "tu asesor asignado"}</span> con éxito. Para comenzar a chatear, debes completar primero la Evaluación Diagnóstica VIPRO.
+                    </p>
                   )}
-                </p>
-              </div>
-            </div>
+                </div>
+                {user?.viproCompleted ? (
+                  <div className="w-full bg-brand-light/35 border border-brand-primary/10 rounded p-4 text-left flex items-center gap-3">
+                    <span className="text-xl">💬</span>
+                    <div>
+                      <p className="text-xs font-bold text-brand-primary">Chat Habilitado</p>
+                      <p className="text-[10px] text-text-secondary leading-normal">
+                        Puedes acceder a la conversación desde la pestaña &quot;Mi Asesor Asignado&quot; en tu perfil.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full bg-amber-50 border border-amber-200 rounded p-4 text-left flex items-center gap-3">
+                    <span className="text-xl">📊</span>
+                    <div>
+                      <p className="text-xs font-bold text-amber-800">Evaluación VIPRO Requerida</p>
+                      <p className="text-[10px] text-amber-700 leading-normal">
+                        Tu asesor asignado necesita conocer tu perfil y puntaje VIPRO para poder iniciar el chat.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
             <button
               onClick={() => {
                 onSuccess();
               }}
-              className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none"
+              className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none cursor-pointer"
             >
-              {isVipro ? "Comenzar Evaluación VIPRO" : `Comenzar Chat con ${agent?.name.split(" ")[1] || "Asesor"}`}
+              {isVipro 
+                ? "Comenzar Evaluación VIPRO" 
+                : (user?.viproCompleted 
+                    ? `Comenzar Chat con ${agent?.name.split(" ")[1] || "Asesor"}` 
+                    : "Ver mi Perfil y Completar VIPRO"
+                  )
+              }
             </button>
           </div>
         )}

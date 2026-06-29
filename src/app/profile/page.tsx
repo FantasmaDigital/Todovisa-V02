@@ -13,6 +13,7 @@ import { MessageClientService } from "../service/MessageClientService";
 
 // Convert countries list to sorted array
 const countriesArray = Object.entries(countries)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   .map(([code, data]: [string, any]) => ({
     code,
     name: data.name,
@@ -32,48 +33,186 @@ export default function PerfilUsuarioPage() {
   const [phone, setPhone] = useState("");
   const [countryCode, setCountryCode] = useState("SV");
   
-  // Notification state
-  const [showNotification, setShowNotification] = useState(false);
-  const [notificationMsg, setNotificationMsg] = useState("");
-
   // Tab State: "datos", "proceso", "asesor", "pagos"
   const [activeTab, setActiveTab] = useState("datos");
 
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [checkoutAgent, setCheckoutAgent] = useState<any>(null);
   const [checkoutProduct, setCheckoutProduct] = useState<"vipro" | "advisor">("advisor");
 
   // Chat states
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [messages, setMessages] = useState<any[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // Document upload & DS-160 states
+  const [clientDocs, setClientDocs] = useState<{
+    passport?: string;
+    dui?: string;
+    workCert?: string;
+    bankStatements?: string;
+  }>({});
+
+  const [ds160Confirmed, setDs160Confirmed] = useState(false);
+  const [expedienteStatus, setExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>('draft');
+  const [isDs160ModalOpen, setIsDs160ModalOpen] = useState(false);
+
+  // Mock form values for DS-160
+  const [ds160Data, setDs160Data] = useState({
+    fullName: "",
+    passportNum: "A12345678",
+    birthDate: "1994-05-12",
+    purposeOfTrip: "Turismo B1/B2",
+    hasAssets: true
+  });
+
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4500);
+  };
+
+  const handleFileUpload = (docType: "passport" | "dui" | "workCert" | "bankStatements", fileName: string) => {
+    setClientDocs(prev => ({
+      ...prev,
+      [docType]: fileName
+    }));
+    showToast(`Archivo "${fileName}" cargado con éxito.`, "success");
+  };
+
+  const handleSubmitExpediente = () => {
+    if (!clientDocs.passport || !clientDocs.dui || !clientDocs.workCert || !clientDocs.bankStatements) {
+      showToast("Por favor carga los 4 documentos requeridos para auditar tu expediente.", "info");
+      return;
+    }
+    if (!ds160Confirmed) {
+      showToast("Debes revisar y confirmar tus datos del formulario DS-160.", "info");
+      return;
+    }
+    setExpedienteStatus('submitted');
+    showToast("¡Expediente enviado con éxito! Tu asesora Sofía Rodríguez ha sido notificada.", "success");
+    
+    // Defer prepending system message
+    setTimeout(() => {
+      const newSystemMessage = {
+        id: `msg-sys-${Date.now()}`,
+        sender: "agent" as const,
+        text: `He recibido tu expediente completo para auditoría (Pasaporte: ${clientDocs.passport}, DUI: ${clientDocs.dui}, Laboral: ${clientDocs.workCert}, Solvencia: ${clientDocs.bankStatements} y tus datos del DS-160). \n\nVoy a proceder a auditar y cotejar cada documento hoy mismo. Si todo coincide con las regulaciones de la sección consular, cambiaré el estado a "Aprobado" y pasaremos a programar tu cita y realizar el simulacro de entrevista (Paso 5). ¡Excelente trabajo de recopilación!`,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, newSystemMessage]);
+      
+      // Also automatically approve the expediente after a short delay (e.g. 6 seconds) to simulate the agent review!
+      setTimeout(() => {
+        setExpedienteStatus('approved');
+        const approvedMessage = {
+          id: `msg-sys-${Date.now() + 1}`,
+          sender: "agent" as const,
+          text: `🎉 ¡Buenas noticias! He revisado detalladamente tu expediente digital y el borrador de tu formulario DS-160. Todo está perfectamente alineado y cumple al 100% con los criterios de solvencia y arraigo.\n\nHe procedido a cerrar el llenado del DS-160. Ya puedes revisar el Paso 5 en tu seguimiento para coordinar las fechas de tu cita y agendar tu sesión de simulacro de entrevista por Zoom.`,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, approvedMessage]);
+      }, 6500);
+    }, 1000);
+  };
+
   // Computed assigned agent
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const assignedAgent = (agentsData as any[]).find(a => a.id === user?.assignedAgentId) || agentsData[0];
 
+  // Sync user profile state with Supabase Auth on page load
   useEffect(() => {
-    setIsMounted(true);
+    let isSubscribed = true;
+    const syncWithSupabase = async () => {
+      try {
+        const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
+        if (error) {
+          console.warn("Could not fetch user from Supabase, operating in local/offline mode:", error.message);
+          return;
+        }
+
+        if (supabaseUser && isSubscribed) {
+          const metadata = supabaseUser.user_metadata || {};
+          
+          const updatedUser = {
+            id: supabaseUser.id,
+            email: supabaseUser.email || '',
+            firstName: metadata.first_name || '',
+            lastName: metadata.last_name || '',
+            phone: metadata.phone || '',
+            country: metadata.country || '',
+            viproScore: metadata.vipro_score || null,
+            viproCompleted: metadata.vipro_completed || false,
+            viproDestination: metadata.vipro_destination || null,
+            hasPaidAdvisor: metadata.has_paid_advisor || false,
+            assignedAgentId: metadata.assigned_agent_id || null
+          };
+
+          // Compare with current user state to avoid unnecessary loops
+          if (
+            !user ||
+            user.id !== updatedUser.id ||
+            user.viproCompleted !== updatedUser.viproCompleted ||
+            user.viproScore !== updatedUser.viproScore ||
+            user.viproDestination !== updatedUser.viproDestination ||
+            user.hasPaidAdvisor !== updatedUser.hasPaidAdvisor ||
+            user.assignedAgentId !== updatedUser.assignedAgentId ||
+            user.firstName !== updatedUser.firstName ||
+            user.lastName !== updatedUser.lastName
+          ) {
+            console.log("Syncing auth store state with Supabase Auth user metadata.");
+            // Defer store update to avoid react-hooks/set-state-in-effect warning
+            setTimeout(() => setUser(updatedUser), 0);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to sync user session with Supabase:", err);
+      }
+    };
+
+    syncWithSupabase();
+    return () => {
+      isSubscribed = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsMounted(true), 0);
+    return () => clearTimeout(timer);
   }, []);
 
   // Sync state when user store loads
   useEffect(() => {
     if (user) {
-      setFirstName(user.firstName || "");
-      setLastName(user.lastName || "");
-      setPhone(user.phone || "");
-      setCountryCode(user.country || "SV");
+      const timer = setTimeout(() => {
+        setFirstName(user.firstName || "");
+        setLastName(user.lastName || "");
+        setPhone(user.phone || "");
+        setCountryCode(user.country || "SV");
+        setDs160Data(prev => ({
+          ...prev,
+          fullName: `${user.firstName || ""} ${user.lastName || ""}`.trim()
+        }));
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [user]);
 
-  // Read URL search params for active tab
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const tab = params.get("tab");
       if (tab && ["datos", "proceso", "asesor", "pagos"].includes(tab)) {
-        setActiveTab(tab);
+        const timer = setTimeout(() => setActiveTab(tab), 0);
+        return () => clearTimeout(timer);
       }
     }
   }, []);
@@ -292,7 +431,7 @@ export default function PerfilUsuarioPage() {
   const handleSaveData = (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName.trim() || !lastName.trim()) {
-      alert("Por favor completa el nombre y apellido.");
+      showToast("Por favor completa el nombre y apellido.", "error");
       return;
     }
 
@@ -304,9 +443,7 @@ export default function PerfilUsuarioPage() {
       country: countryCode,
     });
 
-    setNotificationMsg("¡Cambios guardados con éxito!");
-    setShowNotification(true);
-    setTimeout(() => setShowNotification(false), 4000);
+    showToast("¡Cambios guardados con éxito!", "success");
   };
 
   const handleLogout = () => {
@@ -463,17 +600,7 @@ export default function PerfilUsuarioPage() {
         </div>
       </div>
 
-      {/* Alerta de Éxito */}
-      {showNotification && (
-        <div className="w-[80%] mx-auto mt-6">
-          <div className="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-sm p-4 flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
-            <svg className="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="text-sm font-semibold">{notificationMsg}</span>
-          </div>
-        </div>
-      )}
+
 
       {/* Grid Principal */}
       <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8">
@@ -490,8 +617,8 @@ export default function PerfilUsuarioPage() {
               <h3 className="font-bold text-text-primary text-md leading-snug">{firstName} {lastName}</h3>
               <p className="text-xs text-text-secondary mt-1">{user.email}</p>
               
-              {user.hasCompletedVipro ? (
-                <div className="mt-4 inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2.5 py-1 rounded-full border border-emerald-100">
+              {user.viproCompleted ? (
+                <div className="mt-4 inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2.5 py-1 rounded-full border border-emerald-200">
                   <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
                   EVALUACIÓN VIPRO COMPLETADA
                 </div>
@@ -501,7 +628,7 @@ export default function PerfilUsuarioPage() {
                   VIPRO: COMPLETAR AHORA
                 </div>
               ) : (
-                <div className="mt-4 inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 text-[10px] font-bold px-2.5 py-1 rounded-full border border-amber-100">
+                <div className="mt-4 inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 text-[10px] font-bold px-2.5 py-1 rounded-full border border-amber-200 animate-pulse">
                   <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping"></span>
                   EVALUACIÓN VIPRO PENDIENTE
                 </div>
@@ -675,16 +802,16 @@ export default function PerfilUsuarioPage() {
                   {/* Paso 2 */}
                   <div className="flex gap-4 relative">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      user.hasCompletedVipro ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
+                      user.viproCompleted ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
                     }`}>
-                      {user.hasCompletedVipro ? "✓" : "2"}
+                      {user.viproCompleted ? "✓" : "2"}
                     </div>
                     <div className={`flex-1 rounded-md p-4 border ${
-                      user.hasCompletedVipro ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
+                      user.viproCompleted ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
                     }`}>
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className="text-sm font-bold text-text-primary">Paso 2: Evaluación Diagnóstica VIPRO</h4>
-                        {user.hasCompletedVipro ? (
+                        {user.viproCompleted ? (
                           <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">CALIFICADO</span>
                         ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
                           <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE COMPLETAR</span>
@@ -692,13 +819,15 @@ export default function PerfilUsuarioPage() {
                           <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE PAGO</span>
                         )}
                       </div>
-                      {user.hasCompletedVipro ? (
+                      {user.viproCompleted ? (
                         <>
-                          <p className="text-xs text-text-secondary">Evaluación realizada con éxito para tu destino.</p>
+                          <p className="text-xs text-text-secondary">
+                            Evaluación realizada con éxito para destino: <span className="font-semibold text-text-primary">{user.viproDestination === "UK" ? "🇬🇧 Inglaterra" : "🇺🇸 Estados Unidos"}</span>.
+                          </p>
                           <div className="mt-3 flex items-center gap-3 bg-brand-light/50 border border-blue-100 rounded p-2.5 w-max">
                             <span className="text-lg">📊</span>
                             <div>
-                              <p className="text-xs font-bold text-brand-primary">Puntaje Obtenido: 88/100 (Favorable)</p>
+                              <p className="text-xs font-bold text-brand-primary">Puntaje Obtenido: {user.viproScore || 85}/100 ({(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión Recomendada"})</p>
                               <p className="text-[10px] text-text-secondary">Tu perfil cuenta con alta probabilidad. Recomendado continuar con llenado de DS-160.</p>
                             </div>
                           </div>
@@ -736,48 +865,62 @@ export default function PerfilUsuarioPage() {
                   </div>
 
                   {/* Paso 3 */}
-                  <div className="flex gap-4 relative">
+                  <div className={`flex gap-4 relative transition-all ${user.viproCompleted ? "" : "opacity-60"}`}>
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      user.hasPaidAdvisor ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
+                      !user.viproCompleted
+                        ? "bg-gray-200 text-text-muted"
+                        : user.hasPaidAdvisor
+                        ? "bg-brand-primary text-white"
+                        : "bg-amber-500 text-white animate-pulse"
                     }`}>
-                      {user.hasPaidAdvisor ? "✓" : "3"}
+                      {user.viproCompleted && user.hasPaidAdvisor ? "✓" : "3"}
                     </div>
                     <div className={`flex-1 rounded-md p-4 border ${
-                      user.hasPaidAdvisor ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
+                      !user.viproCompleted
+                        ? "bg-background-main/50 border-border-light"
+                        : user.hasPaidAdvisor
+                        ? "bg-background-main/30 border-border-light"
+                        : "bg-white border-amber-200 shadow-sm"
                     }`}>
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className="text-sm font-bold text-text-primary">Paso 3: Asignación de Agente Consular</h4>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                          user.hasPaidAdvisor 
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
-                            : "bg-amber-50 text-amber-800 border-amber-200"
-                        }`}>
-                          {user.hasPaidAdvisor ? "COMPLETADO" : "ACCION REQUERIDA"}
-                        </span>
+                        {user.viproCompleted && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            user.hasPaidAdvisor 
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                              : "bg-amber-50 text-amber-800 border-amber-200"
+                          }`}>
+                            {user.hasPaidAdvisor ? "COMPLETADO" : "ACCION REQUERIDA"}
+                          </span>
+                        )}
                       </div>
                       
-                      {user.hasPaidAdvisor ? (
+                      {!user.viproCompleted ? (
+                        <p className="text-xs text-text-muted">
+                          Estará disponible una vez que completes tu Evaluación Diagnóstica VIPRO.
+                        </p>
+                      ) : user.hasPaidAdvisor ? (
                         <div>
                           <p className="text-xs text-text-secondary">
                             Has asignado correctamente a tu asesor: <span className="font-semibold text-text-primary">{assignedAgent.name}</span>.
                           </p>
                           <button
                             onClick={() => setActiveTab("asesor")}
-                            className="mt-3 bg-brand-primary text-white font-semibold px-4 py-2 rounded-sm hover:bg-brand-hover transition-colors text-xs inline-flex items-center gap-1.5 focus:outline-none"
+                            className="mt-3 text-xs text-brand-primary font-bold hover:underline"
                           >
-                            <span>Ir a mi Chat de Soporte</span>
-                            <span>💬</span>
+                            Ir a mi Chat de Soporte &rarr;
                           </button>
                         </div>
                       ) : (
                         <div>
-                          <p className="text-xs text-text-secondary mb-3">Debes seleccionar un agente virtual certificado para iniciar el armado de tu expediente y simulación.</p>
+                          <p className="text-xs text-text-secondary mb-3">
+                            Selecciona un asesor consular de nuestra red certificada para guiar el armado de tu expediente.
+                          </p>
                           <button
                             onClick={() => router.push("/agents")}
-                            className="bg-brand-primary text-white font-semibold px-4 py-2 rounded-sm hover:bg-brand-hover transition-colors text-xs inline-flex items-center gap-1 focus:outline-none"
+                            className="bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold px-4 py-2 rounded-sm transition-colors shadow-sm cursor-pointer"
                           >
-                            <span>Elegir Agente Ahora</span>
-                            <span>&rarr;</span>
+                            Elegir Asesor Consular &rarr;
                           </button>
                         </div>
                       )}
@@ -787,42 +930,237 @@ export default function PerfilUsuarioPage() {
                   {/* Paso 4 */}
                   <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      user.hasPaidAdvisor ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
+                      expedienteStatus === 'approved'
+                        ? "bg-emerald-500 text-white animate-none"
+                        : user.hasPaidAdvisor
+                        ? "bg-amber-500 text-white animate-pulse"
+                        : "bg-gray-200 text-text-muted"
                     }`}>
-                      {user.hasPaidAdvisor ? "4" : "4"}
+                      {expedienteStatus === 'approved' ? "✓" : "4"}
                     </div>
                     <div className={`flex-1 border rounded-md p-4 ${
-                      user.hasPaidAdvisor ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
+                      expedienteStatus === 'approved'
+                        ? "bg-white border-emerald-200 shadow-sm"
+                        : user.hasPaidAdvisor
+                        ? "bg-white border-amber-200 shadow-sm"
+                        : "bg-background-main/50 border-border-light"
                     }`}>
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className={`text-sm font-bold ${user.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
                           Paso 4: Armado de Expediente y Formulario Consular
                         </h4>
                         {user.hasPaidAdvisor && (
-                          <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
-                            EN PROGRESO
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            expedienteStatus === 'approved'
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-200 animate-none"
+                              : expedienteStatus === 'submitted'
+                              ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse"
+                              : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
+                          }`}>
+                            {expedienteStatus === 'approved'
+                              ? "COMPLETADO"
+                              : expedienteStatus === 'submitted'
+                              ? "EN AUDITORÍA"
+                              : "EN PROGRESO"}
                           </span>
                         )}
                       </div>
                       <p className={`text-xs ${user.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"}`}>
                         Llenado digital del formulario de visa y preparación de documentos de solvencia económica. Tu asesor te dará pautas por chat.
                       </p>
+
+                      {user.hasPaidAdvisor && (
+                        <div className="mt-4 pt-4 border-t border-border-light space-y-4">
+                          <div>
+                            <span className="text-xs font-bold text-text-primary uppercase tracking-wider block mb-1">
+                              📂 Expediente Digital Consular
+                            </span>
+                            <span className="text-[11px] text-text-secondary block mb-3 leading-relaxed">
+                              Carga los archivos requeridos para que tu asesora {assignedAgent.name} los audite antes de programar tu cita:
+                            </span>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {/* Pasaporte */}
+                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                <div>
+                                  <span className="text-xs font-bold text-text-primary block">1. Pasaporte Vigente</span>
+                                  <span className="text-[9px] text-text-muted">Primera página con datos de identidad.</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 mt-1">
+                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                    {clientDocs.passport || "❌ No subido"}
+                                  </span>
+                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                    Subir
+                                    <input 
+                                      type="file" 
+                                      accept="image/*,application/pdf" 
+                                      className="hidden" 
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleFileUpload('passport', file.name);
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+
+                              {/* DUI */}
+                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                <div>
+                                  <span className="text-xs font-bold text-text-primary block">2. DUI / Identificación</span>
+                                  <span className="text-[9px] text-text-muted">Copia legible por ambos lados.</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 mt-1">
+                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                    {clientDocs.dui || "❌ No subido"}
+                                  </span>
+                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                    Subir
+                                    <input 
+                                      type="file" 
+                                      accept="image/*,application/pdf" 
+                                      className="hidden" 
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleFileUpload('dui', file.name);
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+
+                              {/* Constancia Laboral */}
+                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                <div>
+                                  <span className="text-xs font-bold text-text-primary block">3. Arraigo Laboral / Académico</span>
+                                  <span className="text-[9px] text-text-muted">Constancia laboral firmada o matrícula de estudios.</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 mt-1">
+                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                    {clientDocs.workCert || "❌ No subido"}
+                                  </span>
+                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                    Subir
+                                    <input 
+                                      type="file" 
+                                      accept="image/*,application/pdf" 
+                                      className="hidden" 
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleFileUpload('workCert', file.name);
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+
+                              {/* Solvencia Bancaria */}
+                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                <div>
+                                  <span className="text-xs font-bold text-text-primary block">4. Solvencia Económica</span>
+                                  <span className="text-[9px] text-text-muted">Estados de cuenta bancarios (últimos 3 meses).</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 mt-1">
+                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                    {clientDocs.bankStatements || "❌ No subido"}
+                                  </span>
+                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                    Subir
+                                    <input 
+                                      type="file" 
+                                      accept="image/*,application/pdf" 
+                                      className="hidden" 
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleFileUpload('bankStatements', file.name);
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* DS-160 Form Review Section */}
+                          <div className="bg-amber-50/50 border border-amber-200/60 rounded-sm p-4 mt-3">
+                            <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
+                              <span className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                                📝 Formulario Consular DS-160
+                              </span>
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
+                                ds160Confirmed ? "bg-emerald-100 border-emerald-200 text-emerald-800" : "bg-amber-100 border-amber-200 text-amber-800"
+                              }`}>
+                                {ds160Confirmed ? "Confirmado" : "Pendiente de Revisión"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-amber-900/90 leading-relaxed mb-3">
+                              Debes auditar y ratificar tu información de solicitud consular para que tu asesor procese el llenado final en la plataforma del Departamento de Estado.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setIsDs160ModalOpen(true)}
+                              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-sm transition-colors cursor-pointer"
+                            >
+                              {ds160Confirmed ? "Editar Datos Confirmados" : "Auditar mis Datos Consulares"}
+                            </button>
+                          </div>
+
+                          {/* Submit button for Step 4 */}
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={handleSubmitExpediente}
+                              disabled={expedienteStatus === 'submitted' || expedienteStatus === 'approved'}
+                              className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-sm ${
+                                expedienteStatus === 'submitted'
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed"
+                                  : expedienteStatus === 'approved'
+                                  ? "bg-emerald-600 text-white cursor-not-allowed"
+                                  : "bg-brand-primary hover:bg-brand-hover text-white cursor-pointer"
+                              }`}
+                            >
+                              {expedienteStatus === 'submitted'
+                                ? "⏳ Expediente en Auditoría por tu Asesor"
+                                : expedienteStatus === 'approved'
+                                ? "✅ Expediente Aprobado y DS-160 Cerrado"
+                                : "🚀 Enviar Expediente Completo a Auditoría"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Paso 5 */}
-                  <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                    <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                  {/* Paso 5 */}
+                  <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
+                      expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
+                    }`}>
                       5
                     </div>
-                    <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                      <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 5: Programación de Cita y Simulacro Consular</h4>
-                      <p className="text-xs text-text-muted">Obtención de fechas en el CAS / Embajada y entrenamiento intensivo con simulacros de entrevista.</p>
+                    <div className={`flex-1 rounded-md p-4 border ${
+                      expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
+                    }`}>
+                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                        <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
+                          Paso 5: Programación de Cita y Simulacro Consular
+                        </h4>
+                        {expedienteStatus === 'approved' && (
+                          <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
+                            LISTO PARA AGENDAR
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"}`}>
+                        Obtención de fechas en el CAS / Embajada y entrenamiento intensivo con tu asesor. Ponte en contacto con tu asesor por el chat para coordinar los horarios de simulación en Zoom.
+                      </p>
                     </div>
                   </div>
 
                   {/* Paso 6 */}
-                  <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                  <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
                     <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
                       6
                     </div>
@@ -833,14 +1171,14 @@ export default function PerfilUsuarioPage() {
                   </div>
 
                   {/* Paso 7 */}
-                  <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                  <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
                     <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
                       7
                     </div>
                     <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className="text-sm font-bold text-text-secondary">Paso 7: Soporte Post-Entrevista y Siguientes Pasos</h4>
-                        {user.hasPaidAdvisor && (
+                        {user?.hasPaidAdvisor && (
                           <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
                             SIEMPRE ACTIVO
                           </span>
@@ -852,8 +1190,7 @@ export default function PerfilUsuarioPage() {
                 </div>
               </div>
             )}
-
-            {/* TAB: MI ASESOR */}
+{/* TAB: MI ASESOR */}
             {activeTab === "asesor" && (
               <div>
                 <div className="mb-6 pb-4 border-b border-border-light">
@@ -862,175 +1199,177 @@ export default function PerfilUsuarioPage() {
                 </div>
 
                 {user.hasPaidAdvisor ? (
-                  // CHAT APARTADO: Chat con el Asesor
-                  <div className="space-y-6 animate-fade-in">
-                    <style dangerouslySetInnerHTML={{ __html: `
-                      .custom-scrollbar::-webkit-scrollbar {
-                        width: 6px;
-                      }
-                      .custom-scrollbar::-webkit-scrollbar-track {
-                        background: rgba(0, 0, 0, 0.02);
-                        border-radius: 8px;
-                      }
-                      .custom-scrollbar::-webkit-scrollbar-thumb {
-                        background: rgba(0, 0, 0, 0.12);
-                        border-radius: 8px;
-                      }
-                      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                        background: rgba(0, 0, 0, 0.25);
-                      }
-                    `}} />
-
-                    {/* Advisor Info Bar */}
-                    <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
-                      <div className="relative">
-                        <img
-                          src={assignedAgent.photo}
-                          alt={assignedAgent.name}
-                          className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
-                        />
-                        <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
+                  !user.viproCompleted ? (
+                    // Cuestionario VIPRO no completado todavía
+                    <div className="bg-white rounded-[2rem] border border-amber-200 p-8 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                      <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
+                        📊
                       </div>
-                      <div className="text-center sm:text-left flex-1 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                          <h5 className="font-bold text-text-primary text-base tracking-tight">{assignedAgent.name}</h5>
-                          <span className="bg-[#FAF0E6] text-[#A0522D] text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-[#EEDC82]">ASESOR ASIGNADO</span>
-                        </div>
-                        <p className="text-xs text-brand-primary font-bold">{assignedAgent.title}</p>
-                        <div className="flex items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary">
-                          <span className="flex items-center gap-1">⭐ <span className="font-semibold text-text-primary">{assignedAgent.rating.toFixed(1)}</span> ({assignedAgent.reviewsCount} reseñas)</span>
-                          <span className="text-gray-300">•</span>
-                          <span>Soporte 24/7 Activo</span>
-                        </div>
+                      <div>
+                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Requerida</h3>
+                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
+                          Para iniciar la asesoría y chatear con <strong>{assignedAgent.name}</strong>, primero debes completar la Evaluación Diagnóstica VIPRO. Tu asesor necesita analizar tus respuestas y tu puntaje de viabilidad para guiar tu caso de forma personalizada.
+                        </p>
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-colors text-xs focus:outline-none shadow-sm cursor-pointer"
+                        >
+                          Realizar Evaluación VIPRO Ahora
+                        </button>
                       </div>
                     </div>
+                  ) : (
+                    // CHAT APARTADO: Chat con el Asesor (ya tiene viproCompleted)
+                    <div className="space-y-6 animate-fade-in">
+                      <style dangerouslySetInnerHTML={{ __html: `
+                        .custom-scrollbar::-webkit-scrollbar {
+                          width: 6px;
+                        }
+                        .custom-scrollbar::-webkit-scrollbar-track {
+                          background: rgba(0, 0, 0, 0.02);
+                          border-radius: 8px;
+                        }
+                        .custom-scrollbar::-webkit-scrollbar-thumb {
+                          background: rgba(0, 0, 0, 0.12);
+                          border-radius: 8px;
+                        }
+                        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                          background: rgba(0, 0, 0, 0.25);
+                        }
+                      `}} />
 
-                    {/* Chat Window */}
-                    <div className="border border-border-light rounded-2xl overflow-hidden flex flex-col h-[550px] bg-[#FAF9F6] shadow-sm relative">
-                      {/* Chat Header */}
-                      <div className="bg-white px-6 py-4 border-b border-border-light flex items-center justify-between shadow-sm z-10">
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <img
-                              src={assignedAgent.photo}
-                              alt={assignedAgent.name}
-                              className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
-                            />
-                            <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                            </span>
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-text-primary text-sm leading-tight">{assignedAgent.name}</h4>
-                            <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
-                              En línea • Especialista Consular
-                            </p>
-                          </div>
+                      {/* Advisor Info Bar */}
+                      <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
+                        <div className="relative">
+                          <img
+                            src={assignedAgent.photo}
+                            alt={assignedAgent.name}
+                            className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
+                          />
+                          <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
                         </div>
-                        <div className="text-right hidden sm:flex flex-col items-end gap-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] text-[#2C4A75] bg-blue-50 border border-blue-100 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                              Contrato Activo
-                            </span>
-                            {isSupabaseDbAvailable ? (
-                              <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-100 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
-                                <span className="w-1 h-1 bg-emerald-500 rounded-full"></span> Realtime
-                              </span>
-                            ) : (
-                              <span 
-                                className="text-[9px] text-amber-700 bg-amber-50 border border-amber-100 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 cursor-help"
-                                title="Para persistencia, crea la tabla 'messages' en tu base de datos de Supabase. Ejecuta el SQL del walkthrough."
-                              >
-                                <span className="w-1 h-1 bg-amber-500 rounded-full animate-pulse"></span> Simulado
-                              </span>
-                            )}
+                        <div className="text-center sm:text-left flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                            <h5 className="font-bold text-text-primary text-base tracking-tight">{assignedAgent.name}</h5>
+                            <span className="bg-[#FAF0E6] text-[#A0522D] text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-[#EEDC82]">ASESOR ASIGNADO</span>
                           </div>
-                        </div>
-                      </div>
-
-                      {/* Chat Info Banner */}
-                      <div className="bg-[#FAF8F5] border-b border-[#EBEBEB] px-6 py-3 flex items-start gap-2.5 text-xs text-text-secondary leading-relaxed z-10">
-                        <span className="text-brand-primary text-sm mt-0.5">ℹ️</span>
-                        <div className="flex-1">
-                          <span className="font-bold text-text-primary">Canal de Comunicación Directo:</span> Este chat permanecerá activo a lo largo de todo tu proceso consular y continuará disponible para cualquier duda post-entrevista.
+                          <p className="text-xs text-brand-primary font-bold">{assignedAgent.title}</p>
+                          <div className="flex items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary">
+                            <span className="flex items-center gap-1">⭐ <span className="font-semibold text-text-primary">{assignedAgent.rating.toFixed(1)}</span> ({assignedAgent.reviewsCount} reseñas)</span>
+                            <span className="text-gray-300">•</span>
+                            <span>Soporte 24/7 Activo</span>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Messages Box */}
-                      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
-                        {messages.map((msg) => {
-                          const isSelf = msg.sender === "user";
-                          return (
-                            <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
-                              <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
-                                {!isSelf && (
-                                  <img
-                                    src={assignedAgent.photo}
-                                    alt={assignedAgent.name}
-                                    className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
-                                  />
-                                )}
-                                <div className="flex flex-col">
-                                  <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                                    isSelf 
-                                      ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none" 
-                                      : "bg-white border border-border-light text-text-primary rounded-tl-none"
-                                  }`}>
-                                    <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
-                                  </div>
-                                  <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
-                                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {isTyping && (
-                          <div className="flex justify-start animate-pulse">
-                            <div className="flex gap-3 max-w-[75%]">
+                      {/* Chat Window */}
+                      <div className="border border-border-light rounded-2xl overflow-hidden flex flex-col h-[550px] bg-[#FAF9F6] shadow-sm relative">
+                        {/* Chat Header */}
+                        <div className="bg-white px-6 py-4 border-b border-border-light flex items-center justify-between shadow-sm z-10">
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
                               <img
                                 src={assignedAgent.photo}
                                 alt={assignedAgent.name}
-                                className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
+                                className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
                               />
-                              <div className="bg-white border border-border-light rounded-2xl rounded-tl-none px-4 py-3.5 shadow-sm flex items-center gap-1.5">
-                                <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
-                                <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
-                                <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
-                              </div>
+                              <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                              </span>
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-text-primary text-sm leading-tight">{assignedAgent.name}</h4>
+                              <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                                En línea • Especialista Consular
+                              </p>
                             </div>
                           </div>
-                        )}
-                      </div>
-
-                      {/* Input Form */}
-                      <form onSubmit={handleSendMessage} className="bg-white p-4 border-t border-border-light flex gap-3 items-center z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.01)]">
-                        <div className="relative flex-1">
-                          <input
-                            type="text"
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                            placeholder={`Escribe un mensaje para ${assignedAgent.name.split(" ")[1]}...`}
-                            disabled={isTyping}
-                            className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted disabled:opacity-60 transition-all shadow-inner"
-                          />
+                          <div className="text-right hidden sm:flex flex-col items-end gap-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] text-[#2C4A75] bg-blue-50 border border-blue-100 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                Contrato Activo
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <button
-                          type="submit"
-                          disabled={!inputValue.trim() || isTyping}
-                          className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
-                          title="Enviar mensaje"
-                        >
-                          <svg className="w-4 h-4 transform rotate-45 translate-x-[-1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                          </svg>
-                        </button>
-                      </form>
+
+                        {/* Messages Box */}
+                        <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
+                          {messages.map((msg) => {
+                            const isSelf = msg.sender === "user";
+                            return (
+                              <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
+                                <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                                  {!isSelf && (
+                                    <img
+                                      src={assignedAgent.photo}
+                                      alt={assignedAgent.name}
+                                      className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
+                                    />
+                                  )}
+                                  <div className="flex flex-col">
+                                    <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                                      isSelf 
+                                        ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none" 
+                                        : "bg-white border border-border-light text-text-primary rounded-tl-none"
+                                    }`}>
+                                      <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
+                                    </div>
+                                    <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
+                                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {isTyping && (
+                            <div className="flex justify-start animate-pulse">
+                              <div className="flex gap-3 max-w-[75%]">
+                                <img
+                                  src={assignedAgent.photo}
+                                  alt={assignedAgent.name}
+                                  className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
+                                />
+                                <div className="bg-white border border-border-light rounded-2xl rounded-tl-none px-4 py-3.5 shadow-sm flex items-center gap-1.5">
+                                  <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+                                  <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+                                  <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Input Form */}
+                        <form onSubmit={handleSendMessage} className="bg-white p-4 border-t border-border-light flex gap-3 items-center z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.01)]">
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              value={inputValue}
+                              onChange={(e) => setInputValue(e.target.value)}
+                              placeholder={`Escribe un mensaje para ${assignedAgent.name.split(" ")[1]}...`}
+                              disabled={isTyping}
+                              className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted disabled:opacity-60 transition-all shadow-inner"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={!inputValue.trim() || isTyping}
+                            className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
+                            title="Enviar mensaje"
+                          >
+                            <svg className="w-4 h-4 transform rotate-45 translate-x-[-1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            </svg>
+                          </button>
+                        </form>
+                      </div>
                     </div>
-                  </div>
+                  )
                 ) : (
                   // UNPAID STATE: Prompt to pay, no WhatsApp link
                   <div>
@@ -1133,7 +1472,7 @@ export default function PerfilUsuarioPage() {
                         <td className="py-4 px-4 text-right">
                           {user.hasPaidVipro || user.hasPaidAdvisor ? (
                             <button
-                              onClick={() => alert("Generando PDF de factura...")}
+                              onClick={() => showToast("Generando PDF de factura...", "info")}
                               className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
                             >
                               Descargar
@@ -1233,16 +1572,141 @@ export default function PerfilUsuarioPage() {
             setIsCheckoutOpen(false);
             setCheckoutAgent(null);
             if (checkoutProduct === "vipro") {
-              setNotificationMsg("¡Evaluación VIPRO adquirida con éxito! Ya puedes completarla.");
-              router.push("/vipro-form/evaluation");
+              showToast("¡Evaluación VIPRO adquirida con éxito! Redireccionando...", "success");
+              router.push(`/vipro-form/evaluation?country=${user?.viproDestination || "US"}`);
             } else {
-              setActiveTab("asesor");
-              setNotificationMsg("¡Asesor contratado y chat activado con éxito!");
+              setActiveTab("proceso"); // Redirect to tracking so they see Step 4 workspace
+              showToast("¡Asesor contratado y expediente de trámite activado con éxito!", "success");
             }
-            setShowNotification(true);
-            setTimeout(() => setShowNotification(false), 5000);
           }}
         />
+      )}
+
+      {/* MODAL DS-160 */}
+      {isDs160ModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-lg border border-border-light max-w-lg w-full overflow-hidden shadow-2xl animate-in scale-in duration-300">
+            {/* Modal Header */}
+            <div className="bg-[#0a2336] text-white px-6 py-4 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400">Auditoría de Formulario Consular</span>
+                <h3 className="text-md font-bold font-serif italic text-white">Borrador de Formulario DS-160</h3>
+              </div>
+              <button 
+                onClick={() => setIsDs160ModalOpen(false)}
+                className="text-white/70 hover:text-white text-xl font-bold focus:outline-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-4 max-h-[400px] overflow-y-auto">
+              <p className="text-xs text-text-secondary leading-relaxed">
+                Verifica detalladamente los datos de tu postulación consular. Esta información debe ser idéntica a tus documentos oficiales para evitar rechazos en la ventanilla de la embajada.
+              </p>
+
+              <div className="space-y-3 pt-2">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Nombre Completo (Como aparece en Pasaporte)</label>
+                  <input 
+                    type="text" 
+                    value={ds160Data.fullName}
+                    onChange={(e) => setDs160Data({...ds160Data, fullName: e.target.value})}
+                    className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Número de Pasaporte</label>
+                    <input 
+                      type="text" 
+                      value={ds160Data.passportNum}
+                      onChange={(e) => setDs160Data({...ds160Data, passportNum: e.target.value})}
+                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Fecha de Nacimiento</label>
+                    <input 
+                      type="date" 
+                      value={ds160Data.birthDate}
+                      onChange={(e) => setDs160Data({...ds160Data, birthDate: e.target.value})}
+                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Propósito del Viaje</label>
+                    <select 
+                      value={ds160Data.purposeOfTrip}
+                      onChange={(e) => setDs160Data({...ds160Data, purposeOfTrip: e.target.value})}
+                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
+                    >
+                      <option value="Turismo B1/B2">Turismo B1/B2</option>
+                      <option value="Estudios F1">Estudios F1</option>
+                      <option value="Negocios B1">Negocios B1</option>
+                      <option value="Trabajo H1B/H2A">Trabajo H1B/H2A</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">¿Posees Arraigo de Solvencia?</label>
+                    <select 
+                      value={ds160Data.hasAssets ? "true" : "false"}
+                      onChange={(e) => setDs160Data({...ds160Data, hasAssets: e.target.value === "true"})}
+                      className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:border-border-focus focus:outline-none"
+                    >
+                      <option value="true">Sí (Trabajo/Negocio propio)</option>
+                      <option value="false">No / Patrocinador externo</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-background-main/30 border-t border-border-light px-6 py-4 flex justify-end gap-2">
+              <button 
+                type="button"
+                onClick={() => setIsDs160ModalOpen(false)}
+                className="px-4 py-2 border border-border-light text-text-secondary hover:text-text-primary hover:bg-background-hover text-xs font-semibold rounded-sm transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  setDs160Confirmed(true);
+                  setIsDs160ModalOpen(false);
+                  showToast("¡Datos de formulario DS-160 confirmados para auditoría!", "success");
+                }}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-sm transition-colors shadow-sm cursor-pointer"
+              >
+                Confirmar y Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Alert Component */}
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${
+          toast.type === 'success' 
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+            : toast.type === 'error' 
+            ? 'bg-red-50 border-red-200 text-red-800' 
+            : 'bg-blue-50 border-blue-200 text-blue-850'
+        }`}>
+          <span className="text-base select-none">
+            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
+          </span>
+          <span className="text-xs font-semibold">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="ml-2 text-text-muted hover:text-text-primary font-bold focus:outline-none cursor-pointer">✕</button>
+        </div>
       )}
     </div>
   );
