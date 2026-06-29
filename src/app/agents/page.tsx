@@ -44,16 +44,30 @@ export default function AgentesPage() {
   const [checkoutAgent, setCheckoutAgent] = useState<Agent | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
+
   const handleHireAgent = (agent: Agent) => {
     if (!user) {
-      alert("Por favor, inicia sesión para poder contratar a este asesor.");
-      router.push("/auth/signin");
+      showToast("Por favor, inicia sesión para poder contratar a este asesor.", "info");
+      setTimeout(() => {
+        router.push("/auth/signin");
+      }, 1500);
       return;
     }
     
     if (user.hasPaidAdvisor) {
-      alert("Ya tienes contratada una asesoría activa. Redirigiendo a tu chat...");
-      router.push("/profile?tab=asesor");
+      showToast("Ya tienes contratada una asesoría activa. Redirigiendo a tu chat...", "info");
+      setTimeout(() => {
+        router.push("/profile?tab=asesor");
+      }, 1500);
       return;
     }
 
@@ -575,6 +589,21 @@ export default function AgentesPage() {
             router.push("/profile?tab=asesor");
           }}
         />
+      )}
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${
+          toast.type === 'success' 
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+            : toast.type === 'error' 
+            ? 'bg-red-50 border-red-200 text-red-800' 
+            : 'bg-blue-50 border-blue-200 text-blue-850'
+        }`}>
+          <span className="text-base select-none">
+            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
+          </span>
+          <span className="text-xs font-semibold">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="ml-2 text-text-muted hover:text-text-primary font-bold focus:outline-none cursor-pointer">✕</button>
+        </div>
       )}
     </div>
   );

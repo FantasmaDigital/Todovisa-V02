@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import supabase from "@/app/lib/supabase";
 
 interface FormData {
   fullName: string;
@@ -22,20 +23,35 @@ interface FormData {
 
 export default function AgentApplyPage() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState<FormData>({
-    fullName: "",
-    email: "",
-    phone: "",
-    countryResidence: "",
-    experienceYears: "",
-    linkedin: "",
-    specialties: [],
-    targetCountries: [],
-    languages: [],
-    biography: "",
-    termsAccepted: false,
+  const [step, setStep] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent_apply_step");
+      return saved ? parseInt(saved, 10) : 1;
+    }
+    return 1;
   });
+
+  const [formData, setFormData] = useState<FormData>(() => {
+    const defaultData = {
+      fullName: "",
+      email: "",
+      phone: "",
+      countryResidence: "",
+      experienceYears: "",
+      linkedin: "",
+      specialties: [],
+      targetCountries: [],
+      languages: [],
+      biography: "",
+      termsAccepted: false,
+    };
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent_apply_form_data");
+      return saved ? JSON.parse(saved) : defaultData;
+    }
+    return defaultData;
+  });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -44,14 +60,189 @@ export default function AgentApplyPage() {
 
   // Document uploads: key -> { name, progress }
   type DocFile = { name: string; progress: number | null };
-  const [docs, setDocs] = useState<Record<string, DocFile | null>>({
-    dui: null,
-    certificacion: null,
-    antecedentes: null,
-    domicilio: null,
-    titulo: null,
-    cv: null,
+  const [docs, setDocs] = useState<Record<string, DocFile | null>>(() => {
+    const defaultDocs = {
+      dui: null,
+      certificacion: null,
+      antecedentes: null,
+      domicilio: null,
+      titulo: null,
+      cv: null,
+    };
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent_apply_docs");
+      return saved ? JSON.parse(saved) : defaultDocs;
+    }
+    return defaultDocs;
   });
+
+  const [progressRestored, setProgressRestored] = useState(false);
+
+  // Auto-save form progress to local storage
+  useEffect(() => {
+    if (typeof window !== "undefined" && !isSubmitted) {
+      localStorage.setItem("agent_apply_form_data", JSON.stringify(formData));
+      localStorage.setItem("agent_apply_step", String(step));
+      localStorage.setItem("agent_apply_docs", JSON.stringify(docs));
+    }
+  }, [formData, step, docs, isSubmitted]);
+
+  // Show status banner if progress was restored
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedStep = localStorage.getItem("agent_apply_step");
+      const savedForm = localStorage.getItem("agent_apply_form_data");
+      if (savedStep || savedForm) {
+        setProgressRestored(true);
+      }
+    }
+  }, []);
+
+  const handleRestartApplication = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("agent_apply_form_data");
+      localStorage.removeItem("agent_apply_step");
+      localStorage.removeItem("agent_apply_docs");
+    }
+    setFormData({
+      fullName: "",
+      email: "",
+      phone: "",
+      countryResidence: "",
+      experienceYears: "",
+      linkedin: "",
+      specialties: [],
+      targetCountries: [],
+      languages: [],
+      biography: "",
+      termsAccepted: false,
+    });
+    setDocs({
+      dui: null,
+      certificacion: null,
+      antecedentes: null,
+      domicilio: null,
+      titulo: null,
+      cv: null,
+    });
+    setStep(1);
+    setProgressRestored(false);
+  };
+
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4500);
+  };
+
+  const saveDraftToSupabase = async (updatedData: FormData, updatedDocs: any, targetStep: number) => {
+    if (!updatedData.email || !updatedData.fullName) return;
+
+    const draftId = applicationId || "TDA-DRAFT-" + Math.floor(100000 + Math.random() * 900000);
+    if (!applicationId) {
+      setApplicationId(draftId);
+    }
+
+    try {
+      const { error } = await supabase.from("agent_applications").upsert({
+        application_id: draftId,
+        full_name: updatedData.fullName,
+        email: updatedData.email,
+        phone: updatedData.phone || "",
+        country_residence: updatedData.countryResidence || "",
+        experience_years: updatedData.experienceYears || "1",
+        linkedin: updatedData.linkedin || "",
+        specialties: updatedData.specialties || [],
+        target_countries: updatedData.targetCountries || [],
+        languages: updatedData.languages || [],
+        biography: updatedData.biography || "",
+        terms_accepted: updatedData.termsAccepted || false,
+        status: "draft",
+        documents: {
+          dui: updatedDocs.dui?.name || null,
+          certificacion: updatedDocs.certificacion?.name || null,
+          antecedentes: updatedDocs.antecedentes?.name || null,
+          domicilio: updatedDocs.domicilio?.name || null,
+          titulo: updatedDocs.titulo?.name || null,
+          cv: updatedDocs.cv?.name || null,
+          last_saved_step: targetStep,
+        }
+      }, { onConflict: "email" });
+
+      if (error) {
+        console.warn("Could not auto-save draft to Supabase:", error.message);
+      } else {
+        console.log("Auto-saved draft progress to Supabase.");
+      }
+    } catch (err) {
+      console.error("Failed to auto-save draft:", err);
+    }
+  };
+
+  const checkAndLoadDraft = async (email: string) => {
+    if (!email.trim() || !/\S+@\S+\.\S+/.test(email)) return true;
+
+    try {
+      const { data, error } = await supabase
+        .from("agent_applications")
+        .select("*")
+        .eq("email", email)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        console.warn("Error checking draft:", error.message);
+        return true;
+      }
+
+      if (data) {
+        if (data.status === "draft") {
+          setFormData({
+            fullName: data.full_name,
+            email: data.email,
+            phone: data.phone,
+            countryResidence: data.country_residence,
+            experienceYears: data.experience_years,
+            linkedin: data.linkedin || "",
+            specialties: data.specialties || [],
+            targetCountries: data.target_countries || [],
+            languages: data.languages || [],
+            biography: data.biography || "",
+            termsAccepted: data.terms_accepted || false,
+          });
+
+          const dbDocs = data.documents || {};
+          setDocs({
+            dui: dbDocs.dui ? { name: dbDocs.dui, progress: null } : null,
+            certificacion: dbDocs.certificacion ? { name: dbDocs.certificacion, progress: null } : null,
+            antecedentes: dbDocs.antecedentes ? { name: dbDocs.antecedentes, progress: null } : null,
+            domicilio: dbDocs.domicilio ? { name: dbDocs.domicilio, progress: null } : null,
+            titulo: dbDocs.titulo ? { name: dbDocs.titulo, progress: null } : null,
+            cv: dbDocs.cv ? { name: dbDocs.cv, progress: null } : null,
+          });
+
+          const lastSavedStep = dbDocs.last_saved_step || 3;
+          setStep(lastSavedStep);
+          setApplicationId(data.application_id);
+          setProgressRestored(true);
+
+          showToast("Hemos recuperado tu postulación en borrador guardada en la base de datos.", "info");
+          return false; // Loaded draft, do not auto-advance to step 3 in the same click
+        } else {
+          setErrors((prev) => ({
+            ...prev,
+            email: `Ya existe una postulación activa o completada (${data.status}) vinculada a este correo.`,
+          }));
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error("Error loading draft:", err);
+    }
+    return true;
+  };
 
   const handleDocUpload = (key: string, file: File) => {
     setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 0 } }));
@@ -61,14 +252,26 @@ export default function AgentApplyPage() {
       p += 20;
       if (p >= 100) {
         clearInterval(iv);
-        setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null } }));
+        setDocs((prev) => {
+          const nextDocs = { ...prev, [key]: { name: file.name, progress: null } };
+          if (step > 2) {
+            saveDraftToSupabase(formData, nextDocs, step);
+          }
+          return nextDocs;
+        });
       } else {
         setDocs((prev) => (prev[key] ? { ...prev, [key]: { name: prev[key]!.name, progress: p } } : prev));
       }
     }, 120);
   };
 
-  const removeDoc = (key: string) => setDocs((prev) => ({ ...prev, [key]: null }));
+  const removeDoc = (key: string) => setDocs((prev) => {
+    const nextDocs = { ...prev, [key]: null };
+    if (step > 2) {
+      saveDraftToSupabase(formData, nextDocs, step);
+    }
+    return nextDocs;
+  });
 
   const countriesList = ["Estados Unidos", "Canadá", "México", "Reino Unido", "Australia", "España", "Otro"];
   const specialtiesList = ["Visas de Turista", "Visas de Estudiante", "Visas de Trabajo", "Residencia Permanente", "Visas de Negocios / Inversión", "Renovación de Visa"];
@@ -135,32 +338,125 @@ export default function AgentApplyPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const nextStep = () => {
-    if (validateStep()) {
+  const nextStep = async () => {
+    if (step === 2) {
+      if (!validateStep()) return;
+      setIsSubmitting(true);
+      const canProceed = await checkAndLoadDraft(formData.email);
+      setIsSubmitting(false);
+      if (!canProceed) return;
+      
       setStep((prev) => prev + 1);
+      saveDraftToSupabase(formData, docs, 3);
+    } else {
+      if (validateStep()) {
+        const next = step + 1;
+        setStep(next);
+        if (step > 2) {
+          saveDraftToSupabase(formData, docs, next);
+        }
+      }
     }
   };
 
   const prevStep = () => {
-    setStep((prev) => prev - 1);
+    const prev = step - 1;
+    setStep(prev);
+    if (step > 2) {
+      saveDraftToSupabase(formData, docs, prev);
+    }
   };
 
 
   // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateStep()) return;
 
     setIsSubmitting(true);
+    setErrors({});
 
-    // Simulate database insertion and processing
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setIsSubmitted(true);
-      // Generate a dynamic app ID
-      const randomId = "TDA-" + Math.floor(100000 + Math.random() * 900000);
+    const randomId = applicationId || "TDA-" + Math.floor(100000 + Math.random() * 900000);
+
+    try {
+      const { error } = await supabase.from("agent_applications").upsert({
+        application_id: randomId,
+        full_name: formData.fullName,
+        email: formData.email,
+        phone: formData.phone,
+        country_residence: formData.countryResidence,
+        experience_years: formData.experienceYears,
+        linkedin: formData.linkedin,
+        specialties: formData.specialties,
+        target_countries: formData.targetCountries,
+        languages: formData.languages,
+        biography: formData.biography,
+        terms_accepted: formData.termsAccepted,
+        status: "pending",
+        documents: {
+          dui: docs.dui?.name || null,
+          certificacion: docs.certificacion?.name || null,
+          antecedentes: docs.antecedentes?.name || null,
+          domicilio: docs.domicilio?.name || null,
+          titulo: docs.titulo?.name || null,
+          cv: docs.cv?.name || null,
+        }
+      }, { onConflict: "email" });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("agent_apply_form_data");
+        localStorage.removeItem("agent_apply_step");
+        localStorage.removeItem("agent_apply_docs");
+      }
       setApplicationId(randomId);
-    }, 2000);
+      setIsSubmitted(true);
+    } catch (err: any) {
+      console.error("Error submitting agent application:", err);
+      const isOffline = err.message?.includes('fetch failed') || err.message?.includes('ENOTFOUND') || err.message?.includes('fetch');
+      if (isOffline) {
+        console.warn("⚠️ Supabase no disponible. Guardando postulación localmente.");
+        const localData = {
+          application_id: randomId,
+          full_name: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          country_residence: formData.countryResidence,
+          experience_years: formData.experienceYears,
+          linkedin: formData.linkedin,
+          specialties: formData.specialties,
+          target_countries: formData.targetCountries,
+          languages: formData.languages,
+          biography: formData.biography,
+          terms_accepted: formData.termsAccepted,
+          status: "pending",
+          documents: {
+            dui: docs.dui?.name || null,
+            certificacion: docs.certificacion?.name || null,
+            antecedentes: docs.antecedentes?.name || null,
+            domicilio: docs.domicilio?.name || null,
+            titulo: docs.titulo?.name || null,
+            cv: docs.cv?.name || null,
+          },
+          created_at: new Date().toISOString()
+        };
+        localStorage.setItem(`agent_app_${randomId}`, JSON.stringify(localData));
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("agent_apply_form_data");
+          localStorage.removeItem("agent_apply_step");
+          localStorage.removeItem("agent_apply_docs");
+        }
+        setApplicationId(randomId);
+        setIsSubmitted(true);
+      } else {
+        setErrors({ submit: err.message || "Error al enviar la postulación. Por favor intente de nuevo." });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -178,6 +474,22 @@ export default function AgentApplyPage() {
                 Completa el proceso de postulación en 6 sencillos pasos para unirte a nuestra red nacional de expertos.
               </p>
             </div>
+
+            {progressRestored && (
+              <div className="bg-brand-light/35 border border-brand-primary/20 rounded-md p-4 mb-8 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top duration-300 max-w-xl mx-auto">
+                <div className="flex items-center gap-2 text-xs font-semibold text-brand-primary">
+                  <span className="text-sm">🔄</span>
+                  <span>Se ha restaurado tu progreso guardado automáticamente hasta el Paso {step}.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRestartApplication}
+                  className="text-xs text-brand-primary hover:underline font-bold cursor-pointer border-0 bg-transparent"
+                >
+                  Empezar de Nuevo
+                </button>
+              </div>
+            )}
 
             {/* Stepper Progress Bar */}
             <div className="mb-10">
@@ -519,7 +831,7 @@ export default function AgentApplyPage() {
 
                   {([
                     { key: "dui", label: "Documento Único de Identidad (DUI / INE / Pasaporte)", required: true, hint: "Página principal con foto y datos visibles" },
-                    { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. IATA, RCIC, CSIC, consulado acreditante" },
+                    { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. RCIC, CSIC, consulado acreditante" },
                     { key: "antecedentes", label: "Carta de No Antecedentes Penales", required: false, hint: "Emitida en los últimos 6 meses" },
                     { key: "domicilio", label: "Comprobante de Domicilio", required: false, hint: "Recibo de luz, agua o estado de cuenta (máx. 3 meses)" },
                     { key: "titulo", label: "Título o Diploma Profesional", required: false, hint: "Derecho, Relaciones Internacionales, Administración, etc." },
@@ -659,6 +971,12 @@ export default function AgentApplyPage() {
                 </div>
               )}
 
+              {errors.submit && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-sm text-sm">
+                  ⚠️ {errors.submit}
+                </div>
+              )}
+
               {/* Navigation Action Buttons */}
               <div className="flex justify-between pt-6 border-t border-border-light">
                 {step > 1 ? (
@@ -736,20 +1054,18 @@ export default function AgentApplyPage() {
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
               <Link
+                href={`/agents/portal?id=${applicationId}`}
+                className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 text-white text-xs font-bold rounded-sm hover:bg-emerald-700 transition-colors text-center inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Ver Contrato y Estado</span>
+                <span>&rarr;</span>
+              </Link>
+              <Link
                 href="/"
-                className="w-full sm:w-auto px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors text-center"
+                className="w-full sm:w-auto px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors text-center cursor-pointer"
               >
                 Volver al Inicio
               </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  alert("Detalles de postulación descargados en formato digital.");
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 border border-border-light text-text-secondary text-xs font-bold rounded-sm hover:bg-background-hover transition-colors text-center"
-              >
-                Descargar Comprobante
-              </button>
             </div>
           </div>
         )}
@@ -865,6 +1181,13 @@ export default function AgentApplyPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {toast && (
+        <div className={`fixed bottom-5 right-5 z-[200] px-4 py-3 rounded shadow-md text-white font-semibold text-xs transition-all duration-300 animate-in slide-in-from-bottom-5 ${
+          toast.type === "success" ? "bg-emerald-600" : toast.type === "error" ? "bg-rose-600" : "bg-blue-600"
+        }`}>
+          {toast.message}
         </div>
       )}
     </div>

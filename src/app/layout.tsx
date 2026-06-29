@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "TodoVisa - Tu visa sin estrés, guiada por expertos",
-  description: "Simplificamos tu proceso de visado con tecnología, asesoría experta y el respaldo de agentes certificados IATA. Completa tu evaluación inicial hoy.",
+  description: "Simplificamos tu proceso de visado con tecnología, asesoría experta y el respaldo de agentes certificados. Completa tu evaluación inicial hoy.",
   icons: {
     icon: "/todovisa.ico",
     shortcut: "/todovisa.ico",
