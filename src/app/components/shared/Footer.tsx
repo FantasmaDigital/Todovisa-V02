@@ -4,10 +4,10 @@ import Image from "next/image";
 
 const footerLinks = {
   Servicios: [
-    { label: "Asesoría Virtual", href: "#asesoria-virtual" },
-    { label: "Evaluación VIPRO", href: "#evaluacion-vipro" },
-    { label: "Cita Presencial", href: "#cita-presencial" },
-    { label: "Cómo Funciona", href: "#como-funciona" },
+    { label: "Asesoría Virtual", href: "/citas" },
+    { label: "Evaluación VIPRO", href: "/vipro-form" },
+    { label: "Red de Agentes", href: "/agents" },
+    { label: "Cómo Funciona", href: "/#como-funciona" },
   ],
   Compañía: [
     { label: "Sobre Nosotros", href: "#" },

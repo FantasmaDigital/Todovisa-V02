@@ -12,16 +12,16 @@ const processOptions = {
     ),
     steps: [
       {
-        title: "Llena tu formulario VIPRO",
-        description: "Completa nuestra evaluación digital con tus datos y antecedentes para analizar tu caso a profundidad."
+        title: "Elige tu Asesor Certificado",
+        description: "Explora nuestra red de agentes y agencias B2B para seleccionar al experto ideal para tu tipo de visado."
       },
       {
-        title: "Agenda cita con un agente",
-        description: "Elige el horario ideal para revisar tu expediente junto a un experto en perfilamiento consular."
+        title: "Asesoría y Llenado Guiado",
+        description: "Agenda tus sesiones virtuales y completa tu formulario oficial DS-160 con acompañamiento experto paso a paso."
       },
       {
-        title: "Prepárate para tu visa",
-        description: "Realiza simulacros de entrevista y organiza tu documentación para presentarte a la embajada con total seguridad."
+        title: "Simulacro y Preparación",
+        description: "Realiza simulacros de entrevista consular y organiza tu documentación crítica para presentarte con total seguridad."
       }
     ]
   },
@@ -33,7 +33,7 @@ const processOptions = {
     steps: [
       {
         title: "Llena tu formulario VIPRO",
-        description: "Proporciona tu información básica de viaje para un escaneo rápido de tus probabilidades de aprobación."
+        description: "Completa nuestra evaluación digital con tus datos y antecedentes para analizar tu caso a profundidad."
       },
       {
         title: "Recibe consejos de mejora",
@@ -42,26 +42,6 @@ const processOptions = {
       {
         title: "Optimiza tu perfil",
         description: "Aplica nuestras recomendaciones clave antes de iniciar tu proceso formal de solicitud."
-      }
-    ]
-  },
-  presencial: {
-    title: "Asesoría Presencial",
-    icon: (
-      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-    ),
-    steps: [
-      {
-        title: "Visítanos en oficina",
-        description: "Acércate a nuestras instalaciones para discutir tu caso cara a cara y resolver cualquier duda."
-      },
-      {
-        title: "Diagnóstico personalizado",
-        description: "Revisaremos físicamente tus comprobantes y diseñaremos la estrategia más fuerte para tu perfil."
-      },
-      {
-        title: "Plan de acción guiado",
-        description: "Estableceremos un cronograma claro con los pasos exactos a seguir hasta el día de tu cita consular."
       }
     ]
   }
@@ -78,7 +58,7 @@ export const ProcessSection = () => {
     servicioCompleto: {
       price: user?.hasPaidVipro ? "$112.50 USD" : "$150.00 USD",
       promo: user?.hasPaidVipro ? "¡Descuento VIPRO del 25% aplicado!" : "Obtén acompañamiento integral",
-      description: "La solución completa que incluye la evaluación diagnóstica VIPRO, el llenado del formulario DS-160 y simulacros de entrevista con un asesor asignado.",
+      description: "La solución completa que incluye el llenado guiado de tu formulario oficial DS-160, asesoramiento integral y simulacros de entrevista virtual con un asesor asignado.",
       buttonText: "Explorar Agentes y Contratar",
       action: () => router.push("/agents")
     },
@@ -88,13 +68,6 @@ export const ProcessSection = () => {
       description: "Accede de forma independiente a la Evaluación Diagnóstica VIPRO para obtener un escaneo automatizado de tus fortalezas y debilidades perfiladas.",
       buttonText: "Adquirir Evaluación Express",
       action: () => router.push("/vipro-form")
-    },
-    presencial: {
-      price: "Cita Presencial",
-      promo: "Visítanos en nuestras oficinas físicas",
-      description: "Reunión cara a cara en Polanco (CDMX), Providencia (GDL), San Pedro (MTY) o San Salvador con un asesor certificado.",
-      buttonText: "Agendar Cita Presencial",
-      action: () => router.push("/citas")
     }
   };
 

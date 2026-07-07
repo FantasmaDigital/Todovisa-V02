@@ -24,8 +24,8 @@ function ViproFormContent() {
 
     useEffect(() => {
         const checkActiveProgress = async () => {
-            // If user is not logged in or has not paid, do not show active progress
-            if (!user || (!user.hasPaidVipro && !user.hasPaidAdvisor)) {
+            // If user is not logged in or has not paid VIPRO, do not show active progress
+            if (!user || !user.hasPaidVipro) {
                 setActiveProgressCountry(null);
                 setIsLoadingProgress(false);
                 return;
@@ -117,8 +117,11 @@ function ViproFormContent() {
             return;
         }
 
-        if (user.hasPaidVipro || user.hasPaidAdvisor) {
+        if (user.hasPaidVipro) {
             router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`);
+        } else if (user.hasPaidAdvisor) {
+            alert("Cuentas con el Servicio Completo. No requieres realizar la Evaluación Express VIPRO ya que tu asesor asignado se encargará del llenado oficial y asesoría personalizada. Serás redirigido al Portal de Asesoría.");
+            router.push("/agents/portal");
         } else {
             setIsCheckoutOpen(true);
         }

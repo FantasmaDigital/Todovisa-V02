@@ -70,6 +70,7 @@ function AgentPortalContent() {
   const [touristCases, setTouristCases] = useState(6);
   const [studentCases, setStudentCases] = useState(3);
   const [simRating, setSimRating] = useState(4.8);
+  const [b2bAgentsCount, setB2bAgentsCount] = useState(3);
 
   // Onboarding Checklist
   const [onboardingSteps, setOnboardingSteps] = useState({
@@ -83,10 +84,84 @@ function AgentPortalContent() {
     setLoading(true);
     setError(null);
     try {
+      const cleanId = appId.trim().toUpperCase();
+
+      // INTERRUPTOR B2B MOCK
+      if (cleanId.startsWith("B2B-")) {
+        const mockAgency: AgentApplication = {
+          id: "agency-b2b-volamos",
+          application_id: cleanId,
+          full_name: cleanId === "B2B-MUNDO" ? "Mundo Joven B2B S.A." : "Volamos Viajes S.A. de C.V.",
+          email: cleanId === "B2B-MUNDO" ? "b2b@mundojoven.com" : "reservas1@volamosviajes.com",
+          phone: "+503 7020-0976",
+          country_residence: "El Salvador",
+          experience_years: "12",
+          linkedin: "https://linkedin.com/company/volamosviajes",
+          specialties: ["Turismo", "Estudio", "Negocios"],
+          target_countries: ["Estados Unidos", "Canadá", "Inglaterra"],
+          languages: ["Español", "Inglés"],
+          biography: "Agencia de viajes corporativa certificada TodoVisa para el asesoramiento B2B de visados.",
+          status: "approved",
+          terms_accepted: false,
+          documents: {},
+          is_local: true,
+          created_at: new Date().toISOString()
+        };
+
+        const localSave = localStorage.getItem(`agent_app_${cleanId}`);
+        if (localSave) {
+          const parsed = JSON.parse(localSave);
+          setAgent(parsed);
+          if (parsed.signature_name) setSignatureName(parsed.signature_name);
+        } else {
+          setAgent(mockAgency);
+          localStorage.setItem(`agent_app_${cleanId}`, JSON.stringify(mockAgency));
+          if (mockAgency.full_name) setSignatureName(mockAgency.full_name);
+        }
+        setLoading(false);
+        return;
+      }
+
+      // INTERRUPTOR TERCERIZADO MOCK
+      if (cleanId === "TDA-SOFIA7") {
+        const mockSofia: AgentApplication = {
+          id: "agent-1",
+          application_id: "TDA-SOFIA7",
+          full_name: "Lic. Sofía Rodríguez",
+          email: "sofia.rodriguez@todovisa.com",
+          phone: "+503 7890-1234",
+          country_residence: "México",
+          experience_years: "7",
+          linkedin: "https://linkedin.com/in/sofiarodriguez",
+          specialties: ["Turismo", "Estudio", "Negocios"],
+          target_countries: ["Estados Unidos", "Canadá"],
+          languages: ["Español", "Inglés"],
+          biography: "Asesora experta en perfiles consulares complejos. Especialista en la red TodoVisa con más de 500 casos aprobados.",
+          status: "approved",
+          terms_accepted: false,
+          documents: {},
+          is_local: true,
+          created_at: new Date().toISOString()
+        };
+
+        const localSave = localStorage.getItem(`agent_app_${cleanId}`);
+        if (localSave) {
+          const parsed = JSON.parse(localSave);
+          setAgent(parsed);
+          if (parsed.signature_name) setSignatureName(parsed.signature_name);
+        } else {
+          setAgent(mockSofia);
+          localStorage.setItem(`agent_app_${cleanId}`, JSON.stringify(mockSofia));
+          if (mockSofia.full_name) setSignatureName(mockSofia.full_name);
+        }
+        setLoading(false);
+        return;
+      }
+
       const { data, error: fetchErr } = await supabase
         .from("agent_applications")
         .select("*")
-        .eq("application_id", appId.trim().toUpperCase())
+        .eq("application_id", cleanId)
         .single();
 
       if (fetchErr) {
@@ -230,8 +305,19 @@ function AgentPortalContent() {
   };
 
   // Simulator Math
-  const getCommissionRate = () => (simRating >= 4.8 ? 0.8 : 0.7);
-  const getGrossEarnings = () => touristCases * 150 + studentCases * 250;
+  const getCommissionRate = () => {
+    if (agent?.application_id?.startsWith("B2B-")) {
+      return simRating >= 4.8 ? 0.85 : 0.75;
+    }
+    return simRating >= 4.8 ? 0.80 : 0.70;
+  };
+  const getGrossEarnings = () => {
+    const cases = touristCases * 150 + studentCases * 250;
+    if (agent?.application_id?.startsWith("B2B-")) {
+      return cases * b2bAgentsCount;
+    }
+    return cases;
+  };
   const getAgentShare = () => getGrossEarnings() * getCommissionRate();
   const getPlatformFee = () => getAgentShare() * 0.05;
   const getNetEarnings = () => getAgentShare() - getPlatformFee();
@@ -273,28 +359,90 @@ function AgentPortalContent() {
         )}
         {/* NO ID OR LOOKUP SCREEN */}
         {!idParam && (
-          <div className="max-w-md mx-auto w-full bg-white border border-border-light rounded-sm p-8 text-center my-10 shadow-sm">
-            <span className="text-4xl">📄</span>
-            <h3 className="text-lg font-bold text-text-primary mt-4 mb-2">Consultar Estado de Contrato</h3>
-            <p className="text-xs text-text-secondary mb-6 leading-relaxed">
-              Ingresa el Folio de tu postulación (ej. TDA-123456) para ver tu estado, firmar el acuerdo o abrir tu panel.
-            </p>
+          <div className="max-w-xl mx-auto w-full bg-white border border-border-light rounded-xl p-8 my-10 shadow-lg flex flex-col gap-6 animate-in fade-in duration-300">
+            <div className="text-center">
+              <span className="text-5xl">📄</span>
+              <h3 className="text-xl font-bold font-serif italic text-text-primary mt-4 mb-2">Portal de Socios TodoVisa</h3>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                Accede a tu cuenta de socio de la red TodoVisa. Introduce tu Folio de Postulación para firmar contratos, simular ganancias y ver tu estado.
+              </p>
+            </div>
+
+            {/* Selector de Tipo de Socio */}
+            <div className="flex bg-background-main p-1.5 rounded-lg border border-border-light">
+              <button
+                type="button"
+                onClick={() => {
+                  setLookupId("TDA-SOFIA7");
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                  lookupId.startsWith("TDA-") || !lookupId.startsWith("B2B-")
+                    ? "bg-white text-brand-primary shadow-sm border border-border-light/50 font-bold"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                💼 Agente Tercerizado
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLookupId("B2B-VOLAMOS");
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                  lookupId.startsWith("B2B-")
+                    ? "bg-white text-brand-primary shadow-sm border border-border-light/50 font-bold"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                🏢 Agencia de Viajes B2B
+              </button>
+            </div>
+
             <form onSubmit={handleLookupSubmit} className="space-y-4">
-              <input
-                type="text"
-                value={lookupId}
-                onChange={(e) => setLookupId(e.target.value)}
-                placeholder="TDA-XXXXXX"
-                className="w-full text-center px-4 py-3 bg-background-main border border-border-light rounded-sm text-sm font-mono focus:border-border-focus focus:outline-none transition-all placeholder:text-text-muted"
-                required
-              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Folio de Postulación</label>
+                <input
+                  type="text"
+                  value={lookupId}
+                  onChange={(e) => setLookupId(e.target.value)}
+                  placeholder="TDA-XXXXXX o B2B-XXXXXX"
+                  className="w-full text-center px-4 py-3.5 bg-background-main border border-border-light rounded-lg text-base font-mono font-bold focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all placeholder:text-text-muted text-text-primary"
+                  required
+                />
+              </div>
               <button
                 type="submit"
-                className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer"
+                className="w-full py-3.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-md"
               >
-                Buscar Expediente
+                Ingresar al Portal de Socio →
               </button>
             </form>
+
+            <div className="bg-brand-light/35 border border-brand-primary/10 p-4 rounded-xl flex flex-col gap-2.5 text-xs text-text-secondary">
+              <p className="font-bold text-brand-primary">Códigos de prueba rápidos:</p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push("/agents/portal?id=TDA-SOFIA7");
+                  }}
+                  className="flex-1 py-2 px-3 border border-brand-primary/20 bg-white hover:bg-brand-light rounded-lg text-left text-[11px] font-medium text-text-primary cursor-pointer flex flex-col justify-between"
+                >
+                  <span className="text-brand-primary font-bold">💼 Agente Tercerizado</span>
+                  <span className="font-mono mt-1 font-bold text-gray-500">TDA-SOFIA7</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push("/agents/portal?id=B2B-VOLAMOS");
+                  }}
+                  className="flex-1 py-2 px-3 border border-brand-primary/20 bg-white hover:bg-brand-light rounded-lg text-left text-[11px] font-medium text-text-primary cursor-pointer flex flex-col justify-between"
+                >
+                  <span className="text-brand-primary font-bold">🏢 Agencia B2B Partner</span>
+                  <span className="font-mono mt-1 font-bold text-gray-500">B2B-VOLAMOS</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -402,13 +550,9 @@ function AgentPortalContent() {
                         <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Años de Experiencia</span>
                         <p>{agent.experience_years} Años</p>
                       </div>
-                      <div className="sm:col-span-2">
-                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Biografía Breve</span>
-                        <p className="leading-relaxed">{agent.biography}</p>
                       </div>
                     </div>
                   </div>
-                </div>
               )}
 
               {/* STATE 2: APPROVED / PENDING CONTRACT SIGNATURE */}
@@ -418,9 +562,15 @@ function AgentPortalContent() {
                   <div className="bg-emerald-50 border border-emerald-200 rounded-sm p-6 flex items-start gap-4">
                     <span className="text-2xl mt-0.5">🎉</span>
                     <div>
-                      <h4 className="font-bold text-emerald-800 text-sm">¡Postulación Aprobada con Éxito!</h4>
+                      <h4 className="font-bold text-emerald-800 text-sm">
+                        {agent.application_id.startsWith("B2B-") 
+                          ? "¡Alianza B2B Aprobada con Éxito!" 
+                          : "¡Postulación Aprobada con Éxito!"}
+                      </h4>
                       <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                        Felicidades, tu perfil ha superado las validaciones técnicas. Hemos redactado tu acuerdo comercial. Por favor, lee los términos del contrato comercial a continuación, proporciona tu firma electrónica digital y acéptalo para comenzar.
+                        {agent.application_id.startsWith("B2B-")
+                          ? "Felicidades, la alianza de distribución B2B ha sido validada. Hemos redactado tu acuerdo comercial corporativo. Por favor, lee los términos a continuación, proporciona la firma digital del representante legal y acéptalo para comenzar."
+                          : "Felicidades, tu perfil ha superado las validaciones técnicas. Hemos redactado tu acuerdo comercial. Por favor, lee los términos del contrato comercial a continuación, proporciona tu firma electrónica digital y acéptalo para comenzar."}
                       </p>
                     </div>
                   </div>
@@ -428,56 +578,92 @@ function AgentPortalContent() {
                   {/* The Contract Document */}
                   <div className="bg-white border border-border-light rounded-sm shadow-sm overflow-hidden flex flex-col">
                     <div className="bg-gray-50 border-b border-border-light px-6 py-4 flex items-center justify-between">
-                      <span className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono">CONTRATO_AGENTE_TODOVISA.pdf</span>
+                      <span className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono">
+                        {agent.application_id.startsWith("B2B-") 
+                          ? "ACUERDO_ALIANZA_DISTRIBUCION_B2B.pdf" 
+                          : "CONTRATO_AGENTE_TODOVISA.pdf"}
+                      </span>
                       <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold px-2 py-0.5 rounded">PENDIENTE DE FIRMA</span>
                     </div>
 
                     {/* Scrollable contract text */}
-                    <div className="p-6 md:p-8 max-h-[350px] overflow-y-auto space-y-6 text-xs text-text-secondary leading-relaxed bg-[#fafafa] border-b border-border-light font-mono scrollbar-thin">
-                      <h3 className="text-center font-bold text-text-primary text-sm uppercase tracking-wide">
-                        CONTRATO DE PRESTACIÓN DE SERVICIOS - AGENTE CONSULTOR INDEPENDIENTE
-                      </h3>
-                      
-                      <p>
-                        Conste por el presente documento el Contrato de Prestación de Servicios de Consultoría Migratoria Independiente (en adelante, el &quot;Acuerdo&quot;), celebrado entre:
-                      </p>
-                      <p>
-                        <strong>TodoVisa S.A. de C.V.</strong>, con domicilio en San Salvador, El Salvador (en adelante, &quot;La Plataforma&quot;); y el postulante cuyos datos de identidad se detallan en el Folio <strong>{agent.application_id}</strong> (en adelante, el &quot;Agente&quot;). Ambos denominados conjuntamente como las &quot;Partes&quot;.
-                      </p>
-
-                      <div>
-                        <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA PRIMERA: OBJETO DEL ACUERDO</h4>
+                    {agent.application_id.startsWith("B2B-") ? (
+                      <div className="p-6 md:p-8 max-h-[350px] overflow-y-auto space-y-6 text-xs text-text-secondary leading-relaxed bg-[#fafafa] border-b border-border-light font-mono scrollbar-thin text-left">
+                        <h3 className="text-center font-bold text-text-primary text-sm uppercase tracking-wide">
+                          CONTRATO DE ALIANZA COMERCIAL Y DISTRIBUCIÓN DE SERVICIOS - AGENCIAS B2B
+                        </h3>
                         <p>
-                          El Agente se une a la Red de Especialistas TodoVisa de manera independiente, obligándose a prestar servicios de orientación, revisión de expedientes, llenado digital de solicitudes de visa (ej. DS-160, VAF1A) y asesoramiento de simulacro de entrevista consular para los clientes asignados por La Plataforma.
+                          Conste por el presente documento el Contrato de Alianza Comercial y Distribución de Asesoría Consular B2B (en adelante, el "Acuerdo de Alianza"), celebrado entre:
                         </p>
-                      </div>
-
-                      <div>
-                        <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA SEGUNDA: RÉGIMEN FINANCIERO Y COMISIONES</h4>
                         <p>
-                          Las partes pactan de mutuo acuerdo la siguiente estructura de compensación económica:
+                          <strong>TodoVisa S.A. de C.V.</strong>, y la Agencia de Viajes socia cuyos datos se detallan en el Folio B2B <strong>{agent.application_id}</strong> (en adelante, la "Agencia").
                         </p>
-                        <ul className="list-disc pl-5 mt-1.5 space-y-1">
-                          <li><strong>Comisión Base (70%):</strong> El Agente percibirá el setenta por ciento (70%) neto de la tarifa de asesoría cobrada oficialmente al cliente a través de la pasarela de TodoVisa.</li>
-                          <li><strong>Bono de Excelencia (10% adicional):</strong> La Plataforma otorgará un bono extra del diez por ciento (10%), ascendiendo al ochenta por ciento (80%) total de comisión, cuando el Agente promedie una calificación de satisfacción de 4.8/5.0 estrellas en el mes.</li>
-                          <li><strong>Tarifa de Plataforma (5% retención):</strong> La Plataforma retendrá un cinco por ciento (5%) de la comisión del Agente para solventar costos operativos de facturación, pasarela de cobros segura, uso de servidores y herramientas de asistencia.</li>
-                        </ul>
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA PRIMERA: OBJETO DEL ACUERDO</h4>
+                          <p>
+                            La Agencia distribuirá el servicio premium de perfilamiento TodoVisa a través de su propia red de agentes de viajes corporativos, asignando a los asesores calificados de su equipo para llevar a cabo la revisión documental del cliente final.
+                          </p>
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA SEGUNDA: COMISIONES CORPORATIVAS B2B</h4>
+                          <p>
+                            La Agencia B2B percibirá una tasa de comisión del 75% neto sobre las ventas de asesoría consular procesadas. Adicionalmente, si el volumen consolidado de la Agencia supera los 15 expedientes exitosos al mes, se aplicará un Bono Corporativo del 10% adicional (total 85% de retribución neta).
+                          </p>
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA TERCERA: CONFIDENCIALIDAD DE CLIENTES B2B</h4>
+                          <p>
+                            Toda la información personal de los clientes captados por la Agencia y procesada en el portal es confidencial y no podrá ser compartida ni comercializada fuera del alcance de la solicitud de visado respectiva.
+                          </p>
+                        </div>
                       </div>
-
-                      <div>
-                        <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA TERCERA: MÉTODOS Y CICLO DE PAGO</h4>
+                    ) : (
+                      <div className="p-6 md:p-8 max-h-[350px] overflow-y-auto space-y-6 text-xs text-text-secondary leading-relaxed bg-[#fafafa] border-b border-border-light font-mono scrollbar-thin text-left">
+                        <h3 className="text-center font-bold text-text-primary text-sm uppercase tracking-wide">
+                          CONTRATO DE PRESTACIÓN DE SERVICIOS - AGENTE CONSULTOR INDEPENDIENTE
+                        </h3>
+                        
                         <p>
-                          Las comisiones correspondientes a los trámites marcados como &quot;Cerrados y Aprobados por el Cliente&quot; serán acumuladas semanalmente. TodoVisa efectuará el pago al Agente cada día <strong>Viernes hábil</strong> mediante transferencia bancaria (ACH) o el procesador de pagos registrado en su perfil.
+                          Conste por el presente documento el Contrato de Prestación de Servicios de Consultoría Migratoria Independiente (en adelante, el &quot;Acuerdo&quot;), celebrado entre:
                         </p>
-                      </div>
-
-                      <div>
-                        <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA CUARTA: CONFIDENCIALIDAD DE DATOS</h4>
                         <p>
-                          El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al trámite migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
+                          <strong>TodoVisa S.A. de C.V.</strong>, con domicilio en San Salvador, El Salvador (en adelante, &quot;La Plataforma&quot;); y el postulante cuyos datos de identidad se detallan en el Folio <strong>{agent.application_id}</strong> (en adelante, el &quot;Agente&quot;). Ambos denominados conjuntamente como las &quot;Partes&quot;.
                         </p>
+
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA PRIMERA: OBJETO DEL ACUERDO</h4>
+                          <p>
+                            El Agente se une a la Red de Especialistas TodoVisa de manera independiente, obligándose a prestar servicios de orientación, revisión de expedientes, llenado digital de solicitudes de visa (ej. DS-160, VAF1A) y asesoramiento de simulacro de entrevista consular para los clientes asignados por La Plataforma.
+                          </p>
+                        </div>
+
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA SEGUNDA: RÉGIMEN FINANCIERO Y COMISIONES</h4>
+                          <p>
+                            Las partes pactan de mutuo acuerdo la siguiente estructura de compensación económica:
+                          </p>
+                          <ul className="list-disc pl-5 mt-1.5 space-y-1">
+                            <li><strong>Comisión Base (70%):</strong> El Agente percibirá el setenta por ciento (70%) neto de la tarifa de asesoría cobrada oficialmente al cliente a través de la pasarela de TodoVisa.</li>
+                            <li><strong>Bono de Excelencia (10% adicional):</strong> La Plataforma otorgará un bono extra del diez por ciento (10%), ascendiendo al ochenta por ciento (80%) total de comisión, cuando el Agente promedie una calificación de satisfacción de 4.8/5.0 estrellas en el mes.</li>
+                            <li><strong>Tarifa de Plataforma (5% retención):</strong> La Plataforma retendrá un cinco por ciento (5%) de la comisión del Agente para solventar costos operativos de facturación, pasarela de cobros segura, uso de servidores y herramientas de asistencia.</li>
+                          </ul>
+                        </div>
+
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA TERCERA: MÉTODOS Y CICLO DE PAGO</h4>
+                          <p>
+                            Las comisiones correspondientes a los trámites marcados como &quot;Cerrados y Aprobados por el Cliente&quot; serán acumuladas semanalmente. TodoVisa efectuará el pago al Agente cada día <strong>Viernes hábil</strong> mediante transferencia bancaria (ACH) o el procesador de pagos registrado en su perfil.
+                          </p>
+                        </div>
+
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA CUARTA: CONFIDENCIALIDAD DE DATOS</h4>
+                          <p>
+                            El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al trámite migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Signature Form */}
                     <form onSubmit={signContract} className="p-6 space-y-5 bg-white">
@@ -489,15 +675,19 @@ function AgentPortalContent() {
                           onChange={(e) => setTermsChecked(e.target.checked)}
                           className="mt-1 w-4 h-4 border border-border-light text-brand-primary rounded-sm focus:ring-brand-primary"
                         />
-                        <label htmlFor="terms" className="text-xs text-text-secondary leading-normal cursor-pointer select-none">
-                          He leído en su totalidad y de conformidad, <strong>acepto los términos comerciales</strong>, las comisiones financieras del 70% (con posibilidad de 80% por bono de excelencia) y las cláusulas penales por incumplimiento de confidencialidad de datos.
+                        <label htmlFor="terms" className="text-xs text-text-secondary leading-normal cursor-pointer select-none text-left">
+                          {agent.application_id.startsWith("B2B-") 
+                            ? <span>Acepto los términos de alianza comercial B2B, las comisiones financieras corporativas del 75% al 85% y las cláusulas penales por filtración de datos de clientes.</span>
+                            : <span>He leído en su totalidad y de conformidad, <strong>acepto los términos comerciales</strong>, las comisiones financieras del 70% (con posibilidad de 80% por bono de excelencia) y las cláusulas penales por incumplimiento de confidencialidad de datos.</span>}
                         </label>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end pt-2">
                         <div>
-                          <label htmlFor="signature-input" className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                            Firma Legal Digital (Escribe tu Nombre Completo)
+                          <label htmlFor="signature-input" className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 text-left">
+                            {agent.application_id.startsWith("B2B-") 
+                              ? "Firma Digital de Representante Legal (Escribe tu Nombre)"
+                              : "Firma Legal Digital (Escribe tu Nombre Completo)"}
                           </label>
                           <input
                             id="signature-input"
@@ -521,7 +711,9 @@ function AgentPortalContent() {
                               Firmando contrato...
                             </>
                           ) : (
-                            "✍️ Firmar y Activar Contrato"
+                            agent.application_id.startsWith("B2B-") 
+                              ? "🤝 Firmar y Activar Alianza Comercial"
+                              : "✍️ Firmar y Activar Contrato"
                           )}
                         </button>
                       </div>
@@ -556,19 +748,48 @@ function AgentPortalContent() {
                   <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
                     <div className="mb-6 pb-2 border-b border-border-light">
                       <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Plan Financiero</span>
-                      <h3 className="text-lg font-bold text-text-primary mt-1">Simulador de Comisiones Semanales</h3>
-                      <p className="text-xs text-text-secondary mt-1">
-                        Estima cuánto ganarás según el número de expedientes que aprueben los clientes que asesores.
+                      <h3 className="text-lg font-bold text-text-primary mt-1 text-left">
+                        {agent.application_id.startsWith("B2B-") 
+                          ? "Simulador de Comisiones Consolidadas (Agencia B2B)" 
+                          : "Simulador de Comisiones Semanales"}
+                      </h3>
+                      <p className="text-xs text-text-secondary mt-1 text-left">
+                        {agent.application_id.startsWith("B2B-")
+                          ? "Estima los ingresos acumulados por todos los agentes de viajes de tu equipo en base al volumen mensual de expedientes."
+                          : "Estima cuánto ganarás según el número de expedientes que aprueben los clientes que asesores."}
                       </p>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       {/* Controls Panel */}
                       <div className="space-y-5">
+                        {agent.application_id.startsWith("B2B-") && (
+                          /* Active Agents Slider */
+                          <div>
+                            <div className="flex justify-between items-center mb-1 text-xs text-left">
+                              <span className="font-semibold text-text-primary">Asesores Activos de la Agencia</span>
+                              <span className="font-bold text-brand-primary font-mono">{b2bAgentsCount} agentes</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="1"
+                              max="10"
+                              value={b2bAgentsCount}
+                              onChange={(e) => setB2bAgentsCount(parseInt(e.target.value))}
+                              className="w-full accent-brand-primary cursor-pointer"
+                            />
+                            <span className="text-[9px] text-text-muted block text-left">Multiplica el volumen de casos consolidado de la agencia.</span>
+                          </div>
+                        )}
+
                         {/* Tourist Cases Input */}
                         <div>
-                          <div className="flex justify-between items-center mb-1 text-xs">
-                            <span className="font-semibold text-text-primary">Casos de Visa de Turista</span>
+                          <div className="flex justify-between items-center mb-1 text-xs text-left">
+                            <span className="font-semibold text-text-primary">
+                              {agent.application_id.startsWith("B2B-")
+                                ? "Casos de Visa de Turista (Promedio por Asesor)"
+                                : "Casos de Visa de Turista"}
+                            </span>
                             <span className="font-bold text-brand-primary font-mono">{touristCases} casos</span>
                           </div>
                           <input
@@ -577,15 +798,19 @@ function AgentPortalContent() {
                             max="25"
                             value={touristCases}
                             onChange={(e) => setTouristCases(parseInt(e.target.value))}
-                            className="w-full accent-brand-primary"
+                            className="w-full accent-brand-primary cursor-pointer"
                           />
-                          <span className="text-[9px] text-text-muted">Retribución base por caso cerrado: $150 USD</span>
+                          <span className="text-[9px] text-text-muted block text-left">Retribución base por caso cerrado: $150 USD</span>
                         </div>
 
                         {/* Student Cases Input */}
                         <div>
-                          <div className="flex justify-between items-center mb-1 text-xs">
-                            <span className="font-semibold text-text-primary">Casos de Estudiante / Trabajo</span>
+                          <div className="flex justify-between items-center mb-1 text-xs text-left">
+                            <span className="font-semibold text-text-primary">
+                              {agent.application_id.startsWith("B2B-")
+                                ? "Casos de Estudiante / Trabajo (Promedio por Asesor)"
+                                : "Casos de Estudiante / Trabajo"}
+                            </span>
                             <span className="font-bold text-brand-primary font-mono">{studentCases} casos</span>
                           </div>
                           <input
@@ -594,14 +819,14 @@ function AgentPortalContent() {
                             max="15"
                             value={studentCases}
                             onChange={(e) => setStudentCases(parseInt(e.target.value))}
-                            className="w-full accent-brand-primary"
+                            className="w-full accent-brand-primary cursor-pointer"
                           />
-                          <span className="text-[9px] text-text-muted">Retribución base por caso cerrado: $250 USD</span>
+                          <span className="text-[9px] text-text-muted block text-left">Retribución base por caso cerrado: $250 USD</span>
                         </div>
 
                         {/* Customer Rating Rating */}
                         <div>
-                          <div className="flex justify-between items-center mb-1 text-xs">
+                          <div className="flex justify-between items-center mb-1 text-xs text-left">
                             <span className="font-semibold text-text-primary">Calificación de Satisfacción</span>
                             <span className="font-bold font-mono flex items-center gap-1">
                               ⭐ <span className={simRating >= 4.8 ? "text-emerald-600 font-bold" : "text-amber-600"}>{simRating.toFixed(1)}</span>
@@ -614,11 +839,13 @@ function AgentPortalContent() {
                             step="0.1"
                             value={simRating}
                             onChange={(e) => setSimRating(parseFloat(e.target.value))}
-                            className="w-full accent-brand-primary"
+                            className="w-full accent-brand-primary cursor-pointer"
                           />
                           <div className="flex justify-between text-[9px] text-text-muted mt-1">
                             <span>Mínimo 3.0</span>
-                            <span className={simRating >= 4.8 ? "text-emerald-600 font-bold" : ""}>Bono Excelencia (&gt;= 4.8)</span>
+                            <span className={simRating >= 4.8 ? "text-emerald-600 font-bold" : ""}>
+                              {agent.application_id.startsWith("B2B-") ? "Bono Volumen B2B (>= 4.8)" : "Bono Excelencia (>= 4.8)"}
+                            </span>
                             <span>Máximo 5.0</span>
                           </div>
                         </div>
@@ -628,12 +855,12 @@ function AgentPortalContent() {
                       <div className="bg-background-main border border-border-light rounded p-5 flex flex-col justify-between">
                         <div className="space-y-4">
                           <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
-                            <span>Facturación Bruta Asesorada</span>
+                            <span>Facturación Bruta Consolidada</span>
                             <span className="font-mono font-semibold text-text-primary">${getGrossEarnings().toFixed(2)} USD</span>
                           </div>
 
                           <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
-                            <span>Tasa de Comisión</span>
+                            <span>Tasa de Comisión {agent.application_id.startsWith("B2B-") ? "B2B" : ""}</span>
                             <span className="font-mono font-bold flex items-center gap-1">
                               {getCommissionRate() * 100}%
                               {simRating >= 4.8 ? (
@@ -641,7 +868,9 @@ function AgentPortalContent() {
                                   +10% Bono
                                 </span>
                               ) : (
-                                <span className="text-[8px] text-text-muted">(Base 70%)</span>
+                                <span className="text-[8px] text-text-muted">
+                                  {agent.application_id.startsWith("B2B-") ? "(Base 75%)" : "(Base 70%)"}
+                                </span>
                               )}
                             </span>
                           </div>
@@ -653,7 +882,9 @@ function AgentPortalContent() {
                         </div>
 
                         <div className="pt-4 mt-4 border-t border-dashed border-border-light text-center">
-                          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Liquidación Neta Semanal (Estimado)</span>
+                          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">
+                            {agent.application_id.startsWith("B2B-") ? "Liquidación Neta Semanal de Agencia" : "Liquidación Neta Semanal (Estimado)"}
+                          </span>
                           <p className="text-3xl font-bold text-brand-primary font-mono mt-1">${getNetEarnings().toFixed(2)} USD</p>
                           <span className="text-[10px] text-emerald-600 font-semibold block mt-1">
                             Aproximado Mensual: ${(getNetEarnings() * 4).toFixed(2)} USD
@@ -663,37 +894,86 @@ function AgentPortalContent() {
                     </div>
                   </div>
 
-                  {/* Public Profile Card */}
-                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
-                    <h3 className="text-md font-bold text-text-primary mb-5 pb-2 border-b border-border-light">Vista Previa de tu Perfil Público</h3>
-                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-                      <div className="w-16 h-16 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xl flex-shrink-0 border border-brand-primary/20">
-                        {agent.full_name.charAt(0)}
-                      </div>
-                      <div className="flex-grow text-center sm:text-left space-y-2">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-center sm:justify-start">
-                          <h4 className="font-bold text-text-primary text-sm">{agent.full_name}</h4>
-                          <span className="bg-emerald-50 text-emerald-700 text-[8px] font-bold px-2 py-0.5 rounded border border-emerald-100 self-center">
-                            ASESOR CERTIFICADO
-                          </span>
+                  {/* Dual card block: B2B team list vs individual profile preview */}
+                  {agent.application_id.startsWith("B2B-") ? (
+                    <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-6">
+                      <div className="border-b border-border-light pb-3 flex justify-between items-center">
+                        <div className="text-left">
+                          <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Gestión de Equipo</span>
+                          <h3 className="text-md font-bold text-text-primary mt-0.5">Asesores Asociados a la Agencia</h3>
                         </div>
-                        <p className="text-xs text-brand-primary font-semibold">Especialista en {agent.specialties.join(", ")}</p>
-                        <p className="text-xs text-text-secondary italic">&quot;{agent.biography}&quot;</p>
-                        <div className="flex flex-wrap gap-1.5 justify-center sm:justify-start pt-1">
-                          {agent.languages.map((l) => (
-                            <span key={l} className="bg-gray-100 text-text-secondary text-[9px] px-2 py-0.5 rounded">
-                              🗣️ {l}
+                        <button
+                          onClick={() => showToast("Funcionalidad demo: Enlace de invitación copiado al portapapeles.", "success")}
+                          className="px-3 py-1.5 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer"
+                        >
+                          + Invitar Asesor
+                        </button>
+                      </div>
+
+                      <div className="divide-y divide-border-light text-xs">
+                        {[
+                          { name: "Lic. Sofía Rodríguez", role: "Especialista Senior", cases: 24, rating: 4.9, active: true },
+                          { name: "Mtra. Ana María Silva", role: "Asesora Consular", cases: 18, rating: 5.0, active: true },
+                          { name: "Lic. Carlos Mendoza", role: "Asesor General", cases: 12, rating: 4.8, active: true },
+                          { name: "Asesor Temporal 1", role: "En Capacitación", cases: 0, rating: 0.0, active: false }
+                        ].map((member) => (
+                          <div key={member.name} className="py-3 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xs border border-brand-primary/20">
+                                {member.name.charAt(0)}
+                              </div>
+                              <div className="text-left">
+                                <p className="font-bold text-text-primary">{member.name}</p>
+                                <p className="text-[10px] text-text-secondary">{member.role}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-6">
+                              <div className="text-right">
+                                <p className="font-semibold text-text-primary">{member.cases} casos cerrados</p>
+                                <p className="text-[10px] text-text-secondary">⭐ {member.rating > 0 ? member.rating.toFixed(1) : "N/A"}</p>
+                              </div>
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${member.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-gray-100 text-gray-500"}`}>
+                                {member.active ? "ACTIVO" : "PENDIENTE"}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Public Profile Card */
+                    <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
+                      <h3 className="text-md font-bold text-text-primary mb-5 pb-2 border-b border-border-light text-left">Vista Previa de tu Perfil Público</h3>
+                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+                        <div className="w-16 h-16 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xl flex-shrink-0 border border-brand-primary/20">
+                          {agent.full_name.charAt(0)}
+                        </div>
+                        <div className="flex-grow text-center sm:text-left space-y-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-center sm:justify-start">
+                            <h4 className="font-bold text-text-primary text-sm">{agent.full_name}</h4>
+                            <span className="bg-emerald-50 text-emerald-700 text-[8px] font-bold px-2 py-0.5 rounded border border-emerald-100 self-center">
+                              ASESOR CERTIFICADO
                             </span>
-                          ))}
-                          {agent.target_countries.map((c) => (
-                            <span key={c} className="bg-brand-light text-brand-primary text-[9px] px-2 py-0.5 rounded">
-                              📍 {c}
-                            </span>
-                          ))}
+                          </div>
+                          <p className="text-xs text-brand-primary font-semibold text-left">Especialista en {agent.specialties.join(", ")}</p>
+                          <p className="text-xs text-text-secondary italic text-left">&quot;{agent.biography}&quot;</p>
+                          <div className="flex flex-wrap gap-1.5 justify-center sm:justify-start pt-1">
+                            {agent.languages.map((l) => (
+                              <span key={l} className="bg-gray-100 text-text-secondary text-[9px] px-2 py-0.5 rounded">
+                                🗣️ {l}
+                              </span>
+                            ))}
+                            {agent.target_countries.map((c) => (
+                              <span key={c} className="bg-brand-light text-brand-primary text-[9px] px-2 py-0.5 rounded">
+                                📍 {c}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>

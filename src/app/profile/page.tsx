@@ -84,6 +84,17 @@ export default function PerfilUsuarioPage() {
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // Preformulario state
+  const [isPreformularioCompleted, setIsPreformularioCompleted] = useState(false);
+  const [viproEvaluations, setViproEvaluations] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user?.id) {
+      const completed = localStorage.getItem(`preformulario_completed_user_id_${user.id}`);
+      setIsPreformularioCompleted(completed === "true");
+    }
+  }, [user]);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setToast({ message, type });
     setTimeout(() => {
@@ -359,6 +370,28 @@ export default function PerfilUsuarioPage() {
 
         if (!purchaseError && purchases) {
           setDbPurchases(purchases);
+        }
+
+        const { data: evaluations, error: evalError } = await supabase
+          .from("vipro_evaluations")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("is_completed", true)
+          .order("created_at", { ascending: false });
+
+        if (!evalError && evaluations && evaluations.length > 0) {
+          setViproEvaluations(evaluations);
+        } else if (user.viproCompleted) {
+          setViproEvaluations([
+            {
+              id: "vipro-fallback",
+              user_id: user.id,
+              destination_country: user.viproDestination || "US",
+              score: user.viproScore || 85,
+              created_at: new Date().toISOString(),
+              is_completed: true
+            }
+          ]);
         }
 
         // If records exist, dynamically sync store flags too
@@ -824,22 +857,7 @@ export default function PerfilUsuarioPage() {
               <h3 className="font-bold text-text-primary text-md leading-snug">{firstName} {lastName}</h3>
               <p className="text-xs text-text-secondary mt-1">{user.email}</p>
               
-              {user.viproCompleted ? (
-                <div className="mt-4 inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2.5 py-1 rounded-full border border-emerald-200">
-                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                  EVALUACIÓN VIPRO COMPLETADA
-                </div>
-              ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
-                <div className="mt-4 inline-flex items-center gap-1.5 bg-brand-light text-brand-primary text-[10px] font-bold px-2.5 py-1 rounded-full border border-blue-100 animate-pulse">
-                  <span className="w-1.5 h-1.5 bg-brand-primary rounded-full"></span>
-                  VIPRO: COMPLETAR AHORA
-                </div>
-              ) : (
-                <div className="mt-4 inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 text-[10px] font-bold px-2.5 py-1 rounded-full border border-amber-200 animate-pulse">
-                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping"></span>
-                  EVALUACIÓN VIPRO PENDIENTE
-                </div>
-              )}
+
             </div>
 
             {/* Navegación Vertical */}
@@ -847,6 +865,7 @@ export default function PerfilUsuarioPage() {
               {[
                 { id: "datos", label: "Mis Datos Personales", icon: "👤" },
                 { id: "proceso", label: "Seguimiento de Trámite", icon: "✈️" },
+                { id: "vipro", label: "Evaluación VIPRO", icon: "📊" },
                 { id: "asesor", label: "Mi Asesor Asignado", icon: "🤝" },
                 { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" }
               ].map((tab) => (
@@ -1009,63 +1028,105 @@ export default function PerfilUsuarioPage() {
                   {/* Paso 2 */}
                   <div className="flex gap-4 relative">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      user.viproCompleted ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
+                      (user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
                     }`}>
-                      {user.viproCompleted ? "✓" : "2"}
+                      {(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "✓" : "2"}
                     </div>
                     <div className={`flex-1 rounded-md p-4 border ${
-                      user.viproCompleted ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
+                      (user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
                     }`}>
-                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                        <h4 className="text-sm font-bold text-text-primary">Paso 2: Evaluación Diagnóstica VIPRO</h4>
-                        {user.viproCompleted ? (
-                          <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">CALIFICADO</span>
-                        ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
-                          <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE COMPLETAR</span>
-                        ) : (
-                          <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE PAGO</span>
-                        )}
-                      </div>
-                      {user.viproCompleted ? (
+                      {user.hasPaidAdvisor ? (
+                        /* Preformulario for Servicio Completo */
                         <>
-                          <p className="text-xs text-text-secondary">
-                            Evaluación realizada con éxito para destino: <span className="font-semibold text-text-primary">{user.viproDestination === "UK" ? "🇬🇧 Inglaterra" : "🇺🇸 Estados Unidos"}</span>.
-                          </p>
-                          <div className="mt-3 flex items-center gap-3 bg-brand-light/50 border border-blue-100 rounded p-2.5 w-max">
-                            <span className="text-lg">📊</span>
-                            <div>
-                              <p className="text-xs font-bold text-brand-primary">Puntaje Obtenido: {user.viproScore || 85}/100 ({(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión Recomendada"})</p>
-                              <p className="text-[10px] text-text-secondary">Tu perfil cuenta con alta probabilidad. Recomendado continuar con llenado de DS-160.</p>
-                            </div>
+                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                            <h4 className="text-sm font-bold text-text-primary">Paso 2: Preformulario</h4>
+                            {isPreformularioCompleted ? (
+                              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">COMPLETADO</span>
+                            ) : (
+                              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE COMPLETAR</span>
+                            )}
                           </div>
-                        </>
-                      ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
-                        <>
-                          <p className="text-xs text-text-secondary mb-3">Has habilitado tu Evaluación VIPRO. Complétala ahora para conocer tu puntaje de perfilamiento consular y permitir a tu asesor comenzar a auditar tu caso.</p>
-                          <button
-                            onClick={() => router.push("/vipro-form")}
-                            className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
-                          >
-                            Comenzar Evaluación VIPRO
-                          </button>
+                          {isPreformularioCompleted ? (
+                            <p className="text-xs text-text-secondary">
+                              Preformulario completado con éxito. Tu asesor ya cuenta con tus datos para el llenado oficial de tu solicitud de visa.
+                            </p>
+                          ) : (
+                            <>
+                              <p className="text-xs text-text-secondary mb-3">
+                                Completa tu preformulario con tus datos personales, de contacto, laborales y familiares para que tu asesor pueda iniciar el llenado oficial de tu formulario DS-160.
+                              </p>
+                              <button
+                                onClick={() => router.push("/preformulario")}
+                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
+                              >
+                                Completar Preformulario
+                              </button>
+                            </>
+                          )}
                         </>
                       ) : (
+                        /* VIPRO Evaluation for Autonomía / Express */
                         <>
-                          <p className="text-xs text-text-secondary mb-3">La Evaluación VIPRO no es gratuita. Realiza el pago de $19.99 USD (o adquiere el Servicio Completo con Asesor) para habilitar tu cuestionario y conocer tus probabilidades.</p>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => router.push("/vipro-form")}
-                              className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
-                            >
-                              Adquirir VIPRO ($19.99 USD)
-                            </button>
-                            <button
-                              onClick={() => router.push("/agents")}
-                              className="px-4 py-2 bg-white border border-brand-primary text-brand-primary text-xs font-bold rounded-sm hover:bg-brand-light transition-all focus:outline-none cursor-pointer"
-                            >
-                              Ver Asesores
-                            </button>
+                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                            <h4 className="text-sm font-bold text-text-primary">Paso 2: Evaluación Diagnóstica VIPRO</h4>
+                            {user.viproCompleted ? (
+                              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">CALIFICADO</span>
+                            ) : user.hasPaidVipro ? (
+                              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE COMPLETAR</span>
+                            ) : (
+                              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE PAGO</span>
+                            )}
                           </div>
+                          {user.viproCompleted ? (
+                            <>
+                              <p className="text-xs text-text-secondary">
+                                Evaluación realizada con éxito para destino: <span className="font-semibold text-text-primary">{user.viproDestination === "UK" ? "🇬🇧 Inglaterra" : "🇺🇸 Estados Unidos"}</span>.
+                              </p>
+                              <div className="mt-3 flex items-center gap-3 bg-brand-light/50 border border-blue-100 rounded p-2.5 w-max">
+                                <span className="text-lg">📊</span>
+                                <div>
+                                  <p className="text-xs font-bold text-brand-primary">Puntaje Obtenido: {user.viproScore || 85}/100 ({(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión Recomendada"})</p>
+                                  <p className="text-[10px] text-text-secondary">Tu perfil cuenta con alta probabilidad. Recomendado continuar con llenado de DS-160.</p>
+                                </div>
+                              </div>
+                              <div className="mt-3">
+                                <button
+                                  onClick={() => router.push(`/vipro-form/evaluation?country=${user.viproDestination || "US"}`)}
+                                  className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
+                                >
+                                  Ver Respuestas y Recomendaciones
+                                </button>
+                              </div>
+                            </>
+                          ) : user.hasPaidVipro ? (
+                            <>
+                              <p className="text-xs text-text-secondary mb-3">Has habilitado tu Evaluación VIPRO. Complétala ahora para conocer tu puntaje de perfilamiento consular.</p>
+                              <button
+                                onClick={() => router.push("/vipro-form")}
+                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
+                              >
+                                Comenzar Evaluación VIPRO
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-xs text-text-secondary mb-3">La Evaluación VIPRO no es gratuita. Realiza el pago de $19.99 USD (o adquiere el Servicio Completo con Asesor) para habilitar tu cuestionario y conocer tus probabilidades.</p>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => router.push("/vipro-form")}
+                                  className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
+                                >
+                                  Adquirir VIPRO ($19.99 USD)
+                                </button>
+                                <button
+                                  onClick={() => router.push("/agents")}
+                                  className="px-4 py-2 bg-white border border-brand-primary text-brand-primary text-xs font-bold rounded-sm hover:bg-brand-light transition-all focus:outline-none cursor-pointer"
+                                >
+                                  Ver Asesores
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -1387,6 +1448,130 @@ export default function PerfilUsuarioPage() {
                 </div>
               </div>
             )}
+
+            {/* TAB: EVALUACION VIPRO */}
+            {activeTab === "vipro" && (
+              <div>
+                <div className="mb-6 pb-4 border-b border-border-light text-left">
+                  <h2 className="text-lg font-bold text-text-primary">Evaluación de Viabilidad VIPRO</h2>
+                  <p className="text-xs text-text-secondary mt-1">Análisis automatizado de probabilidad y recomendaciones de perfilamiento consular.</p>
+                </div>
+
+                {user.viproCompleted ? (
+                  <div className="space-y-6 text-left">
+                    <div className="bg-gradient-to-r from-emerald-50/50 to-white rounded-2xl border border-emerald-200 p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
+                      <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl font-bold shadow-inner">
+                          📊
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-text-primary text-base">Evaluación Calificada</h3>
+                          <p className="text-xs text-text-secondary mt-0.5">Destino: <span className="font-semibold text-text-primary">{user.viproDestination === "UK" ? "🇬🇧 Inglaterra" : "🇺🇸 Estados Unidos"}</span></p>
+                        </div>
+                      </div>
+                      <div className="bg-white px-5 py-3 rounded-xl border border-emerald-100 flex items-center gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Puntaje</p>
+                          <p className="text-2xl font-black text-emerald-600">{user.viproScore || 85}/100</p>
+                        </div>
+                        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md uppercase border ${
+                          (user.viproScore || 85) >= 80 
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                            : "bg-amber-50 text-amber-800 border-amber-200"
+                        }`}>
+                          {(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión"}
+                        </span>
+                      </div>
+                    </div>
+
+
+
+                    {/* Evaluations history table */}
+                    {viproEvaluations.length > 0 && (
+                      <div className="pt-4">
+                        <h4 className="font-bold text-text-primary text-sm uppercase tracking-wider mb-4">Historial de Intentos</h4>
+                        <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
+                                <th className="py-3 px-4">Destino</th>
+                                  <th className="py-3 px-4">Fecha</th>
+                                  <th className="py-3 px-4">Calificación</th>
+                                  <th className="py-3 px-4 text-right">Acción</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border-light text-xs">
+                                {viproEvaluations.map((evaluation) => {
+                                  const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
+                                  const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
+                                  return (
+                                    <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
+                                      <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
+                                        <span className="text-lg">{countryEmoji}</span>
+                                        <span>{countryName}</span>
+                                      </td>
+                                      <td className="py-4 px-4 text-text-secondary">
+                                        {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                      </td>
+                                      <td className="py-4 px-4 font-bold text-text-primary">
+                                        {evaluation.score || 85} / 100
+                                      </td>
+                                      <td className="py-4 px-4 text-right">
+                                        <button
+                                          onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
+                                          className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
+                                        >
+                                          Ver
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
+                    <div className="bg-white rounded-3xl border border-amber-200 p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                      <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
+                        📊
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Habilitada</h3>
+                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
+                          Tienes acceso a la evaluación pre-consular VIPRO. Realiza el cuestionario ahora para calificar tu perfil y obtener recomendaciones dinámicas.
+                        </p>
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
+                        >
+                          Comenzar Evaluación VIPRO
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-3xl border border-border-light p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                      <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center text-2xl font-bold border border-brand-primary/10">
+                        🔒
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Bloqueada</h3>
+                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
+                          La evaluación de viabilidad pre-consular VIPRO analiza a profundidad tu lazo familiar, laboral y solvencia con recomendaciones personalizadas. Habilítala ahora adquiriendo tu acceso.
+                        </p>
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
+                        >
+                          Adquirir Evaluación Express ($19.99 USD)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+              </div>
+            )}
 {/* TAB: MI ASESOR */}
             {activeTab === "asesor" && (
               <div>
@@ -1640,8 +1825,76 @@ export default function PerfilUsuarioPage() {
                         </button>
                       </div>
                     </div>
-                  </div>
-                )}
+                      {/* Completed VIPRO evaluations table */}
+                      <div className="mt-8 pt-8 border-t border-border-light">
+                        <div className="mb-4 text-left">
+                          <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider flex items-center gap-1.5">
+                            📋 Historial de Evaluaciones VIPRO
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-1">Revisa el listado de tus evaluaciones de viabilidad pre-consular completadas y sus recomendaciones de mejora.</p>
+                        </div>
+
+                        {viproEvaluations.length > 0 ? (
+                          <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
+                                  <th className="py-3 px-4">Destino</th>
+                                  <th className="py-3 px-4">Fecha</th>
+                                  <th className="py-3 px-4">Calificación</th>
+                                  <th className="py-3 px-4">Resultado</th>
+                                  <th className="py-3 px-4 text-right">Acción</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border-light text-xs">
+                                {viproEvaluations.map((evaluation) => {
+                                  const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
+                                  const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
+                                  const score = evaluation.score || 85;
+                                  const isFavorable = score >= 80;
+                                  return (
+                                    <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
+                                      <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
+                                        <span className="text-lg">{countryEmoji}</span>
+                                        <span>{countryName}</span>
+                                      </td>
+                                      <td className="py-4 px-4 text-text-secondary">
+                                        {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                      </td>
+                                      <td className="py-4 px-4 font-bold text-text-primary">
+                                        {score} / 100
+                                      </td>
+                                      <td className="py-4 px-4">
+                                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                          isFavorable
+                                            ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                            : "bg-amber-50 text-amber-800 border-amber-100"
+                                        }`}>
+                                          {isFavorable ? "FAVORABLE" : "REVISIÓN"}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-4 text-right">
+                                        <button
+                                          onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
+                                          className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
+                                        >
+                                          Ver Detalles
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="bg-white border border-border-light rounded-xl p-6 text-center text-text-muted text-xs shadow-sm">
+                            No has completado ninguna evaluación VIPRO todavía.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
               </div>
             )}
 

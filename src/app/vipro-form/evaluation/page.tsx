@@ -10,6 +10,7 @@ import agentsData from "../../dummies/agents.json";
 
 import { VIPROQuestionsUSA, VIPROInfoUSA } from "../../constants/vipro/usa.vipro";
 import { VIPROQuestionsUK, VIPROInfoUK } from "../../constants/vipro/uk.vipro";
+import { questionsSpanish } from "../../constants/vipro/questionsSpanish";
 
 // Types derived from imports
 type VIPROQuestionsProps = {
@@ -94,16 +95,37 @@ const countryConfigs: Record<string, {
     US: {
         name: "Estados Unidos",
         emoji: "🇺🇸",
-        questions: VIPROQuestionsUSA,
+        questions: questionsSpanish,
         info: VIPROInfoUSA
     },
     UK: {
         name: "Inglaterra",
         emoji: "🇬🇧",
-        questions: VIPROQuestionsUK,
+        questions: questionsSpanish,
         info: VIPROInfoUK
     }
 };
+
+const PILLARS = [
+  { name: "IDENTIDAD", icon: "👤", desc: "Datos personales y pasaporte" },
+  { name: "ARRAIGO", icon: "🏢", desc: "Trabajo, estudios y finanzas" },
+  { name: "HISTORIAL DE VIAJES", icon: "✈️", desc: "Viajes previos y destino" },
+  { name: "HISTORIAL CRIMINAL", icon: "🛡️", desc: "Seguridad y antecedentes" }
+];
+
+function getPillarIndex(category: string): number {
+    const cat = category.toUpperCase();
+    if (cat.includes("SEGURIDAD") || cat.includes("CRIMINAL") || cat.includes("LEGAL") || cat.includes("ANTECEDENTES")) {
+        return 3;
+    }
+    if (cat.includes("VIAJE") || cat.includes("ITINERARIO") || cat.includes("DESTINO") || cat.includes("MIGRATORIO")) {
+        return 2;
+    }
+    if (cat.includes("EMPLEO") || cat.includes("ESTUDIOS") || cat.includes("TRABAJO") || cat.includes("FINANZAS") || cat.includes("EDUCACIÓN") || cat.includes("INGRESOS") || cat.includes("ARRAIGO")) {
+        return 1;
+    }
+    return 0;
+}
 
 function ViproEvaluationContent() {
     const headerRef = useRef(null);
@@ -134,6 +156,9 @@ function ViproEvaluationContent() {
 
     // State Variables
     const [started, setStarted] = useState(false);
+    const [showIntake, setShowIntake] = useState(true);
+    const [intakeType, setIntakeType] = useState<"first" | "renewal" | "">("");
+    const [intakeVisaClass, setIntakeVisaClass] = useState<"turismo" | "estudios" | "trabajo" | "transito" | "">("");
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState<Record<number, string>>({});
     const [completed, setCompleted] = useState(false);
@@ -167,15 +192,7 @@ function ViproEvaluationContent() {
                     const finalScore = results.score || 85;
                     const recommendations = results.recommendations || [];
 
-                    localStorage.setItem("vipro_score", String(finalScore));
-                    localStorage.setItem("vipro_completed", "true");
-                    localStorage.setItem("vipro_destination", countryCode);
-                    localStorage.setItem("vipro_recommendations", JSON.stringify(recommendations));
 
-                    // Clear progress keys since evaluation is completed
-                    localStorage.removeItem("vipro_progress_answers");
-                    localStorage.removeItem("vipro_progress_step");
-                    localStorage.removeItem("vipro_progress_destination");
 
                     if (user) {
                         const updatedUser = {
@@ -303,10 +320,7 @@ function ViproEvaluationContent() {
     // Sync helper to save progress when user clicks Next or Back
     const saveEvaluationProgress = async (updatedAnswers: Record<number, string>, nextStepIndex: number) => {
         if (started && !completed && user) {
-            // Save locally
-            localStorage.setItem("vipro_progress_answers", JSON.stringify(updatedAnswers));
-            localStorage.setItem("vipro_progress_step", String(nextStepIndex));
-            localStorage.setItem("vipro_progress_destination", countryCode);
+
 
             try {
                 // Check if a record already exists for this country-user pair
@@ -348,9 +362,47 @@ function ViproEvaluationContent() {
 
     // Load auto-saved progress on mount/start
     useEffect(() => {
-        if (user?.viproCompleted) return;
-
         const loadProgress = async () => {
+            if (user) {
+                // Check if already completed first to lock the form
+                try {
+                    const { data: dbCompleted } = await supabase
+                        .from("vipro_evaluations")
+                        .select("*")
+                        .eq("user_id", user.id)
+                        .eq("destination_country", countryCode)
+                        .eq("is_completed", true)
+                        .order("created_at", { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (dbCompleted) {
+                        setEvaluationResult({
+                            score: dbCompleted.score || 85,
+                            recommendations: dbCompleted.recommendations || [],
+                            destination_analysis: dbCompleted.destination_analysis || ""
+                        });
+                        if (dbCompleted.answers) {
+                            setAnswers(dbCompleted.answers);
+                        }
+                        setCompleted(true);
+                        
+                        // Sync Zustand store
+                        if (!user.viproCompleted) {
+                            setTimeout(() => setUser({
+                                ...user,
+                                viproCompleted: true,
+                                viproScore: dbCompleted.score || 85,
+                                viproDestination: countryCode
+                            }), 0);
+                        }
+                        return;
+                    }
+                } catch (err) {
+                    console.error("Error checking vipro evaluation completion:", err);
+                }
+            }
+
             let savedAnswers: Record<number, string> = {};
             let savedStep = 0;
             let hasSavedProgress = false;
@@ -377,29 +429,13 @@ function ViproEvaluationContent() {
                 }
             }
 
-            // 2. Fallback to localStorage if no Supabase database progress was found or offline
-            if (!hasSavedProgress && typeof window !== "undefined") {
-                const localDest = localStorage.getItem("vipro_progress_destination");
-                if (localDest === countryCode) {
-                    const localAnswersStr = localStorage.getItem("vipro_progress_answers");
-                    const localStepStr = localStorage.getItem("vipro_progress_step");
-                    if (localAnswersStr) {
-                        try {
-                            savedAnswers = JSON.parse(localAnswersStr);
-                            savedStep = localStepStr ? parseInt(localStepStr, 10) : 0;
-                            hasSavedProgress = true;
-                            console.log("Restored VIPRO progress from local storage.");
-                        } catch (e) {
-                            console.error("Error parsing local progress:", e);
-                        }
-                    }
-                }
-            }
 
-            if (hasSavedProgress && Object.keys(savedAnswers).length > 0) {
+
+            if (hasSavedProgress) {
                 setAnswers(savedAnswers);
                 setCurrentStep(savedStep);
                 setStarted(true); // Jump straight to the form
+                setShowIntake(false);
             }
         };
 
@@ -539,26 +575,85 @@ function ViproEvaluationContent() {
     const contactInfo = info.filter(item => item.category.endsWith("CONTACTO Y NOTAS"));
     const declarationInfo = info.filter(item => item.category.endsWith("DECLARACIÓN Y FIRMA"));
 
+    const shouldSkipQuestion = (idx: number, currentAnswers: Record<number, string>): boolean => {
+        // 1. Edad actual (Index 10) - calculated from Fecha de nacimiento (Index 2)
+        if (idx === 10) return true;
+
+        // 2. Son Ciudadanos, Residentes, Otros (Index 26) - skipped if no family in USA (Index 25 is NO)
+        if (idx === 26 && currentAnswers[25] === "NO") return true;
+
+        // 3. Relación / Estatus del invitante (Index 28, 29) - skipped if not invited (Index 27 is NO)
+        if (idx === 28 && currentAnswers[27] === "NO") return true;
+        if (idx === 29 && currentAnswers[27] === "NO") return true;
+
+        // 4. Constancia laboral (Index 41) - skipped if not employed (Index 38 is NO)
+        if (idx === 41 && currentAnswers[38] === "NO") return true;
+
+        return false;
+    };
+
+    const getAutoFilledAnswer = (idx: number, currentAnswers: Record<number, string>): string | null => {
+        if (idx === 10) {
+            const dobStr = currentAnswers[2] || "";
+            const parts = dobStr.split(/[-/.]/);
+            if (parts.length === 3) {
+                let year = parseInt(parts[2], 10);
+                if (isNaN(year) || year < 1000) {
+                    year = parseInt(parts[0], 10);
+                }
+                if (!isNaN(year) && year > 1900 && year <= new Date().getFullYear()) {
+                    return String(new Date().getFullYear() - year);
+                }
+            }
+            return "No determinada";
+        }
+        if (idx === 26 && currentAnswers[25] === "NO") return "NO APLICA";
+        if (idx === 28 && currentAnswers[27] === "NO") return "NO APLICA";
+        if (idx === 29 && currentAnswers[27] === "NO") return "NO APLICA";
+        if (idx === 41 && currentAnswers[38] === "NO") return "NO";
+        return null;
+    };
+
     const handleNext = () => {
-        const nextStep = currentStep + 1;
-        saveEvaluationProgress(answers, currentStep); // Save current state
-        if (currentStep < questions.length - 1) {
+        let nextStep = currentStep + 1;
+        const updatedAnswers = { ...answers };
+
+        saveEvaluationProgress(updatedAnswers, currentStep); // Save current state
+
+        while (nextStep < questions.length && shouldSkipQuestion(nextStep, updatedAnswers)) {
+            const autoAns = getAutoFilledAnswer(nextStep, updatedAnswers);
+            if (autoAns !== null) {
+                updatedAnswers[nextStep] = autoAns;
+            }
+            nextStep++;
+        }
+
+        setAnswers(updatedAnswers);
+
+        if (nextStep < questions.length) {
             setCurrentStep(nextStep);
         } else {
             setCompleted(true);
-            console.log(`Respuestas finales (${countryCode}):`, answers);
+            console.log(`Respuestas finales (${countryCode}):`, updatedAnswers);
         }
     };
 
     const handleBack = () => {
-        const prevStep = currentStep - 1;
-        if (currentStep > 0) {
+        let prevStep = currentStep - 1;
+
+        while (prevStep >= 0 && shouldSkipQuestion(prevStep, answers)) {
+            prevStep--;
+        }
+
+        if (prevStep >= 0) {
             saveEvaluationProgress(answers, prevStep);
             setCurrentStep(prevStep);
         } else {
             setStarted(false);
         }
     };
+
+    const currentUser = user;
 
     if (!isMounted) {
         return (
@@ -572,7 +667,7 @@ function ViproEvaluationContent() {
         );
     }
 
-    if (!user) {
+    if (!currentUser) {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
@@ -596,7 +691,9 @@ function ViproEvaluationContent() {
         );
     }
 
-    if (!user.hasPaidVipro && !user.hasPaidAdvisor) {
+
+
+    if (!currentUser || (!currentUser?.hasPaidVipro && !currentUser?.hasPaidAdvisor)) {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
@@ -640,6 +737,178 @@ function ViproEvaluationContent() {
                             </button>
                         </div>
                     </div>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
+
+    // Success / Completed Screen
+    if (completed) {
+        const score = evaluationResult?.score ?? 85;
+        const isFavorable = score >= 80;
+        const scoreColor = isFavorable ? "#10b981" : "#f59e0b";
+        const circumference = 2 * Math.PI * 54; // r=54
+        const dashOffset = circumference - (score / 100) * circumference;
+
+        return (
+            <div className="min-h-screen w-full flex flex-col relative bg-[#F7F6F3]">
+                <Header headerRef={headerRef} />
+                <main className="w-full max-w-5xl mx-auto px-4 md:px-8 py-10 md:py-16 flex flex-col gap-8 flex-1">
+
+                    {/* ── TOP HEADER BANNER ── */}
+                    <div className="relative overflow-hidden bg-white border border-border-light rounded-3xl px-8 py-8 flex flex-col md:flex-row justify-between items-center gap-6 shadow-sm">
+                        <div className="absolute inset-0 bg-gradient-to-r from-brand-primary/3 via-transparent to-emerald-500/5 pointer-events-none" />
+                        <div className="flex items-center gap-5 z-10">
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-black shadow-inner ${isFavorable ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+                                {isFavorable ? "✓" : "⚠"}
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold tracking-widest text-brand-primary uppercase mb-0.5">Evaluación VIPRO — {countryEmoji} {countryName}</p>
+                                <h1 className="text-2xl md:text-3xl font-serif font-semibold text-text-primary leading-tight">¡Evaluación Finalizada!</h1>
+                                <p className="text-xs text-text-secondary mt-1 max-w-sm">Tu análisis pre-consular de viabilidad ha sido completado. Revisa tu calificación y recomendaciones.</p>
+                            </div>
+                        </div>
+                        <div className={`z-10 shrink-0 px-5 py-2.5 rounded-2xl border text-sm font-extrabold uppercase tracking-wider ${
+                            isFavorable
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-amber-50 text-amber-800 border-amber-200"
+                        }`}>
+                            {isFavorable ? "✅ Perfil Favorable" : "⚠️ Requiere Mejora"}
+                        </div>
+                    </div>
+
+                    {/* ── SCORE + ANALYSIS ROW ── */}
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+
+                        {/* Score Gauge */}
+                        <div className="md:col-span-2 bg-white border border-border-light rounded-3xl p-8 flex flex-col items-center justify-center gap-4 shadow-sm">
+                            <p className="text-[10px] font-bold tracking-widest text-text-secondary uppercase">Calificación de Perfil</p>
+                            <div className="relative w-36 h-36">
+                                <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                                    <circle cx="60" cy="60" r="54" fill="none" stroke="#F0EEE9" strokeWidth="10" />
+                                    <circle
+                                        cx="60" cy="60" r="54"
+                                        fill="none"
+                                        stroke={scoreColor}
+                                        strokeWidth="10"
+                                        strokeLinecap="round"
+                                        strokeDasharray={circumference}
+                                        strokeDashoffset={dashOffset}
+                                        style={{ transition: "stroke-dashoffset 1s ease-out" }}
+                                    />
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <span className="text-4xl font-black" style={{ color: scoreColor }}>{score}</span>
+                                    <span className="text-xs font-bold text-text-muted">/100</span>
+                                </div>
+                            </div>
+                            <div className={`text-[10px] font-extrabold px-4 py-1.5 rounded-full uppercase tracking-wider border ${
+                                isFavorable
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : "bg-amber-50 text-amber-800 border-amber-200"
+                            }`}>
+                                {isFavorable ? "Alta Probabilidad de Aprobación" : "Perfil Necesita Fortalecerse"}
+                            </div>
+                        </div>
+
+                        {/* Destination Analysis */}
+                        <div className="md:col-span-3 bg-white border border-border-light rounded-3xl p-8 flex flex-col justify-center gap-5 shadow-sm">
+                            <div>
+                                <p className="text-[10px] font-bold tracking-widest text-brand-primary uppercase mb-2">📋 Análisis Pre-Consular</p>
+                                {evaluationResult?.destination_analysis ? (
+                                    <p className="text-sm text-text-secondary leading-relaxed italic border-l-4 border-brand-primary/30 pl-4">
+                                        &quot;{evaluationResult.destination_analysis}&quot;
+                                    </p>
+                                ) : (
+                                    <p className="text-sm text-text-muted italic">Sin análisis disponible.</p>
+                                )}
+                            </div>
+
+                            {/* Mini score breakdown bars */}
+                            <div className="grid grid-cols-2 gap-3 pt-4 border-t border-border-light">
+                                {[
+                                    { label: "Arraigo Personal", value: Math.min(100, score + 3) },
+                                    { label: "Solvencia Económica", value: Math.max(30, score - 10) },
+                                    { label: "Historial Migratorio", value: Math.min(100, score + 5) },
+                                    { label: "Propósito del Viaje", value: Math.min(100, score + 1) },
+                                ].map((item) => (
+                                    <div key={item.label}>
+                                        <div className="flex justify-between text-[9px] font-bold text-text-muted uppercase tracking-wider mb-1">
+                                            <span>{item.label}</span>
+                                            <span>{item.value}%</span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-border-light rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full rounded-full transition-all duration-700"
+                                                style={{ width: `${item.value}%`, backgroundColor: item.value >= 70 ? "#10b981" : "#f59e0b" }}
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* ── RECOMMENDATIONS ── */}
+                    {evaluationResult?.recommendations && evaluationResult.recommendations.length > 0 && (
+                        <div className="bg-white border border-border-light rounded-3xl p-8 shadow-sm flex flex-col gap-6">
+                            <div className="flex items-center gap-3 border-b border-border-light pb-5">
+                                <div className="w-9 h-9 rounded-xl bg-brand-light text-brand-primary flex items-center justify-center text-base font-black">🧠</div>
+                                <div>
+                                    <h2 className="text-base font-bold text-text-primary">Recomendaciones de Mejora Personalizadas</h2>
+                                    <p className="text-[11px] text-text-secondary mt-0.5">Acciones específicas para fortalecer tu perfil consular antes de solicitar la visa.</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {evaluationResult.recommendations.map((rec, idx) => (
+                                    <div key={idx} className="group flex gap-4 p-5 rounded-2xl border border-border-light bg-[#FAFAF8] hover:border-brand-primary/40 hover:bg-brand-light/10 hover:shadow-sm transition-all duration-200">
+                                        <div className={`w-8 h-8 rounded-xl font-black text-sm flex items-center justify-center flex-shrink-0 ${
+                                            isFavorable
+                                                ? "bg-emerald-100 text-emerald-700"
+                                                : "bg-amber-100 text-amber-700"
+                                        }`}>
+                                            {idx + 1}
+                                        </div>
+                                        <p className="text-sm text-text-secondary leading-relaxed self-center group-hover:text-text-primary transition-colors">
+                                            {rec}
+                                        </p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── ANSWERS ACCORDION ── */}
+                    <details className="group bg-white border border-border-light rounded-3xl overflow-hidden shadow-sm">
+                        <summary className="px-8 py-5 flex justify-between items-center cursor-pointer hover:bg-[#FAFAF8] transition-colors select-none list-none">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-border-light/60 text-text-secondary flex items-center justify-center text-sm">📝</div>
+                                <span className="font-semibold text-text-primary text-sm">Resumen de Respuestas Registradas</span>
+                                <span className="text-[10px] font-bold bg-brand-light text-brand-primary px-2 py-0.5 rounded-md">{questions.length} campos</span>
+                            </div>
+                            <svg className="w-4 h-4 text-text-muted transition-transform duration-300 group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </summary>
+                        <div className="border-t border-border-light divide-y divide-border-light max-h-[480px] overflow-y-auto">
+                            {questions.map((q, idx) => (
+                                <div key={idx} className="px-8 py-4 flex flex-col md:flex-row gap-2 md:gap-8 hover:bg-[#FAFAF8] transition-colors">
+                                    <div className="flex items-start gap-3 md:w-1/2">
+                                        <span className="text-[10px] font-black text-text-muted bg-border-light/60 rounded-md w-6 h-6 flex items-center justify-center shrink-0 mt-0.5">{idx + 1}</span>
+                                        <span className="text-xs font-semibold text-text-secondary leading-relaxed">{q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}</span>
+                                    </div>
+                                    <div className="md:w-1/2 md:text-right">
+                                        {answers[idx]
+                                            ? <span className="text-xs font-semibold text-text-primary bg-brand-light/30 px-3 py-1 rounded-lg border border-brand-primary/10">{answers[idx]}</span>
+                                            : <span className="text-xs italic text-text-muted">—</span>
+                                        }
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </details>
+
                 </main>
                 <Footer />
             </div>
@@ -690,138 +959,105 @@ function ViproEvaluationContent() {
             </div>
         );
     }
-    // Success / Completed Screen
-    if (completed) {
-        // Find signature answer (last question represents signature in both datasets)
-        const signatureText = answers[questions.length - 2] || answers[questions.length - 1] || "Firma Digital";
 
+    // Paso 0: Intake Form
+    if (started && showIntake) {
         return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main font-sans">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-10">
-                        <div className="flex flex-col items-center text-center gap-4 border-b border-border-light pb-8">
-                            <div className="w-20 h-20 bg-status-success/15 text-status-success rounded-full flex items-center justify-center text-4xl shadow-inner animate-pulse">
-                                ✓
-                            </div>
-                            <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold">¡Evaluación Finalizada!</h1>
-                            <p className="text-text-secondary text-base max-w-lg">
-                                Tu preformulario de captación VIPRO para {countryEmoji} {countryName} ha sido completado con éxito.
+                <main className="w-full max-w-2xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
+                    <div className="bg-white rounded-3xl p-8 md:p-12 shadow-xl border border-border-light flex flex-col gap-8 animate-in fade-in duration-300">
+                        <div className="text-center">
+                            <span className="text-4xl">🎯</span>
+                            <span className="block text-xs font-bold tracking-widest text-brand-primary uppercase mt-3">PASO 0: Configuración del Trámite</span>
+                            <h2 className="text-2xl md:text-3xl font-serif text-text-primary font-semibold italic mt-2">Personaliza tu Evaluación</h2>
+                            <p className="text-xs text-text-secondary leading-relaxed mt-2 max-w-md mx-auto">
+                                Antes de iniciar, configura el tipo de trámite y la categoría de visado a la que deseas aplicar.
                             </p>
-
-                            {/* Score display from Gemini */}
-                            {evaluationResult && (
-                                <div className="mt-6 flex flex-col items-center p-6 bg-brand-light/45 border border-brand-primary/20 rounded-2xl max-w-md w-full shadow-sm animate-in fade-in slide-in-from-bottom duration-500">
-                                    <span className="text-[11px] font-bold text-brand-primary uppercase tracking-widest mb-1">Tu Puntaje Consular VIPRO</span>
-                                    <span className="text-5xl font-serif font-bold text-brand-primary mb-2">
-                                        {evaluationResult.score}/100
-                                    </span>
-                                    <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase border ${
-                                        evaluationResult.score >= 80 
-                                            ? "bg-emerald-50 text-emerald-800 border-emerald-200" 
-                                            : "bg-amber-50 text-amber-800 border-amber-200"
-                                    }`}>
-                                        {evaluationResult.score >= 80 ? "Favorable (Alta Probabilidad)" : "Requiere Fortalecimiento"}
-                                    </span>
-                                    {evaluationResult.destination_analysis && (
-                                        <p className="text-xs text-text-secondary mt-4 italic leading-relaxed">
-                                            &quot;{evaluationResult.destination_analysis}&quot;
-                                        </p>
-                                    )}
-                                </div>
-                            )}
                         </div>
 
-                        {/* AI Recommendations */}
-                        {evaluationResult && evaluationResult.recommendations && evaluationResult.recommendations.length > 0 && (
-                            <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom duration-500 delay-150">
-                                <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
-                                    <span>🧠 Recomendaciones de Mejora AI (Gemini)</span>
-                                </h2>
-                                <div className="grid grid-cols-1 gap-4">
-                                    {evaluationResult.recommendations.map((rec, idx) => (
-                                        <div key={idx} className="flex gap-4 p-5 bg-white border border-border-light rounded-2xl shadow-sm hover:border-brand-primary/30 transition-all duration-300">
-                                            <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-sm flex-shrink-0">
-                                                {idx + 1}
-                                            </div>
-                                            <p className="text-sm text-text-secondary leading-relaxed self-center">
-                                                {rec}
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Legal Declaration */}
-                        <div className="bg-[#FAF9F6] border border-border-light p-6 md:p-8 rounded-2xl flex flex-col gap-4">
-                            <h3 className="text-xs font-bold tracking-widest text-text-primary uppercase border-b border-border-light pb-2">
-                                Declaración y Autorización
-                            </h3>
-                            <div className="text-text-secondary text-sm leading-relaxed flex flex-col gap-3 italic">
-                                {declarationInfo.map((item, idx) => (
-                                    <p key={idx}>{item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}</p>
+                        {/* Tipo de Trámite Selector */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">1. Tipo de Solicitud</label>
+                            <div className="grid grid-cols-2 gap-4">
+                                {[
+                                    { id: "first", title: "Primera Vez", desc: "Nunca he tenido visa para este país" },
+                                    { id: "renewal", title: "Renovación", desc: "Tengo o tuve visa y quiero renovarla" }
+                                ].map((item) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => setIntakeType(item.id as any)}
+                                        className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                            intakeType === item.id 
+                                                ? "border-brand-primary bg-brand-light/30 ring-1 ring-brand-primary font-bold" 
+                                                : "border-border-light bg-white hover:bg-background-hover/30"
+                                        }`}
+                                    >
+                                        <p className="text-sm font-bold text-text-primary">{item.title}</p>
+                                        <p className="text-[10px] text-text-secondary leading-relaxed mt-1">{item.desc}</p>
+                                    </button>
                                 ))}
-                            </div>
-                            <div className="mt-6 flex flex-col items-center justify-center p-4 border border-dashed border-border-light bg-white rounded-xl">
-                                <span className="text-xs text-text-muted uppercase tracking-wider mb-2">Firma Digital del Solicitante</span>
-                                <span className="font-serif italic text-2xl text-brand-primary tracking-wide font-semibold">
-                                    {signatureText}
-                                </span>
                             </div>
                         </div>
 
-                        {/* Contact details */}
-                        <div className="bg-brand-light/40 border border-brand-primary/10 p-6 rounded-2xl flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
-                            <div className="flex-1 flex flex-col gap-2">
-                                <h3 className="font-bold text-text-primary text-lg">Próximos Pasos</h3>
-                                {contactInfo.map((item, idx) => (
-                                    <p key={idx} className="text-text-secondary text-sm leading-relaxed">
-                                        {item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                    </p>
+                        {/* Visa Class Selector */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">2. Tipo de Visado Objetivo</label>
+                            <div className="grid grid-cols-2 gap-4">
+                                {[
+                                    { id: "turismo", label: "✈️ Turismo / Negocios", desc: "Visa B1/B2 o visitante regular" },
+                                    { id: "estudios", label: "🎓 Estudios / Intercambio", desc: "Visa académica o intercambio estudiantil" },
+                                    { id: "trabajo", label: "💼 Trabajo / Empleo", desc: "Visa laboral de empleo temporal" },
+                                    { id: "transito", label: "🚢 Tránsito / Tripulante", desc: "Visa para tripulaciones aéreas o marítimas" }
+                                ].map((item) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => setIntakeVisaClass(item.id as any)}
+                                        className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                            intakeVisaClass === item.id 
+                                                ? "border-brand-primary bg-brand-light/30 ring-1 ring-brand-primary font-bold" 
+                                                : "border-border-light bg-white hover:bg-background-hover/30"
+                                        }`}
+                                    >
+                                        <p className="text-sm font-bold text-text-primary">{item.label}</p>
+                                        <p className="text-[10px] text-text-secondary leading-relaxed mt-1">{item.desc}</p>
+                                    </button>
                                 ))}
-                            </div>
-                            <div className="flex gap-3 w-full md:w-auto">
-                                <button 
-                                    onClick={() => router.push('/profile?tab=proceso')}
-                                    className="flex-1 md:flex-none bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors shadow-md text-center cursor-pointer whitespace-nowrap"
-                                >
-                                    Ver mi Perfil
-                                </button>
-                                <a 
-                                    href="https://wa.me/50370200976" 
-                                    target="_blank" 
-                                    rel="noreferrer"
-                                    className="flex-1 md:flex-none border border-border-light bg-white text-text-primary font-semibold px-6 py-3 rounded-lg hover:bg-background-hover transition-colors shadow-sm text-center cursor-pointer whitespace-nowrap"
-                                >
-                                    Hablar con Asesor
-                                </a>
                             </div>
                         </div>
 
-                        {/* Summary of questions and answers */}
-                        <details className="w-full border border-border-light rounded-xl overflow-hidden shadow-sm">
-                            <summary className="bg-background-hover px-6 py-4 font-semibold text-text-primary cursor-pointer hover:bg-border-light/60 transition-colors select-none flex justify-between items-center">
-                                <span>Ver Resumen de Respuestas ({questions.length} campos)</span>
-                                <span className="text-xs text-brand-primary font-bold">Mostrar/Ocultar</span>
-                            </summary>
-                            <div className="p-6 bg-white max-h-96 overflow-y-auto divide-y divide-border-light flex flex-col">
-                                {questions.map((q, idx) => (
-                                    <div key={idx} className="py-3 flex flex-col md:flex-row md:justify-between gap-2">
-                                        <span className="text-sm font-semibold text-text-primary w-full md:w-1/2">{q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}</span>
-                                        <span className="text-sm text-text-secondary w-full md:w-1/2 text-left md:text-right font-medium">
-                                            {answers[idx] || <span className="italic text-text-muted">No respondido / En blanco</span>}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </details>
+                        {/* Buttons */}
+                        <div className="pt-4 border-t border-border-light flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setStarted(false)}
+                                className="px-5 py-3 rounded-xl border border-border-light text-text-secondary font-semibold hover:bg-background-hover transition-all text-sm cursor-pointer"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!intakeType || !intakeVisaClass}
+                                onClick={() => {
+                                    localStorage.setItem("vipro_intake_type", intakeType);
+                                    localStorage.setItem("vipro_intake_visa_class", intakeVisaClass);
+                                    setShowIntake(false);
+                                    saveEvaluationProgress({}, 0);
+                                }}
+                                className="flex-1 py-3 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md text-sm cursor-pointer"
+                            >
+                                Continuar a la Evaluación →
+                            </button>
+                        </div>
                     </div>
                 </main>
                 <Footer />
             </div>
         );
     }
+
 
     // Grouping Annex A and Annex B content
     const annexAItems = annexes.filter(item => {
@@ -859,17 +1095,56 @@ function ViproEvaluationContent() {
                     {/* LEFT/MAIN QUESTION COL */}
                     <div className="lg:col-span-2 flex flex-col gap-6 w-full">
                         
-                        {/* Progress Bar Header */}
-                        <div className="w-full bg-white rounded-2xl p-6 border border-border-light shadow-sm">
-                            <div className="flex justify-between text-xs text-text-secondary font-bold mb-3 uppercase tracking-wider">
-                                <span>Paso {currentStep + 1} de {questions.length}</span>
-                                <span>{Math.round(((currentStep + 1) / questions.length) * 100)}% Completado</span>
+                        {/* 4 Pilares Stepper */}
+                        <div className="w-full bg-white rounded-2xl p-6 border border-border-light shadow-sm flex flex-col gap-6">
+                            {/* The Stepper Headers */}
+                            <div className="grid grid-cols-4 gap-2">
+                                {PILLARS.map((p, idx) => {
+                                    const activePillar = getPillarIndex(question.category);
+                                    const isCurrent = activePillar === idx;
+                                    const isPassed = activePillar > idx;
+                                    return (
+                                        <div key={p.name} className="flex flex-col items-center text-center gap-1.5 relative">
+                                            {/* Step Circle */}
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 ${
+                                                isCurrent 
+                                                    ? "bg-brand-primary text-white ring-4 ring-brand-primary/20 scale-110" 
+                                                    : isPassed 
+                                                    ? "bg-emerald-500 text-white shadow-sm" 
+                                                    : "bg-gray-100 text-text-muted border border-border-light"
+                                            }`}>
+                                                {isPassed ? "✓" : p.icon}
+                                            </div>
+                                            {/* Label */}
+                                            <span className={`text-[9px] font-extrabold tracking-wider uppercase transition-colors duration-300 ${
+                                                isCurrent ? "text-brand-primary font-bold" : "text-text-secondary/70 font-medium"
+                                            }`}>
+                                                {p.name}
+                                            </span>
+                                            {/* Subtext description on hover or small screen */}
+                                            <span className="hidden md:block text-[8px] text-text-muted leading-tight font-medium max-w-[100px] mt-0.5">
+                                                {p.desc}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                            <div className="w-full h-2 bg-border-light rounded-full overflow-hidden text-left">
-                                <div
-                                    className="h-full bg-brand-primary transition-all duration-500 ease-out"
-                                    style={{ width: `${((currentStep + 1) / questions.length) * 100}%` }}
-                                ></div>
+
+                            {/* Divider line between stepper and sub-progress */}
+                            <hr className="border-border-light" />
+
+                            {/* Sub-Progress Bar */}
+                            <div>
+                                <div className="flex justify-between text-[10px] text-text-secondary font-bold mb-2 uppercase tracking-wider text-left">
+                                    <span>Paso {currentStep + 1} de {questions.length} ({question.category.replace(/\[cite:\s*\d+\]/g, "").trim()})</span>
+                                    <span>{Math.round(((currentStep + 1) / questions.length) * 100)}%</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-border-light rounded-full overflow-hidden text-left">
+                                    <div
+                                        className="h-full bg-brand-primary transition-all duration-500 ease-out"
+                                        style={{ width: `${((currentStep + 1) / questions.length) * 100}%` }}
+                                    ></div>
+                                </div>
                             </div>
                         </div>
 

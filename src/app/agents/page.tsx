@@ -23,6 +23,8 @@ interface Agent {
   bio: string;
   whatsapp: string;
   featured: boolean;
+  partnerType: string;
+  agencyName?: string;
 }
 
 export default function AgentesPage() {
@@ -36,6 +38,7 @@ export default function AgentesPage() {
   const [selectedSpecialty, setSelectedSpecialty] = useState("Todos");
   const [selectedLanguage, setSelectedLanguage] = useState("Todos");
   const [selectedAvailability, setSelectedAvailability] = useState("Todos");
+  const [selectedPartnerType, setSelectedPartnerType] = useState("Todos");
   
   // State for active modal agent
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
@@ -90,6 +93,7 @@ export default function AgentesPage() {
   ];
   const languages = ["Todos", "Español", "Inglés", "Francés", "Portugués"];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
+  const partnerTypes = ["Todos", "Agentes Tercerizados", "Agencias de Viajes B2B"];
 
   // Filter logic
   const filteredAgents = (agentsData as Agent[]).filter((agent) => {
@@ -114,7 +118,12 @@ export default function AgentesPage() {
       selectedAvailability === "Todos" ||
       agent.availability.toLowerCase() === selectedAvailability.toLowerCase();
 
-    return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability;
+    const matchesPartnerType =
+      selectedPartnerType === "Todos" ||
+      (selectedPartnerType === "Agentes Tercerizados" && agent.partnerType === "outsourced_agent") ||
+      (selectedPartnerType === "Agencias de Viajes B2B" && agent.partnerType === "b2b_agency");
+
+    return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability && matchesPartnerType;
   });
 
   const clearFilters = () => {
@@ -123,6 +132,7 @@ export default function AgentesPage() {
     setSelectedSpecialty("Todos");
     setSelectedLanguage("Todos");
     setSelectedAvailability("Todos");
+    setSelectedPartnerType("Todos");
   };
 
   return (
@@ -243,7 +253,7 @@ export default function AgentesPage() {
             </div>
 
             {/* Filtro de Disponibilidad */}
-            <div className="mb-2">
+            <div className="mb-5">
               <label htmlFor="availability-select" className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
                 Disponibilidad
               </label>
@@ -256,6 +266,25 @@ export default function AgentesPage() {
                 {availabilities.map((avail) => (
                   <option key={avail} value={avail}>
                     {avail === "Todos" ? "Cualquier disponibilidad" : avail}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filtro de Tipo de Socio */}
+            <div className="mb-2">
+              <label htmlFor="partner-type-select" className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
+                Tipo de Socio
+              </label>
+              <select
+                id="partner-type-select"
+                value={selectedPartnerType}
+                onChange={(e) => setSelectedPartnerType(e.target.value)}
+                className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
+              >
+                {partnerTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
                   </option>
                 ))}
               </select>
@@ -321,6 +350,15 @@ export default function AgentesPage() {
                         {agent.featured && (
                           <span className="inline-flex items-center bg-amber-50 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200">
                             ★ DESTACADO
+                          </span>
+                        )}
+                        {agent.partnerType === "b2b_agency" ? (
+                          <span className="inline-flex items-center bg-blue-50 text-blue-700 text-[9px] font-bold px-2 py-0.5 rounded border border-blue-200" title={`Afiliado a la agencia ${agent.agencyName}`}>
+                            🏢 AGENCIA B2B: {agent.agencyName}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center bg-emerald-50 text-emerald-700 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-200">
+                            💼 TERCERIZADO
                           </span>
                         )}
                       </div>

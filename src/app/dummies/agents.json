@@ -13,7 +13,9 @@
     "availability": "Inmediata",
     "bio": "Especialista en perfiles complejos. He asesorado con éxito a más de 500 aplicantes para visas de turismo y estudios, logrando una tasa de aprobación del 96%.",
     "whatsapp": "https://wa.me/5215512345678?text=Hola%20Sofia,%20me%20gustaria%20recibir%20asesoria%20para%20mi%20visa.",
-    "featured": true
+    "featured": true,
+    "partnerType": "b2b_agency",
+    "agencyName": "Volamos Viajes"
   },
   {
     "id": "agent-2",
@@ -29,7 +31,8 @@
     "availability": "Inmediata",
     "bio": "Experto en visas de negocios, transferencia de ejecutivos y visas de trabajo cualificado para EE.UU. y Australia. Te ayudo a estructurar tu expediente corporativo.",
     "whatsapp": "https://wa.me/5215523456789?text=Hola%20Carlos,%20me%20gustaria%20recibir%20asesoria%20para%20mi%20visa%20de%20trabajo.",
-    "featured": true
+    "featured": true,
+    "partnerType": "outsourced_agent"
   },
   {
     "id": "agent-3",
@@ -45,7 +48,9 @@
     "availability": "Próxima semana",
     "bio": "Enfocada en guiar a estudiantes de Latinoamérica para ingresar a instituciones en Canadá y el Reino Unido. Experta en demostración de fondos e historial académico.",
     "whatsapp": "https://wa.me/5215534567890?text=Hola%20Valeria,%20necesito%20asesoria%20para%20mi%20visa%20de%20estudiante.",
-    "featured": false
+    "featured": false,
+    "partnerType": "b2b_agency",
+    "agencyName": "Mundo Joven B2B"
   },
   {
     "id": "agent-4",
@@ -61,7 +66,8 @@
     "availability": "Inmediata",
     "bio": "Facilito el proceso de renovación de visas de turista sin entrevista. Especialista en solicitudes familiares completas y asesoría para la entrevista consular.",
     "whatsapp": "https://wa.me/5215545678901?text=Hola%20Alejandro,%20quiero%20renovar%20mi%20visa%20de%20turista.",
-    "featured": false
+    "featured": false,
+    "partnerType": "outsourced_agent"
   },
   {
     "id": "agent-5",
@@ -77,7 +83,9 @@
     "availability": "Inmediata",
     "bio": "Ex-auxiliar consular. Preparo a los aplicantes para que afronten la entrevista con seguridad y respondan con precisión a las preguntas clave del cónsul.",
     "whatsapp": "https://wa.me/5215556789012?text=Hola%20Ana%20Maria,%20me%20gustaria%20preparar%20mi%20entrevista%20consular.",
-    "featured": true
+    "featured": true,
+    "partnerType": "b2b_agency",
+    "agencyName": "Volamos Viajes"
   },
   {
     "id": "agent-6",
@@ -93,6 +101,7 @@
     "availability": "Próxima semana",
     "bio": "Experta en trámites ágiles para tripulantes de cruceros y aerolíneas (Visa C1/D), así como visas rápidas de tránsito. Coordinación con agencias navieras.",
     "whatsapp": "https://wa.me/5215567890123?text=Hola%20Mariana,%20necesito%20ayuda%20con%20una%20visa%20de%20tripulante.",
-    "featured": false
+    "featured": false,
+    "partnerType": "outsourced_agent"
   }
 ]

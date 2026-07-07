@@ -12,6 +12,7 @@ export default function VisaDetailPage() {
     const params = useParams();
     const countryCode = (params?.country as string)?.toUpperCase();
     const [openRegion, setOpenRegion] = useState<string | null>(null);
+    const [activeDocTab, setActiveDocTab] = useState<"photos" | "bank" | "ties" | "job">("photos");
     const headerRef = useRef(null);
 
     useEffect(() => {
@@ -78,6 +79,176 @@ export default function VisaDetailPage() {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                </section>
+
+                {/* ── Guía de Preparación de Documentación Crítica ── */}
+                <section className="bg-white border border-border-light rounded-2xl p-8 shadow-sm">
+                    <div className="mb-8 border-b border-border-light pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div className="text-left">
+                            <span className="text-[10px] font-bold text-brand-primary uppercase tracking-widest">Sección Especializada</span>
+                            <h2 className="text-2xl md:text-3xl font-serif text-text-primary mt-1 italic">
+                                Guía de Preparación de Documentación Crítica
+                            </h2>
+                            <p className="text-xs text-text-secondary mt-1">
+                                El 85% de los rechazos consulares ocurren por errores en estos 4 documentos. Asegúrate de cumplir las especificaciones exactas.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+                        {/* Selector Tabs (Left side) */}
+                        <div className="lg:col-span-1 flex flex-row lg:flex-col gap-2.5 overflow-x-auto lg:overflow-x-visible pb-4 lg:pb-0">
+                            {[
+                                { id: "photos", label: "📸 Fotos Consulares", desc: "Formato y encuadre" },
+                                { id: "bank", label: "🏦 Estados de Cuenta", desc: "Solvencia y liquidez" },
+                                { id: "ties", label: "🏡 Demostración de Arraigo", desc: "Vínculos con tu país" },
+                                { id: "job", label: "📄 Constancias Laborales", desc: "Puesto, sueldo y antigüedad" }
+                            ].map((tab) => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setActiveDocTab(tab.id as any)}
+                                    className={`w-full text-left p-4 rounded-xl border cursor-pointer transition-all flex flex-col gap-1 whitespace-nowrap lg:whitespace-normal ${
+                                        activeDocTab === tab.id
+                                            ? "border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/30"
+                                    }`}
+                                >
+                                    <span className="text-xs font-bold text-text-primary">{tab.label}</span>
+                                    <span className="text-[10px] text-text-muted hidden md:block">{tab.desc}</span>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Content Detail Panel (Right side) */}
+                        <div className="lg:col-span-3 bg-background-main border border-border-light rounded-xl p-6 md:p-8 min-h-[300px] flex flex-col justify-between">
+                            {activeDocTab === "photos" && (
+                                <div className="space-y-5 text-left animate-in fade-in duration-300">
+                                    <h4 className="text-lg font-bold text-text-primary">📸 Especificaciones de Fotos Consulares</h4>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        Las embajadas utilizan escaneo biométrico automatizado. Cualquier sombra, brillo o accesorio incorrecto resultará en el rechazo inmediato del formulario.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                                        <div className="bg-white border border-emerald-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-emerald-700">✓ Qué hacer:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Medida exacta de 5x5 cm (2x2 pulgadas).</li>
+                                                <li>Fondo blanco liso y mate (sin sombras).</li>
+                                                <li>Expresión facial neutra, ojos abiertos mirando al frente.</li>
+                                                <li>Tomada dentro de los últimos 6 meses.</li>
+                                            </ul>
+                                        </div>
+                                        <div className="bg-white border border-red-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-red-700">✗ Evitar por completo:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Usar lentes/anteojos (prohibidos por completo).</li>
+                                                <li>Prendas de color blanco (se mezclan con el fondo).</li>
+                                                <li>Cabello cubriendo las cejas u orejas.</li>
+                                                <li>Filtros digitales, retoques de piel o sombras faciales.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeDocTab === "bank" && (
+                                <div className="space-y-5 text-left animate-in fade-in duration-300">
+                                    <h4 className="text-lg font-bold text-text-primary">🏦 Estados de Cuenta Financieros</h4>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        El cónsul busca comprobar que puedes financiar tu viaje por ti mismo y que regresarás. La consistencia es más importante que un saldo alto repentino.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                                        <div className="bg-white border border-emerald-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-emerald-700">✓ Qué presentar:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Estados de cuenta de los últimos 3 a 6 meses completos.</li>
+                                                <li>Cuentas con saldo promedio estable y depósitos recurrentes.</li>
+                                                <li>Documentos oficiales con sello húmedo del banco.</li>
+                                                <li>Tarjetas de crédito que demuestren solvencia adicional.</li>
+                                            </ul>
+                                        </div>
+                                        <div className="bg-white border border-red-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-red-700">✗ Señales de Alerta (Rechazo):</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Depósitos masivos atípicos justo antes del trámite.</li>
+                                                <li>Capturas de pantalla o impresiones de banca en línea sin certificar.</li>
+                                                <li>Cuentas empresariales sin acta constitutiva que te relacione.</li>
+                                                <li>Saldos netos menores al costo estimado del viaje.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeDocTab === "ties" && (
+                                <div className="space-y-5 text-left animate-in fade-in duration-300">
+                                    <h4 className="text-lg font-bold text-text-primary">🏡 Demostración de Arraigo (Lazos Fuertes)</h4>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        La ley consular presume que todo solicitante es un inmigrante potencial. Tu deber es demostrar lazos irrompibles que te obliguen a regresar a tu país de origen.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                                        <div className="bg-white border border-emerald-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-emerald-700">✓ Lazos de Arraigo Válidos:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Títulos de propiedad de bienes inmuebles (casas, terrenos).</li>
+                                                <li>Matrícula de vehículos a tu nombre.</li>
+                                                <li>Certificados de matrimonio y actas de nacimiento de hijos.</li>
+                                                <li>Inscripción universitaria activa y pensión pagada.</li>
+                                            </ul>
+                                        </div>
+                                        <div className="bg-white border border-red-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-red-700">✗ Qué NO cuenta como arraigo:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Cartas de invitación informales en el extranjero.</li>
+                                                <li>Bienes familiares no transferidos legalmente a tu nombre.</li>
+                                                <li>Promesas verbales de retorno sin respaldo físico.</li>
+                                                <li>Contratos de arrendamiento a corto plazo.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeDocTab === "job" && (
+                                <div className="space-y-5 text-left animate-in fade-in duration-300">
+                                    <h4 className="text-lg font-bold text-text-primary">📄 Constancias Laborales y Salariales</h4>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        Tu constancia laboral certifica que tienes ingresos estables y legítimos, y que cuentas con autorización para ausentarte temporalmente por vacaciones.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                                        <div className="bg-white border border-emerald-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-emerald-700">✓ Elementos Obligatorios:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Emitida en hoja membretada original de la empresa.</li>
+                                                <li>Firma física, cargo y contacto directo de Recursos Humanos.</li>
+                                                <li>Detalle exacto de puesto, sueldo mensual y fecha de ingreso.</li>
+                                                <li>Mención explícita del período de vacaciones aprobado.</li>
+                                            </ul>
+                                        </div>
+                                        <div className="bg-white border border-red-200 p-4 rounded-xl space-y-2">
+                                            <p className="font-bold text-red-700">✗ Errores comunes:</p>
+                                            <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
+                                                <li>Constancia sin firma húmeda ni sello de la compañía.</li>
+                                                <li>Omitir el salario mensual o el tiempo de antigüedad.</li>
+                                                <li>Fechas de emisión muy antiguas (deben ser menores a 30 días).</li>
+                                                <li>Falta de número telefónico fijo para validación consular.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="mt-6 pt-4 border-t border-border-light text-center flex flex-col sm:flex-row justify-between items-center gap-3">
+                                <span className="text-[10px] text-text-secondary font-bold uppercase">¿Deseas que revisemos tus documentos?</span>
+                                <Link
+                                    href="/citas"
+                                    className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-lg hover:bg-brand-hover transition-colors shadow-sm"
+                                >
+                                    Agendar Revisión Virtual →
+                                </Link>
+                            </div>
+                        </div>
                     </div>
                 </section>
 

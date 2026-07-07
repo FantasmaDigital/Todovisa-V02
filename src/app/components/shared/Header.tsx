@@ -139,7 +139,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                 </div>
                             </div>
 
-                            <a href="#cita-presencial" className="hover:text-brand-primary transition-colors duration-200">Contacto</a>
+                            <Link href="/citas" className="hover:text-brand-primary transition-colors duration-200">Asesoría Online</Link>
                         </div>
 
                         {
