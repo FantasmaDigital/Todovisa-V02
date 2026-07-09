@@ -122,7 +122,7 @@ function AgentPortalContent() {
         return;
       }
 
-      // INTERRUPTOR TERCERIZADO MOCK
+      // INTERRUPTOR ASESOR INDEPENDIENTE MOCK
       if (cleanId === "TDA-SOFIA7") {
         const mockSofia: AgentApplication = {
           id: "agent-1",
@@ -381,7 +381,7 @@ function AgentPortalContent() {
                     : "text-text-secondary hover:text-text-primary"
                 }`}
               >
-                💼 Agente Tercerizado
+                💼 Asesor Independiente
               </button>
               <button
                 type="button"
@@ -428,7 +428,7 @@ function AgentPortalContent() {
                   }}
                   className="flex-1 py-2 px-3 border border-brand-primary/20 bg-white hover:bg-brand-light rounded-lg text-left text-[11px] font-medium text-text-primary cursor-pointer flex flex-col justify-between"
                 >
-                  <span className="text-brand-primary font-bold">💼 Agente Tercerizado</span>
+                  <span className="text-brand-primary font-bold">💼 Asesor Independiente</span>
                   <span className="font-mono mt-1 font-bold text-gray-500">TDA-SOFIA7</span>
                 </button>
                 <button

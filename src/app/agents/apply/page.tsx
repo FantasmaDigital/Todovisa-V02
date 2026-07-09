@@ -6,8 +6,10 @@ import { Footer } from "../../components/shared/Footer";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import supabase from "@/app/lib/supabase";
+import { useAuthStore } from "../../store/authStore";
 
 interface FormData {
+  applicantType: "outsourced_agent" | "b2b_agency";
   fullName: string;
   email: string;
   phone: string;
@@ -18,11 +20,23 @@ interface FormData {
   targetCountries: string[];
   languages: string[];
   biography: string;
+  // B2B fields
+  companyName: string;
+  taxId: string;
+  legalRepresentative: string;
+  corporateEmail: string;
+  companyPhone: string;
+  companyAddress: string;
+  yearsOfOperation: string;
+  teamSize: string;
+  companyWebsite: string;
+  companyDescription: string;
   termsAccepted: boolean;
 }
 
 export default function AgentApplyPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const [step, setStep] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("agent_apply_step");
@@ -33,6 +47,7 @@ export default function AgentApplyPage() {
 
   const [formData, setFormData] = useState<FormData>(() => {
     const defaultData = {
+      applicantType: "outsourced_agent",
       fullName: "",
       email: "",
       phone: "",
@@ -43,6 +58,16 @@ export default function AgentApplyPage() {
       targetCountries: [],
       languages: [],
       biography: "",
+      companyName: "",
+      taxId: "",
+      legalRepresentative: "",
+      corporateEmail: "",
+      companyPhone: "",
+      companyAddress: "",
+      yearsOfOperation: "",
+      teamSize: "",
+      companyWebsite: "",
+      companyDescription: "",
       termsAccepted: false,
     };
     if (typeof window !== "undefined") {
@@ -51,6 +76,25 @@ export default function AgentApplyPage() {
     }
     return defaultData;
   });
+
+  // Prefill user data if logged in
+  useEffect(() => {
+    if (user) {
+      setFormData((prev) => {
+        const updated = { ...prev };
+        if (!updated.fullName) updated.fullName = `${user.firstName} ${user.lastName}`.trim();
+        if (!updated.email) updated.email = user.email || "";
+        if (!updated.phone) updated.phone = user.phone || "";
+        if (!updated.countryResidence) updated.countryResidence = user.country || "";
+        
+        // Prefill corporate defaults
+        if (!updated.legalRepresentative) updated.legalRepresentative = `${user.firstName} ${user.lastName}`.trim();
+        if (!updated.corporateEmail) updated.corporateEmail = user.email || "";
+        if (!updated.companyPhone) updated.companyPhone = user.phone || "";
+        return updated;
+      });
+    }
+  }, [user]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,6 +112,11 @@ export default function AgentApplyPage() {
       domicilio: null,
       titulo: null,
       cv: null,
+      actaConstitutiva: null,
+      identificacionRepresentante: null,
+      registroTributario: null,
+      domicilioEmpresa: null,
+      brochureServicios: null,
     };
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("agent_apply_docs");
@@ -105,6 +154,7 @@ export default function AgentApplyPage() {
       localStorage.removeItem("agent_apply_docs");
     }
     setFormData({
+      applicantType: "outsourced_agent",
       fullName: "",
       email: "",
       phone: "",
@@ -115,6 +165,16 @@ export default function AgentApplyPage() {
       targetCountries: [],
       languages: [],
       biography: "",
+      companyName: "",
+      taxId: "",
+      legalRepresentative: "",
+      corporateEmail: "",
+      companyPhone: "",
+      companyAddress: "",
+      yearsOfOperation: "",
+      teamSize: "",
+      companyWebsite: "",
+      companyDescription: "",
       termsAccepted: false,
     });
     setDocs({
@@ -124,6 +184,11 @@ export default function AgentApplyPage() {
       domicilio: null,
       titulo: null,
       cv: null,
+      actaConstitutiva: null,
+      identificacionRepresentante: null,
+      registroTributario: null,
+      domicilioEmpresa: null,
+      brochureServicios: null,
     });
     setStep(1);
     setProgressRestored(false);
@@ -139,9 +204,13 @@ export default function AgentApplyPage() {
   };
 
   const saveDraftToSupabase = async (updatedData: FormData, updatedDocs: any, targetStep: number) => {
-    if (!updatedData.email || !updatedData.fullName) return;
+    const isB2b = updatedData.applicantType === "b2b_agency";
+    const emailToUse = isB2b ? updatedData.corporateEmail : updatedData.email;
+    const nameToUse = isB2b ? updatedData.companyName : updatedData.fullName;
 
-    const draftId = applicationId || "TDA-DRAFT-" + Math.floor(100000 + Math.random() * 900000);
+    if (!emailToUse || !nameToUse) return;
+
+    const draftId = applicationId || (isB2b ? "B2B-" : "TDA-DRAFT-") + Math.floor(100000 + Math.random() * 900000);
     if (!applicationId) {
       setApplicationId(draftId);
     }
@@ -149,25 +218,44 @@ export default function AgentApplyPage() {
     try {
       const { error } = await supabase.from("agent_applications").upsert({
         application_id: draftId,
-        full_name: updatedData.fullName,
-        email: updatedData.email,
-        phone: updatedData.phone || "",
-        country_residence: updatedData.countryResidence || "",
-        experience_years: updatedData.experienceYears || "1",
-        linkedin: updatedData.linkedin || "",
+        user_id: user?.id || null,
+        full_name: nameToUse,
+        email: emailToUse,
+        phone: (isB2b ? updatedData.companyPhone : updatedData.phone) || "",
+        country_residence: (isB2b ? updatedData.companyAddress : updatedData.countryResidence) || "",
+        experience_years: (isB2b ? updatedData.yearsOfOperation : updatedData.experienceYears) || "1",
+        linkedin: (isB2b ? updatedData.companyWebsite : updatedData.linkedin) || "",
         specialties: updatedData.specialties || [],
         target_countries: updatedData.targetCountries || [],
         languages: updatedData.languages || [],
-        biography: updatedData.biography || "",
+        biography: (isB2b ? updatedData.companyDescription : updatedData.biography) || "",
         terms_accepted: updatedData.termsAccepted || false,
         status: "draft",
         documents: {
-          dui: updatedDocs.dui?.name || null,
-          certificacion: updatedDocs.certificacion?.name || null,
-          antecedentes: updatedDocs.antecedentes?.name || null,
-          domicilio: updatedDocs.domicilio?.name || null,
-          titulo: updatedDocs.titulo?.name || null,
-          cv: updatedDocs.cv?.name || null,
+          partner_type: updatedData.applicantType,
+          dui: isB2b ? null : updatedDocs.dui?.name || null,
+          certificacion: isB2b ? null : updatedDocs.certificacion?.name || null,
+          antecedentes: isB2b ? null : updatedDocs.antecedentes?.name || null,
+          domicilio: isB2b ? null : updatedDocs.domicilio?.name || null,
+          titulo: isB2b ? null : updatedDocs.titulo?.name || null,
+          cv: isB2b ? null : updatedDocs.cv?.name || null,
+          actaConstitutiva: isB2b ? updatedDocs.actaConstitutiva?.name || null : null,
+          identificacionRepresentante: isB2b ? updatedDocs.identificacionRepresentante?.name || null : null,
+          registroTributario: isB2b ? updatedDocs.registroTributario?.name || null : null,
+          domicilioEmpresa: isB2b ? updatedDocs.domicilioEmpresa?.name || null : null,
+          brochureServicios: isB2b ? updatedDocs.brochureServicios?.name || null : null,
+          b2b_details: isB2b ? {
+            companyName: updatedData.companyName,
+            taxId: updatedData.taxId,
+            legalRepresentative: updatedData.legalRepresentative,
+            corporateEmail: updatedData.corporateEmail,
+            companyPhone: updatedData.companyPhone,
+            companyAddress: updatedData.companyAddress,
+            yearsOfOperation: updatedData.yearsOfOperation,
+            teamSize: updatedData.teamSize,
+            companyWebsite: updatedData.companyWebsite,
+            companyDescription: updatedData.companyDescription
+          } : null,
           last_saved_step: targetStep,
         }
       }, { onConflict: "email" });
@@ -199,21 +287,35 @@ export default function AgentApplyPage() {
 
       if (data) {
         if (data.status === "draft") {
+          const dbDocs = data.documents || {};
+          const dbPartnerType = dbDocs.partner_type || (data.application_id.startsWith("B2B-") ? "b2b_agency" : "outsourced_agent");
+          const isB2b = dbPartnerType === "b2b_agency";
+
           setFormData({
-            fullName: data.full_name,
-            email: data.email,
-            phone: data.phone,
-            countryResidence: data.country_residence,
-            experienceYears: data.experience_years,
-            linkedin: data.linkedin || "",
+            applicantType: dbPartnerType,
+            fullName: isB2b ? "" : data.full_name,
+            email: isB2b ? "" : data.email,
+            phone: isB2b ? "" : data.phone,
+            countryResidence: isB2b ? "" : data.country_residence,
+            experienceYears: isB2b ? "" : data.experience_years,
+            linkedin: isB2b ? "" : data.linkedin || "",
             specialties: data.specialties || [],
             targetCountries: data.target_countries || [],
             languages: data.languages || [],
-            biography: data.biography || "",
+            biography: isB2b ? "" : data.biography || "",
+            companyName: isB2b ? data.full_name : "",
+            taxId: isB2b ? (dbDocs.b2b_details?.taxId || "") : "",
+            legalRepresentative: isB2b ? (dbDocs.b2b_details?.legalRepresentative || "") : "",
+            corporateEmail: isB2b ? data.email : "",
+            companyPhone: isB2b ? data.phone : "",
+            companyAddress: isB2b ? data.country_residence : "",
+            yearsOfOperation: isB2b ? data.experience_years : "",
+            teamSize: isB2b ? (dbDocs.b2b_details?.teamSize || "") : "",
+            companyWebsite: isB2b ? (data.linkedin || "") : "",
+            companyDescription: isB2b ? (data.biography || "") : "",
             termsAccepted: data.terms_accepted || false,
           });
 
-          const dbDocs = data.documents || {};
           setDocs({
             dui: dbDocs.dui ? { name: dbDocs.dui, progress: null } : null,
             certificacion: dbDocs.certificacion ? { name: dbDocs.certificacion, progress: null } : null,
@@ -221,6 +323,11 @@ export default function AgentApplyPage() {
             domicilio: dbDocs.domicilio ? { name: dbDocs.domicilio, progress: null } : null,
             titulo: dbDocs.titulo ? { name: dbDocs.titulo, progress: null } : null,
             cv: dbDocs.cv ? { name: dbDocs.cv, progress: null } : null,
+            actaConstitutiva: dbDocs.actaConstitutiva ? { name: dbDocs.actaConstitutiva, progress: null } : null,
+            identificacionRepresentante: dbDocs.identificacionRepresentante ? { name: dbDocs.identificacionRepresentante, progress: null } : null,
+            registroTributario: dbDocs.registroTributario ? { name: dbDocs.registroTributario, progress: null } : null,
+            domicilioEmpresa: dbDocs.domicilioEmpresa ? { name: dbDocs.domicilioEmpresa, progress: null } : null,
+            brochureServicios: dbDocs.brochureServicios ? { name: dbDocs.brochureServicios, progress: null } : null,
           });
 
           const lastSavedStep = dbDocs.last_saved_step || 3;
@@ -305,30 +412,64 @@ export default function AgentApplyPage() {
   // Validate current step
   const validateStep = () => {
     const newErrors: Record<string, string> = {};
+    const isB2b = formData.applicantType === "b2b_agency";
+
     if (step === 1) {
       // Step 1: Benefits and Earnings model viewer (always valid)
     } else if (step === 2) {
-      if (!formData.fullName.trim()) newErrors.fullName = "El nombre completo es requerido.";
-      if (!formData.email.trim()) {
-        newErrors.email = "El correo electrónico es requerido.";
-      } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-        newErrors.email = "Ingresa un correo electrónico válido.";
+      if (isB2b) {
+        if (!formData.companyName.trim()) newErrors.companyName = "El nombre/razón social de la empresa es requerido.";
+        if (!formData.taxId.trim()) newErrors.taxId = "El registro comercial/tributario es requerido.";
+        if (!formData.legalRepresentative.trim()) newErrors.legalRepresentative = "El nombre del representante legal es requerido.";
+        if (!formData.corporateEmail.trim()) {
+          newErrors.corporateEmail = "El correo corporativo es requerido.";
+        } else if (!/\S+@\S+\.\S+/.test(formData.corporateEmail)) {
+          newErrors.corporateEmail = "Ingresa un correo electrónico válido.";
+        }
+        if (!formData.companyPhone.trim()) newErrors.companyPhone = "El teléfono corporativo es requerido.";
+        if (!formData.companyAddress.trim()) newErrors.companyAddress = "La dirección de la empresa es requerida.";
+      } else {
+        if (!formData.fullName.trim()) newErrors.fullName = "El nombre completo es requerido.";
+        if (!formData.email.trim()) {
+          newErrors.email = "El correo electrónico es requerido.";
+        } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+          newErrors.email = "Ingresa un correo electrónico válido.";
+        }
+        if (!formData.phone.trim()) newErrors.phone = "El teléfono de contacto es requerido.";
+        if (!formData.countryResidence.trim()) newErrors.countryResidence = "El país de residencia es requerido.";
       }
-      if (!formData.phone.trim()) newErrors.phone = "El teléfono de contacto es requerido.";
-      if (!formData.countryResidence.trim()) newErrors.countryResidence = "El país de residencia es requerido.";
     } else if (step === 3) {
-      if (!formData.experienceYears) newErrors.experienceYears = "Selecciona tus años de experiencia.";
+      if (isB2b) {
+        if (!formData.yearsOfOperation) newErrors.yearsOfOperation = "Selecciona los años de operación de la empresa.";
+        if (!formData.teamSize) newErrors.teamSize = "Selecciona el número de asesores en tu equipo.";
+      } else {
+        if (!formData.experienceYears) newErrors.experienceYears = "Selecciona tus años de experiencia.";
+      }
       if (formData.specialties.length === 0) newErrors.specialties = "Selecciona al menos una especialidad.";
       if (formData.targetCountries.length === 0) newErrors.targetCountries = "Selecciona al menos un país destino.";
     } else if (step === 4) {
       if (formData.languages.length === 0) newErrors.languages = "Selecciona al menos un idioma.";
-      if (!formData.biography.trim()) {
-        newErrors.biography = "Por favor, escribe una breve biografía sobre tu experiencia.";
-      } else if (formData.biography.length < 50) {
-        newErrors.biography = "Tu biografía debe tener al menos 50 caracteres.";
+      if (isB2b) {
+        if (!formData.companyDescription.trim()) {
+          newErrors.companyDescription = "Por favor, escribe una breve descripción de la agencia.";
+        } else if (formData.companyDescription.length < 50) {
+          newErrors.companyDescription = "La descripción debe tener al menos 50 caracteres.";
+        }
+      } else {
+        if (!formData.biography.trim()) {
+          newErrors.biography = "Por favor, escribe una breve biografía sobre tu experiencia.";
+        } else if (formData.biography.length < 50) {
+          newErrors.biography = "Tu biografía debe tener al menos 50 caracteres.";
+        }
       }
     } else if (step === 5) {
-      if (!docs.dui) newErrors.doc_dui = "El Documento de Identidad (DUI/INE/Pasaporte) es obligatorio.";
+      if (isB2b) {
+        if (!docs.actaConstitutiva) newErrors.doc_actaConstitutiva = "El Registro de Comercio o Acta Constitutiva es obligatorio.";
+        if (!docs.identificacionRepresentante) newErrors.doc_identificacionRepresentante = "La identificación del representante legal es obligatoria.";
+        if (!docs.registroTributario) newErrors.doc_registroTributario = "El comprobante de Registro Tributario (RFC/RUC) es obligatorio.";
+      } else {
+        if (!docs.dui) newErrors.doc_dui = "El Documento de Identidad (DUI/INE/Pasaporte) es obligatorio.";
+      }
     } else if (step === 6) {
       if (!formData.termsAccepted) {
         newErrors.termsAccepted = "Debes aceptar los términos y condiciones para continuar.";
@@ -339,10 +480,19 @@ export default function AgentApplyPage() {
   };
 
   const nextStep = async () => {
+    if (step === 1) {
+      if (!user) {
+        router.push("/auth/signup?redirect=/agents/apply");
+        return;
+      }
+      setStep(2);
+      return;
+    }
     if (step === 2) {
       if (!validateStep()) return;
       setIsSubmitting(true);
-      const canProceed = await checkAndLoadDraft(formData.email);
+      const emailToValidate = formData.applicantType === "b2b_agency" ? formData.corporateEmail : formData.email;
+      const canProceed = await checkAndLoadDraft(emailToValidate);
       setIsSubmitting(false);
       if (!canProceed) return;
       
@@ -376,30 +526,53 @@ export default function AgentApplyPage() {
     setIsSubmitting(true);
     setErrors({});
 
-    const randomId = applicationId || "TDA-" + Math.floor(100000 + Math.random() * 900000);
+    const isB2b = formData.applicantType === "b2b_agency";
+    const emailToUse = isB2b ? formData.corporateEmail : formData.email;
+    const nameToUse = isB2b ? formData.companyName : formData.fullName;
+    const randomId = applicationId || (isB2b ? "B2B-" : "TDA-") + Math.floor(100000 + Math.random() * 900000);
 
     try {
       const { error } = await supabase.from("agent_applications").upsert({
         application_id: randomId,
-        full_name: formData.fullName,
-        email: formData.email,
-        phone: formData.phone,
-        country_residence: formData.countryResidence,
-        experience_years: formData.experienceYears,
-        linkedin: formData.linkedin,
+        user_id: user?.id || null,
+        full_name: nameToUse,
+        email: emailToUse,
+        phone: isB2b ? formData.companyPhone : formData.phone,
+        country_residence: isB2b ? formData.companyAddress : formData.countryResidence,
+        experience_years: isB2b ? formData.yearsOfOperation : formData.experienceYears,
+        linkedin: isB2b ? formData.companyWebsite : formData.linkedin,
         specialties: formData.specialties,
         target_countries: formData.targetCountries,
         languages: formData.languages,
-        biography: formData.biography,
+        biography: isB2b ? formData.companyDescription : formData.biography,
         terms_accepted: formData.termsAccepted,
         status: "pending",
         documents: {
-          dui: docs.dui?.name || null,
-          certificacion: docs.certificacion?.name || null,
-          antecedentes: docs.antecedentes?.name || null,
-          domicilio: docs.domicilio?.name || null,
-          titulo: docs.titulo?.name || null,
-          cv: docs.cv?.name || null,
+          partner_type: formData.applicantType,
+          dui: isB2b ? null : docs.dui?.name || null,
+          certificacion: isB2b ? null : docs.certificacion?.name || null,
+          antecedentes: isB2b ? null : docs.antecedentes?.name || null,
+          domicilio: isB2b ? null : docs.domicilio?.name || null,
+          titulo: isB2b ? null : docs.titulo?.name || null,
+          cv: isB2b ? null : docs.cv?.name || null,
+          actaConstitutiva: isB2b ? docs.dui?.name || null : null,
+          identificacionRepresentante: isB2b ? docs.certificacion?.name || null : null,
+          registroTributario: isB2b ? docs.antecedentes?.name || null : null,
+          domicilioEmpresa: isB2b ? docs.domicilio?.name || null : null,
+          brochureServicios: isB2b ? docs.titulo?.name || null : null,
+          licenciaTuristica: isB2b ? docs.cv?.name || null : null,
+          b2b_details: isB2b ? {
+            companyName: formData.companyName,
+            taxId: formData.taxId,
+            legalRepresentative: formData.legalRepresentative,
+            corporateEmail: formData.corporateEmail,
+            companyPhone: formData.companyPhone,
+            companyAddress: formData.companyAddress,
+            yearsOfOperation: formData.yearsOfOperation,
+            teamSize: formData.teamSize,
+            companyWebsite: formData.companyWebsite,
+            companyDescription: formData.companyDescription
+          } : null,
         }
       }, { onConflict: "email" });
 
@@ -421,25 +594,45 @@ export default function AgentApplyPage() {
         console.warn("⚠️ Supabase no disponible. Guardando postulación localmente.");
         const localData = {
           application_id: randomId,
-          full_name: formData.fullName,
-          email: formData.email,
-          phone: formData.phone,
-          country_residence: formData.countryResidence,
-          experience_years: formData.experienceYears,
-          linkedin: formData.linkedin,
+          user_id: user?.id || null,
+          full_name: nameToUse,
+          email: emailToUse,
+          phone: isB2b ? formData.companyPhone : formData.phone,
+          country_residence: isB2b ? formData.companyAddress : formData.countryResidence,
+          experience_years: isB2b ? formData.yearsOfOperation : formData.experienceYears,
+          linkedin: isB2b ? formData.companyWebsite : formData.linkedin,
           specialties: formData.specialties,
           target_countries: formData.targetCountries,
           languages: formData.languages,
-          biography: formData.biography,
+          biography: isB2b ? formData.companyDescription : formData.biography,
           terms_accepted: formData.termsAccepted,
           status: "pending",
           documents: {
-            dui: docs.dui?.name || null,
-            certificacion: docs.certificacion?.name || null,
-            antecedentes: docs.antecedentes?.name || null,
-            domicilio: docs.domicilio?.name || null,
-            titulo: docs.titulo?.name || null,
-            cv: docs.cv?.name || null,
+            partner_type: formData.applicantType,
+            dui: isB2b ? null : docs.dui?.name || null,
+            certificacion: isB2b ? null : docs.certificacion?.name || null,
+            antecedentes: isB2b ? null : docs.antecedentes?.name || null,
+            domicilio: isB2b ? null : docs.domicilio?.name || null,
+            titulo: isB2b ? null : docs.titulo?.name || null,
+            cv: isB2b ? null : docs.cv?.name || null,
+            actaConstitutiva: isB2b ? docs.dui?.name || null : null,
+            identificacionRepresentante: isB2b ? docs.certificacion?.name || null : null,
+            registroTributario: isB2b ? docs.antecedentes?.name || null : null,
+            domicilioEmpresa: isB2b ? docs.domicilio?.name || null : null,
+            brochureServicios: isB2b ? docs.titulo?.name || null : null,
+            licenciaTuristica: isB2b ? docs.cv?.name || null : null,
+            b2b_details: isB2b ? {
+              companyName: formData.companyName,
+              taxId: formData.taxId,
+              legalRepresentative: formData.legalRepresentative,
+              corporateEmail: formData.corporateEmail,
+              companyPhone: formData.companyPhone,
+              companyAddress: formData.companyAddress,
+              yearsOfOperation: formData.yearsOfOperation,
+              teamSize: formData.teamSize,
+              companyWebsite: formData.companyWebsite,
+              companyDescription: formData.companyDescription
+            } : null,
           },
           created_at: new Date().toISOString()
         };
@@ -531,39 +724,122 @@ export default function AgentApplyPage() {
             <form onSubmit={handleSubmit} className="mt-12 space-y-6">
               {/* STEP 1: Incentives & Earnings model */}
               {step === 1 && (
-                <div className="space-y-6 animate-fadeIn">
+                <div className="space-y-8 animate-fadeIn">
+                  {/* Selector of Applicant Type */}
+                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 text-center">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-primary block mb-3">Paso 1: Modalidad de Registro</span>
+                    <h3 className="text-lg font-bold text-text-primary mb-6">Selecciona el tipo de perfil para tu postulación</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl mx-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, applicantType: "outsourced_agent" }));
+                        }}
+                        className={`p-5 rounded-lg border text-left transition-all duration-300 flex flex-col justify-between group cursor-pointer ${
+                          formData.applicantType === "outsourced_agent"
+                            ? "border-brand-primary bg-brand-light/30 shadow-md ring-1 ring-brand-primary"
+                            : "border-border-light bg-white hover:bg-background-hover hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2 w-full">
+                          <span className="text-2xl">💼</span>
+                          <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${formData.applicantType === "outsourced_agent" ? "border-brand-primary bg-brand-primary" : "border-gray-300"}`}>
+                            {formData.applicantType === "outsourced_agent" && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">Asesor Independiente</h4>
+                          <p className="text-[11px] text-text-secondary mt-1 leading-relaxed">Trabaja a título individual recibiendo casos pre-calificados y ganando comisiones semanales directas.</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, applicantType: "b2b_agency" }));
+                        }}
+                        className={`p-5 rounded-lg border text-left transition-all duration-300 flex flex-col justify-between group cursor-pointer ${
+                          formData.applicantType === "b2b_agency"
+                            ? "border-brand-primary bg-brand-light/30 shadow-md ring-1 ring-brand-primary"
+                            : "border-border-light bg-white hover:bg-background-hover hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2 w-full">
+                          <span className="text-2xl">🏢</span>
+                          <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${formData.applicantType === "b2b_agency" ? "border-brand-primary bg-brand-primary" : "border-gray-300"}`}>
+                            {formData.applicantType === "b2b_agency" && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">Agencia de Viajes B2B / Empresa</h4>
+                          <p className="text-[11px] text-text-secondary mt-1 leading-relaxed">Asocia tu agencia de viajes o empresa para distribuir visados y gestionar los casos de tus clientes en equipo.</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Benefits grid */}
                   <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
                     <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-primary">Por Qué Unirse</span>
-                    <h2 className="text-xl font-bold text-text-primary mt-1 mb-5">Ventajas de la Red TodoVisa</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+                    <h2 className="text-xl font-bold text-text-primary mt-1 mb-5">
+                      {formData.applicantType === "b2b_agency" ? "Ventajas de Alianza para Agencias B2B" : "Ventajas de la Red TodoVisa"}
+                    </h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-left">
                       <div className="flex gap-3">
                         <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-text-primary">Clientes Pre-Calificados</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Te asignamos solicitudes evaluadas y viables, sin que tengas que buscar clientes por tu cuenta.</p>
-                        </div>
+                        {formData.applicantType === "b2b_agency" ? (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Distribución Exclusiva</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Ofrece a tus clientes el servicio de perfilamiento premium respaldado por la tecnología y expertos de TodoVisa.</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Clientes Pre-Calificados</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Te asignamos solicitudes evaluadas y viables, sin que tengas que buscar clientes por tu cuenta.</p>
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-3">
                         <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-text-primary">Ganancias Transparentes</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Comisiones claras que premian tu experiencia y eficiencia. Sin sorpresas ni costos ocultos.</p>
-                        </div>
+                        {formData.applicantType === "b2b_agency" ? (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Comisiones Consolidadas</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Esquema corporativo preferente del 75% al 85% sobre cada trámite completado por tu equipo.</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Ganancias Transparentes</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Comisiones claras que premian tu experiencia y eficiencia. Sin sorpresas ni costos ocultos.</p>
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-3">
                         <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-text-primary">Gestión 100% Digital</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Panel centralizado para expedientes, chat con clientes y archivo seguro de documentos.</p>
-                        </div>
+                        {formData.applicantType === "b2b_agency" ? (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Panel Multi-Agente B2B</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Monitorea y gestiona los expedientes de todos los clientes de tu agencia desde un tablero consolidado.</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Gestión 100% Digital</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Panel centralizado para expedientes, chat con clientes y archivo seguro de documentos.</p>
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-3">
                         <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-text-primary">Flexibilidad Total</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Trabaja desde cualquier lugar, controla tus horarios y escala tu práctica a tu ritmo.</p>
-                        </div>
+                        {formData.applicantType === "b2b_agency" ? (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Marca Homologada Partner</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Sello oficial de Agencia Autorizada TodoVisa para aumentar la confianza y conversión de tu marca.</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary">Flexibilidad Total</h4>
+                            <p className="text-xs text-text-secondary mt-1 leading-relaxed">Trabaja desde cualquier lugar, controla tus horarios y escala tu práctica a tu ritmo.</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -574,16 +850,24 @@ export default function AgentApplyPage() {
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/75">Modelo de Ingresos</span>
-                        <h3 className="text-lg font-bold font-serif italic text-white mt-0.5">Detalles de Ganancia</h3>
+                        <h3 className="text-lg font-bold font-serif italic text-white mt-0.5">
+                          {formData.applicantType === "b2b_agency" ? "Plan Financiero Corporativo B2B" : "Detalles de Ganancia"}
+                        </h3>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-3 text-xs">
                         <div className="text-center">
-                          <span className="block text-2xl font-bold text-white">70%</span>
+                          <span className="block text-2xl font-bold text-white">
+                            {formData.applicantType === "b2b_agency" ? "75%" : "70%"}
+                          </span>
                           <span className="text-white/60 leading-tight">Comisión base</span>
                         </div>
                         <div className="text-center">
-                          <span className="block text-2xl font-bold text-white">+10%</span>
-                          <span className="text-white/60 leading-tight">Bono excelencia</span>
+                          <span className="block text-2xl font-bold text-white">
+                            {formData.applicantType === "b2b_agency" ? "+10%" : "+10%"}
+                          </span>
+                          <span className="text-white/60 leading-tight">
+                            {formData.applicantType === "b2b_agency" ? "Bono volumen" : "Bono excelencia"}
+                          </span>
                         </div>
                         <div className="text-center">
                           <span className="block text-sm font-bold text-white mt-1">Semanal</span>
@@ -595,102 +879,238 @@ export default function AgentApplyPage() {
                         </div>
                       </div>
                     </div>
-                    <p className="text-[10px] text-white/50 mt-4 leading-normal">* Bono de excelencia aplicable al mantener calificación promedio ≥ 4.8 estrellas en ciclos mensuales.</p>
+                    <p className="text-[10px] text-white/50 mt-4 leading-normal">
+                      {formData.applicantType === "b2b_agency"
+                        ? "* El bono de volumen se activa automáticamente al consolidar más de 15 solicitudes mensuales a través de tu agencia."
+                        : "* Bono de excelencia aplicable al mantener calificación promedio ≥ 4.8 estrellas en ciclos mensuales."}
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* STEP 2: Personal Info */}
+              {/* STEP 2: Personal / Corporate Info */}
               {step === 2 && (
                 <div className="space-y-5 animate-fadeIn text-left">
-                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Información Personal</h3>
+                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">
+                    {formData.applicantType === "b2b_agency" ? "Datos de la Agencia B2B" : "Información Personal"}
+                  </h3>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div>
-                      <label htmlFor="fullName" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Nombre Completo</label>
-                      <input
-                        type="text"
-                        name="fullName"
-                        id="fullName"
-                        value={formData.fullName}
-                        onChange={handleInputChange}
-                        placeholder="Ej. Juan Pérez García"
-                        className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
-                      />
-                      {errors.fullName && <p className="text-xs text-status-error mt-1">{errors.fullName}</p>}
-                    </div>
+                  {formData.applicantType === "b2b_agency" ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div>
+                        <label htmlFor="companyName" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Nombre / Razón Social de la Agencia</label>
+                        <input
+                          type="text"
+                          name="companyName"
+                          id="companyName"
+                          value={formData.companyName}
+                          onChange={handleInputChange}
+                          placeholder="Ej. Volamos Viajes S.A. de C.V."
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.companyName && <p className="text-xs text-status-error mt-1">{errors.companyName}</p>}
+                      </div>
 
-                    <div>
-                      <label htmlFor="email" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Correo Electrónico</label>
-                      <input
-                        type="email"
-                        name="email"
-                        id="email"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        placeholder="ejemplo@todovisa.com"
-                        className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
-                      />
-                      {errors.email && <p className="text-xs text-status-error mt-1">{errors.email}</p>}
-                    </div>
+                      <div>
+                        <label htmlFor="taxId" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Registro Comercial / Identificación Tributaria (RFC / RUC)</label>
+                        <input
+                          type="text"
+                          name="taxId"
+                          id="taxId"
+                          value={formData.taxId}
+                          onChange={handleInputChange}
+                          placeholder="Ej. VVI-123456-XX1"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.taxId && <p className="text-xs text-status-error mt-1">{errors.taxId}</p>}
+                      </div>
 
-                    <div>
-                      <label htmlFor="phone" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Teléfono / WhatsApp</label>
-                      <input
-                        type="text"
-                        name="phone"
-                        id="phone"
-                        value={formData.phone}
-                        onChange={handleInputChange}
-                        placeholder="+52 55 1234 5678"
-                        className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
-                      />
-                      {errors.phone && <p className="text-xs text-status-error mt-1">{errors.phone}</p>}
-                    </div>
+                      <div>
+                        <label htmlFor="legalRepresentative" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Nombre del Representante Legal</label>
+                        <input
+                          type="text"
+                          name="legalRepresentative"
+                          id="legalRepresentative"
+                          value={formData.legalRepresentative}
+                          onChange={handleInputChange}
+                          placeholder="Ej. Eduardo Martínez Solís"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.legalRepresentative && <p className="text-xs text-status-error mt-1">{errors.legalRepresentative}</p>}
+                      </div>
 
-                    <div>
-                      <label htmlFor="countryResidence" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">País y Ciudad de Residencia</label>
-                      <input
-                        type="text"
-                        name="countryResidence"
-                        id="countryResidence"
-                        value={formData.countryResidence}
-                        onChange={handleInputChange}
-                        placeholder="Ej. CDMX, México"
-                        className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
-                      />
-                      {errors.countryResidence && <p className="text-xs text-status-error mt-1">{errors.countryResidence}</p>}
+                      <div>
+                        <label htmlFor="corporateEmail" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Correo Electrónico Corporativo</label>
+                        <input
+                          type="email"
+                          name="corporateEmail"
+                          id="corporateEmail"
+                          value={formData.corporateEmail}
+                          onChange={handleInputChange}
+                          placeholder="reservas@tuagencia.com"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.corporateEmail && <p className="text-xs text-status-error mt-1">{errors.corporateEmail}</p>}
+                      </div>
+
+                      <div>
+                        <label htmlFor="companyPhone" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Teléfono Corporativo / WhatsApp de Contacto</label>
+                        <input
+                          type="text"
+                          name="companyPhone"
+                          id="companyPhone"
+                          value={formData.companyPhone}
+                          onChange={handleInputChange}
+                          placeholder="Ej. +52 55 9876 5432"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.companyPhone && <p className="text-xs text-status-error mt-1">{errors.companyPhone}</p>}
+                      </div>
+
+                      <div>
+                        <label htmlFor="companyAddress" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Dirección y Ciudad de la Agencia</label>
+                        <input
+                          type="text"
+                          name="companyAddress"
+                          id="companyAddress"
+                          value={formData.companyAddress}
+                          onChange={handleInputChange}
+                          placeholder="Ej. Av. Reforma 405, CDMX, México"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.companyAddress && <p className="text-xs text-status-error mt-1">{errors.companyAddress}</p>}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div>
+                        <label htmlFor="fullName" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Nombre Completo</label>
+                        <input
+                          type="text"
+                          name="fullName"
+                          id="fullName"
+                          value={formData.fullName}
+                          onChange={handleInputChange}
+                          placeholder="Ej. Juan Pérez García"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.fullName && <p className="text-xs text-status-error mt-1">{errors.fullName}</p>}
+                      </div>
+
+                      <div>
+                        <label htmlFor="email" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Correo Electrónico</label>
+                        <input
+                          type="email"
+                          name="email"
+                          id="email"
+                          value={formData.email}
+                          onChange={handleInputChange}
+                          placeholder="ejemplo@todovisa.com"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.email && <p className="text-xs text-status-error mt-1">{errors.email}</p>}
+                      </div>
+
+                      <div>
+                        <label htmlFor="phone" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Teléfono / WhatsApp</label>
+                        <input
+                          type="text"
+                          name="phone"
+                          id="phone"
+                          value={formData.phone}
+                          onChange={handleInputChange}
+                          placeholder="+52 55 1234 5678"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.phone && <p className="text-xs text-status-error mt-1">{errors.phone}</p>}
+                      </div>
+
+                      <div>
+                        <label htmlFor="countryResidence" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">País y Ciudad de Residencia</label>
+                        <input
+                          type="text"
+                          name="countryResidence"
+                          id="countryResidence"
+                          value={formData.countryResidence}
+                          onChange={handleInputChange}
+                          placeholder="Ej. CDMX, México"
+                          className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        />
+                        {errors.countryResidence && <p className="text-xs text-status-error mt-1">{errors.countryResidence}</p>}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* STEP 3: Professional Details */}
+              {/* STEP 3: Professional Details / Operations */}
               {step === 3 && (
                 <div className="space-y-6 animate-fadeIn text-left">
-                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Perfil Profesional</h3>
+                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">
+                    {formData.applicantType === "b2b_agency" ? "Detalles de Operación" : "Perfil Profesional"}
+                  </h3>
 
-                  <div>
-                    <label htmlFor="experienceYears" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Experiencia en Trámites Consulares</label>
-                    <select
-                      name="experienceYears"
-                      id="experienceYears"
-                      value={formData.experienceYears}
-                      onChange={handleInputChange}
-                      className="w-full md:w-1/2 px-3 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all cursor-pointer"
-                    >
-                      <option value="">Selecciona una opción</option>
-                      <option value="Menos de 1 año">Menos de 1 año</option>
-                      <option value="1-3 años">1 a 3 años</option>
-                      <option value="3-5 años">3 a 5 años</option>
-                      <option value="Más de 5 años">Más de 5 años</option>
-                    </select>
-                    {errors.experienceYears && <p className="text-xs text-status-error mt-1.5">{errors.experienceYears}</p>}
-                  </div>
+                  {formData.applicantType === "b2b_agency" ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div>
+                        <label htmlFor="yearsOfOperation" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Operación en el Sector de Viajes</label>
+                        <select
+                          name="yearsOfOperation"
+                          id="yearsOfOperation"
+                          value={formData.yearsOfOperation}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all cursor-pointer"
+                        >
+                          <option value="">Selecciona una opción</option>
+                          <option value="Menos de 2 años">Menos de 2 años</option>
+                          <option value="2-5 años">2 a 5 años</option>
+                          <option value="5-10 años">5 a 10 años</option>
+                          <option value="Más de 10 años">Más de 10 años</option>
+                        </select>
+                        {errors.yearsOfOperation && <p className="text-xs text-status-error mt-1.5">{errors.yearsOfOperation}</p>}
+                      </div>
+
+                      <div>
+                        <label htmlFor="teamSize" className="block text-xs font-bold text-text-secondary uppercase mb-2">Cantidad de Asesores en tu Equipo</label>
+                        <select
+                          name="teamSize"
+                          id="teamSize"
+                          value={formData.teamSize}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all cursor-pointer"
+                        >
+                          <option value="">Selecciona una opción</option>
+                          <option value="1-3 asesores">1 a 3 asesores</option>
+                          <option value="4-10 asesores">4 a 10 asesores</option>
+                          <option value="11-25 asesores">11 a 25 asesores</option>
+                          <option value="Más de 25 asesores">Más de 25 asesores</option>
+                        </select>
+                        {errors.teamSize && <p className="text-xs text-status-error mt-1.5">{errors.teamSize}</p>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label htmlFor="experienceYears" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Experiencia en Trámites Consulares</label>
+                      <select
+                        name="experienceYears"
+                        id="experienceYears"
+                        value={formData.experienceYears}
+                        onChange={handleInputChange}
+                        className="w-full md:w-1/2 px-3 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all cursor-pointer"
+                      >
+                        <option value="">Selecciona una opción</option>
+                        <option value="Menos de 1 año">Menos de 1 año</option>
+                        <option value="1-3 años">1 a 3 años</option>
+                        <option value="3-5 años">3 a 5 años</option>
+                        <option value="Más de 5 años">Más de 5 años</option>
+                      </select>
+                      {errors.experienceYears && <p className="text-xs text-status-error mt-1.5">{errors.experienceYears}</p>}
+                    </div>
+                  )}
 
                   {/* Specialties */}
                   <div>
-                    <span className="block text-xs font-bold text-text-secondary uppercase mb-3">Especialidades de Visados</span>
+                    <span className="block text-xs font-bold text-text-secondary uppercase mb-3">Especialidades de Visados que Gestionan</span>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-left">
                       {specialtiesList.map((spec) => (
                         <label
@@ -719,7 +1139,7 @@ export default function AgentApplyPage() {
 
                   {/* Target Countries */}
                   <div>
-                    <span className="block text-xs font-bold text-text-secondary uppercase mb-3">Países Destino que Domina</span>
+                    <span className="block text-xs font-bold text-text-secondary uppercase mb-3">Países Destino que Domina su Operación</span>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-left">
                       {countriesList.map((country) => (
                         <label
@@ -748,13 +1168,17 @@ export default function AgentApplyPage() {
                 </div>
               )}
 
-              {/* STEP 4: Certifications & Bio */}
+              {/* STEP 4: Certifications & Corporate Profile */}
               {step === 4 && (
                 <div className="space-y-6 animate-fadeIn text-left">
-                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Certificaciones y Biografía</h3>
+                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">
+                    {formData.applicantType === "b2b_agency" ? "Perfil Corporativo" : "Certificaciones y Biografía"}
+                  </h3>
 
                   <div>
-                    <span className="block text-xs font-bold text-text-secondary uppercase mb-3">Idiomas que Domina</span>
+                    <span className="block text-xs font-bold text-text-secondary uppercase mb-3">
+                      {formData.applicantType === "b2b_agency" ? "Idiomas que Domina el Equipo" : "Idiomas que Domina"}
+                    </span>
                     <div className="flex flex-wrap gap-2.5">
                       {languagesList.map((lang) => (
                         <label
@@ -779,37 +1203,45 @@ export default function AgentApplyPage() {
                   </div>
 
                   <div>
-                    <label htmlFor="linkedin" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Perfil de LinkedIn (Opcional)</label>
+                    <label htmlFor={formData.applicantType === "b2b_agency" ? "companyWebsite" : "linkedin"} className="block text-xs font-bold text-text-secondary uppercase mb-1.5">
+                      {formData.applicantType === "b2b_agency" ? "Sitio Web Corporativo o LinkedIn de la Agencia" : "Perfil de LinkedIn (Opcional)"}
+                    </label>
                     <input
                       type="url"
-                      name="linkedin"
-                      id="linkedin"
-                      value={formData.linkedin}
+                      name={formData.applicantType === "b2b_agency" ? "companyWebsite" : "linkedin"}
+                      id={formData.applicantType === "b2b_agency" ? "companyWebsite" : "linkedin"}
+                      value={formData.applicantType === "b2b_agency" ? formData.companyWebsite : formData.linkedin}
                       onChange={handleInputChange}
-                      placeholder="https://linkedin.com/in/tu-perfil"
+                      placeholder={formData.applicantType === "b2b_agency" ? "https://www.tuagencia.com" : "https://linkedin.com/in/tu-perfil"}
                       className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
                     />
                   </div>
 
-                  {/* Biography */}
+                  {/* Biography / Corporate Description */}
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
-                      <label htmlFor="biography" className="block text-xs font-bold text-text-secondary uppercase">Tu Trayectoria y Biografía Profesional</label>
-                      <span className={`text-[10px] font-bold ${formData.biography.length > 500 ? "text-status-error" : "text-text-secondary"}`}>
-                        {formData.biography.length}/500 caracteres
+                      <label htmlFor={formData.applicantType === "b2b_agency" ? "companyDescription" : "biography"} className="block text-xs font-bold text-text-secondary uppercase">
+                        {formData.applicantType === "b2b_agency" ? "Trayectoria y Descripción de la Agencia" : "Tu Trayectoria y Biografía Profesional"}
+                      </label>
+                      <span className={`text-[10px] font-bold ${(formData.applicantType === "b2b_agency" ? formData.companyDescription.length : formData.biography.length) > 500 ? "text-status-error" : "text-text-secondary"}`}>
+                        {(formData.applicantType === "b2b_agency" ? formData.companyDescription.length : formData.biography.length)}/500 caracteres
                       </span>
                     </div>
                     <textarea
-                      name="biography"
-                      id="biography"
+                      name={formData.applicantType === "b2b_agency" ? "companyDescription" : "biography"}
+                      id={formData.applicantType === "b2b_agency" ? "companyDescription" : "biography"}
                       rows={4}
-                      value={formData.biography}
+                      value={formData.applicantType === "b2b_agency" ? formData.companyDescription : formData.biography}
                       onChange={handleInputChange}
-                      placeholder="Cuéntanos sobre tu trayectoria ayudando a personas a obtener sus visados..."
+                      placeholder={formData.applicantType === "b2b_agency" ? "Describe brevemente los servicios de tu agencia de viajes, trayectoria comercial y por qué desean ser aliados de TodoVisa..." : "Cuéntanos sobre tu trayectoria ayudando a personas a obtener sus visados..."}
                       maxLength={500}
                       className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all resize-none"
                     />
-                    {errors.biography && <p className="text-xs text-status-error mt-1">{errors.biography}</p>}
+                    {(formData.applicantType === "b2b_agency" ? errors.companyDescription : errors.biography) && (
+                      <p className="text-xs text-status-error mt-1">
+                        {formData.applicantType === "b2b_agency" ? errors.companyDescription : errors.biography}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-start gap-3 px-4 py-3 bg-brand-light border border-brand-primary/20 rounded-sm">
@@ -817,7 +1249,15 @@ export default function AgentApplyPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                     </svg>
                     <p className="text-xs text-brand-primary leading-relaxed">
-                      En el siguiente paso podrás subir tus documentos oficiales: <strong>DUI/INE/Pasaporte, certificaciones, antecedentes penales, comprobante de domicilio, título profesional y CV</strong>.
+                      {formData.applicantType === "b2b_agency" ? (
+                        <>
+                          En el siguiente paso podrás subir los documentos de la empresa: <strong>Registro de Comercio/Acta Constitutiva, DUI/Identificación del Representante Legal, Comprobante de Registro Tributario, Comprobante de Domicilio Corporativo y Brochure de Servicios</strong>.
+                        </>
+                      ) : (
+                        <>
+                          En el siguiente paso podrás subir tus documentos oficiales: <strong>DUI/INE/Pasaporte, certificaciones, antecedentes penales, comprobante de domicilio, título profesional y CV</strong>.
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -827,16 +1267,28 @@ export default function AgentApplyPage() {
               {step === 5 && (
                 <div className="space-y-6 animate-fadeIn text-left">
                   <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Documentación Requerida</h3>
-                  <p className="text-xs text-text-secondary font-semibold">Sube los documentos solicitados. Los marcados con <span className="text-status-error font-bold">*</span> son obligatorios. Formatos: PDF, JPG, PNG (Máx. 10MB por archivo).</p>
+                  <p className="text-xs text-text-secondary font-semibold">
+                    Sube los documentos solicitados. Los marcados con <span className="text-status-error font-bold">*</span> son obligatorios. Formatos: PDF, JPG, PNG (Máx. 10MB por archivo).
+                  </p>
 
-                  {([
-                    { key: "dui", label: "Documento Único de Identidad (DUI / INE / Pasaporte)", required: true, hint: "Página principal con foto y datos visibles" },
-                    { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. RCIC, CSIC, consulado acreditante" },
-                    { key: "antecedentes", label: "Carta de No Antecedentes Penales", required: false, hint: "Emitida en los últimos 6 meses" },
-                    { key: "domicilio", label: "Comprobante de Domicilio", required: false, hint: "Recibo de luz, agua o estado de cuenta (máx. 3 meses)" },
-                    { key: "titulo", label: "Título o Diploma Profesional", required: false, hint: "Derecho, Relaciones Internacionales, Administración, etc." },
-                    { key: "cv", label: "Currículum Vitae (CV)", required: false, hint: "Formato PDF preferido" },
-                  ] as { key: string; label: string; required: boolean; hint: string }[]).map(({ key, label, required, hint }) => (
+                  {((formData.applicantType === "b2b_agency"
+                    ? [
+                        { key: "dui", label: "Acta Constitutiva / Registro de Comercio", required: true, hint: "Escritura pública que acredite la existencia legal de la empresa" },
+                        { key: "certificacion", label: "Identificación del Representante Legal (DUI / INE / Pasaporte)", required: true, hint: "Documento oficial con foto del firmante autorizado" },
+                        { key: "antecedentes", label: "Registro Tributario (RFC / RUC / Tax ID)", required: true, hint: "Cédula fiscal o constancia de inscripción de impuestos" },
+                        { key: "domicilio", label: "Comprobante de Domicilio de la Oficina", required: false, hint: "Recibo de servicio (agua, luz, teléfono) a nombre de la empresa" },
+                        { key: "titulo", label: "Brochure de Servicios / Presentación Comercial", required: false, hint: "Portafolio de servicios turísticos o de visado que ofrece la agencia" },
+                        { key: "cv", label: "Licencia de Operación Turística (Opcional)", required: false, hint: "Acreditación de turismo nacional o local del ministerio correspondiente" },
+                      ]
+                    : [
+                        { key: "dui", label: "Documento Único de Identidad (DUI / INE / Pasaporte)", required: true, hint: "Página principal con foto y datos visibles" },
+                        { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. RCIC, CSIC, consulado acreditante" },
+                        { key: "antecedentes", label: "Carta de No Antecedentes Penales", required: false, hint: "Emitida en los últimos 6 meses" },
+                        { key: "domicilio", label: "Comprobante de Domicilio", required: false, hint: "Recibo de luz, agua o estado de cuenta (máx. 3 meses)" },
+                        { key: "titulo", label: "Título o Diploma Profesional", required: false, hint: "Derecho, Relaciones Internacionales, Administración, etc." },
+                        { key: "cv", label: "Currículum Vitae (CV)", required: false, hint: "Formato PDF preferido" },
+                      ]
+                  ) as { key: string; label: string; required: boolean; hint: string }[]).map(({ key, label, required, hint }) => (
                     <div key={key}>
                       <div className="flex items-center gap-1 mb-1.5">
                         <span className="text-xs font-bold text-text-secondary uppercase">{label}</span>
@@ -880,51 +1332,117 @@ export default function AgentApplyPage() {
                 <div className="space-y-6 animate-fadeIn text-left">
                   <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Revisar Datos Ingresados</h3>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm bg-background-main p-5 border border-border-light rounded-sm text-left">
-                    <div>
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Nombre Completo</span>
-                      <span className="font-semibold text-text-primary">{formData.fullName}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Correo Electrónico</span>
-                      <span className="font-semibold text-text-primary">{formData.email}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Teléfono / WhatsApp</span>
-                      <span className="font-semibold text-text-primary">{formData.phone}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Ubicación</span>
-                      <span className="font-semibold text-text-primary">{formData.countryResidence}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Experiencia</span>
-                      <span className="font-semibold text-text-primary">{formData.experienceYears}</span>
-                    </div>
-                    {formData.linkedin && (
+                  {formData.applicantType === "b2b_agency" ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm bg-background-main p-5 border border-border-light rounded-sm text-left">
                       <div>
-                        <span className="block text-[10px] font-bold text-text-secondary uppercase">LinkedIn</span>
-                        <a href={formData.linkedin} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-primary hover:underline">{formData.linkedin}</a>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Modalidad de Registro</span>
+                        <span className="font-semibold text-brand-primary">Agencia B2B / Partner Corporativo</span>
                       </div>
-                    )}
-                    <div className="md:col-span-2">
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Especialidades</span>
-                      <span className="font-semibold text-text-primary">{formData.specialties.join(", ")}</span>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Nombre / Razón Social de la Agencia</span>
+                        <span className="font-semibold text-text-primary">{formData.companyName}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Identificación Tributaria (RFC / RUC)</span>
+                        <span className="font-semibold text-text-primary">{formData.taxId}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Representante Legal</span>
+                        <span className="font-semibold text-text-primary">{formData.legalRepresentative}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Correo Corporativo</span>
+                        <span className="font-semibold text-text-primary">{formData.corporateEmail}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Teléfono Corporativo</span>
+                        <span className="font-semibold text-text-primary">{formData.companyPhone}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Dirección de la Agencia</span>
+                        <span className="font-semibold text-text-primary">{formData.companyAddress}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Años de Operación</span>
+                        <span className="font-semibold text-text-primary">{formData.yearsOfOperation}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Cantidad de Asesores</span>
+                        <span className="font-semibold text-text-primary">{formData.teamSize}</span>
+                      </div>
+                      {formData.companyWebsite && (
+                        <div>
+                          <span className="block text-[10px] font-bold text-text-secondary uppercase">Sitio Web / LinkedIn</span>
+                          <a href={formData.companyWebsite} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-primary hover:underline">{formData.companyWebsite}</a>
+                        </div>
+                      )}
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Especialidades que Gestionan</span>
+                        <span className="font-semibold text-text-primary">{formData.specialties.join(", ")}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Países Destino</span>
+                        <span className="font-semibold text-text-primary">{formData.targetCountries.join(", ")}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Idiomas del Equipo</span>
+                        <span className="font-semibold text-text-primary">{formData.languages.join(", ")}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Descripción de la Agencia</span>
+                        <p className="text-xs text-text-secondary mt-1 italic leading-relaxed">&ldquo;{formData.companyDescription}&rdquo;</p>
+                      </div>
                     </div>
-                    <div className="md:col-span-2">
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Países Destino</span>
-                      <span className="font-semibold text-text-primary">{formData.targetCountries.join(", ")}</span>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm bg-background-main p-5 border border-border-light rounded-sm text-left">
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Modalidad de Registro</span>
+                        <span className="font-semibold text-brand-primary">Asesor Independiente</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Nombre Completo</span>
+                        <span className="font-semibold text-text-primary">{formData.fullName}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Correo Electrónico</span>
+                        <span className="font-semibold text-text-primary">{formData.email}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Teléfono / WhatsApp</span>
+                        <span className="font-semibold text-text-primary">{formData.phone}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Ubicación</span>
+                        <span className="font-semibold text-text-primary">{formData.countryResidence}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Experiencia</span>
+                        <span className="font-semibold text-text-primary">{formData.experienceYears}</span>
+                      </div>
+                      {formData.linkedin && (
+                        <div>
+                          <span className="block text-[10px] font-bold text-text-secondary uppercase">LinkedIn</span>
+                          <a href={formData.linkedin} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-primary hover:underline">{formData.linkedin}</a>
+                        </div>
+                      )}
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Especialidades</span>
+                        <span className="font-semibold text-text-primary">{formData.specialties.join(", ")}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Países Destino</span>
+                        <span className="font-semibold text-text-primary">{formData.targetCountries.join(", ")}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Idiomas</span>
+                        <span className="font-semibold text-text-primary">{formData.languages.join(", ")}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="block text-[10px] font-bold text-text-secondary uppercase">Biografía</span>
+                        <p className="text-xs text-text-secondary mt-1 italic leading-relaxed">&ldquo;{formData.biography}&rdquo;</p>
+                      </div>
                     </div>
-                    <div className="md:col-span-2">
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Idiomas</span>
-                      <span className="font-semibold text-text-primary">{formData.languages.join(", ")}</span>
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <span className="block text-[10px] font-bold text-text-secondary uppercase">Biografía</span>
-                      <p className="text-xs text-text-secondary mt-1 italic leading-relaxed">&ldquo;{formData.biography}&rdquo;</p>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="pt-4 border-t border-border-light">
                     <label className="flex items-start gap-3 cursor-pointer">
@@ -951,7 +1469,7 @@ export default function AgentApplyPage() {
                         >
                           Términos del Acuerdo del Agente y Estructura de Ganancias
                         </button>{" "}
-                        así como la política de privacidad de TodoVisa, y autorizo la verificación de mi historial profesional.
+                        así como la política de privacidad de TodoVisa, y autorizo la verificación de mi historial profesional/empresarial.
                       </span>
                     </label>
                     {errors.termsAccepted && <p className="text-xs text-status-error mt-2">{errors.termsAccepted}</p>}
@@ -964,9 +1482,28 @@ export default function AgentApplyPage() {
                 <div className="bg-background-main border border-border-light rounded-sm p-4 -mt-2 text-left">
                   <span className="block text-[10px] font-bold text-text-secondary uppercase mb-2">Documentos Adjuntos</span>
                   <div className="flex flex-col gap-1">
-                    {Object.entries(docs).filter(([, v]) => v && v.progress === null).map(([k, v]) => (
-                      <span key={k} className="text-xs text-brand-primary font-semibold">📎 {v!.name}</span>
-                    ))}
+                    {Object.entries(docs).filter(([, v]) => v && v.progress === null).map(([k, v]) => {
+                      const docLabelsMap: Record<string, string> = formData.applicantType === "b2b_agency"
+                        ? {
+                            dui: "Acta Constitutiva / Registro de Comercio",
+                            certificacion: "Identificación del Representante Legal",
+                            antecedentes: "Registro Tributario",
+                            domicilio: "Comprobante de Domicilio",
+                            titulo: "Brochure de Servicios",
+                            cv: "Licencia de Operación Turística",
+                          }
+                        : {
+                            dui: "DUI / INE / Pasaporte",
+                            certificacion: "Certificación Consular",
+                            antecedentes: "Antecedentes Penales",
+                            domicilio: "Comprobante de Domicilio",
+                            titulo: "Título Profesional",
+                            cv: "Currículum Vitae",
+                          };
+                      return (
+                        <span key={k} className="text-xs text-brand-primary font-semibold">📎 {docLabelsMap[k] || k}: {v!.name}</span>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1085,79 +1622,152 @@ export default function AgentApplyPage() {
 
             {/* Scrollable Terms Content */}
             <div className="p-6 overflow-y-auto space-y-6 text-sm text-text-secondary leading-relaxed scrollbar-thin">
-              <div>
-                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">1. Estructura de Ganancias y Comisiones</h4>
-                <p>
-                  El Agente Consultor percibirá una retribución económica basada en las asesorías y tramitaciones completadas exitosamente. El modelo financiero se detalla a continuación:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1.5">
-                  <li>
-                    <strong>Comisión Base:</strong> El agente percibirá el <strong>70% del valor neto</strong> cobrado al cliente por la asesoría de visado.
-                  </li>
-                  <li>
-                    <strong>Bono de Excelencia:</strong> TodoVisa otorga un <strong>+10% adicional (total de 80%)</strong> para aquellos agentes que mantengan una calificación promedio de satisfacción del cliente de 4.8/5.0 estrellas o superior, medida en ciclos mensuales.
-                  </li>
-                  <li>
-                    <strong>Cuota de Plataforma:</strong> TodoVisa retiene un 5% sobre el valor del servicio para cubrir costos administrativos, procesamiento seguro de pagos, soporte en línea y mantenimiento de herramientas de IA.
-                  </li>
-                </ul>
-              </div>
+              {formData.applicantType === "b2b_agency" ? (
+                <>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">1. Estructura de Ganancias Corporativas</h4>
+                    <p>
+                      La Agencia Partner B2B percibirá una retribución económica basada en las tramitaciones de visados gestionadas y completadas con éxito. El plan financiero para agencias se detalla a continuación:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>
+                        <strong>Comisión Base:</strong> La agencia percibirá el <strong>75% del valor neto</strong> de los honorarios de asesoría de visado por cada trámite.
+                      </li>
+                      <li>
+                        <strong>Bono por Volumen de Ventas:</strong> Se otorgará un <strong>+10% adicional (total de 85%)</strong> si la agencia procesa y consolida más de 15 solicitudes de visados pagadas en un ciclo mensual calendario.
+                      </li>
+                      <li>
+                        <strong>Cuota de Plataforma B2B:</strong> TodoVisa retiene el 5% por transacción para cubrir la infraestructura multi-agente, soporte prioritario a la agencia, almacenamiento ilimitado de expedientes corporativos y el uso de herramientas IA de pre-perfilamiento.
+                      </li>
+                    </ul>
+                  </div>
 
-              <div>
-                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">2. Método y Frecuencia de Liquidación</h4>
-                <p>
-                  Los ingresos acumulados se procesarán bajo las siguientes directrices de pago:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1.5">
-                  <li>
-                    <strong>Periodo de Pago:</strong> Las ganancias se liquidan de forma <strong>semanal todos los días viernes</strong>.
-                  </li>
-                  <li>
-                    <strong>Vía de Transferencia:</strong> Los pagos se realizarán mediante transferencia bancaria (ACH/SPEI), PayPal o Stripe a la cuenta registrada por el agente.
-                  </li>
-                  <li>
-                    <strong>Cierre de Casos:</strong> Una comisión es elegible para pago una vez que el cliente haya recibido la resolución o entrega final de su documentación y el caso se marque como cerrado en la plataforma.
-                  </li>
-                </ul>
-              </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">2. Consolidación de Pagos y Facturación</h4>
+                    <p>
+                      Los pagos acumulados se gestionarán bajo las directrices corporativas siguientes:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>
+                        <strong>Frecuencia de Pago:</strong> Las ganancias se liquidan de forma <strong>semanal todos los días viernes</strong>, consolidando todos los trámites cerrados de la agencia.
+                      </li>
+                      <li>
+                        <strong>Cuenta de Destino:</strong> Se transferirá a la cuenta bancaria de la empresa (Razón Social) o cuenta corporativa registrada y validada en su panel.
+                      </li>
+                      <li>
+                        <strong>Requisito Fiscal:</strong> Para recibir la transferencia, la agencia deberá emitir y cargar la factura comercial (CFDI / factura local equivalente) con el desglose correspondiente por el valor de las comisiones generadas.
+                      </li>
+                    </ul>
+                  </div>
 
-              <div>
-                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">3. Asignación de Clientes y Leads</h4>
-                <p>
-                  TodoVisa gestionará un flujo continuo de leads previamente evaluados. El algoritmo asignará clientes a los agentes en base a:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1.5">
-                  <li>La especialidad del visado y el país de destino seleccionado por el agente.</li>
-                  <li>Los idiomas dominados y la disponibilidad declarada en el perfil.</li>
-                  <li>La calificación del agente (agentes con mayor reputación tendrán prioridad de asignación).</li>
-                </ul>
-              </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">3. Distribución B2B y Gestión de Clientes</h4>
+                    <p>
+                      La Agencia B2B es responsable de la captación y primer contacto de sus propios clientes. TodoVisa provee:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>Herramientas para asignar asesores internos de su equipo a clientes específicos.</li>
+                      <li>Un canal directo de soporte y escalabilidad con expertos consultores consulares de TodoVisa.</li>
+                      <li>Un panel centralizado de supervisión y estadísticas para el administrador de la agencia.</li>
+                    </ul>
+                  </div>
 
-              <div>
-                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">4. Obligaciones y Estándares de Servicio</h4>
-                <p>
-                  Para pertenecer y mantenerse activo en la Red de Expertos TodoVisa, el agente se compromete a:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1.5">
-                  <li>Brindar asesoría veraz y legal conforme a las directrices consulares del país correspondiente.</li>
-                  <li>Mantener un tiempo de respuesta inferior a 24 horas hábiles en el chat interno para consultas de clientes activos.</li>
-                  <li>Actualizar el estado del expediente en la plataforma oportunamente.</li>
-                  <li>Mantener absoluta confidencialidad sobre los datos personales y documentos del solicitante.</li>
-                </ul>
-              </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">4. Estándares y Acreditación de Socios</h4>
+                    <p>
+                      La agencia socia se compromete a mantener los siguientes estándares de calidad:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>Presentar documentación real y vigente sobre la constitución y registro fiscal de la empresa.</li>
+                      <li>Asegurar que su personal atienda de manera profesional y verídica a los clientes, sin realizar promesas de obtención de visa garantizada.</li>
+                      <li>No sublicenciar o revender los accesos a la plataforma TodoVisa a terceros sin consentimiento expreso.</li>
+                    </ul>
+                  </div>
 
-              <div>
-                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">5. Terminación y Retención por Incumplimiento</h4>
-                <p>
-                  TodoVisa se reserva el derecho de suspender la cuenta del agente de forma temporal o definitiva en casos de:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1.5">
-                  <li>Falsificación de documentos o acreditaciones profesionales.</li>
-                  <li>Intentos de cobro extraoficiales por fuera de la pasarela de TodoVisa.</li>
-                  <li>Incumplimiento grave de confidencialidad (filtración de datos sensibles).</li>
-                  <li>Tasa de cancelación o abandono de casos asignados superior al 20% en un mes.</li>
-                </ul>
-              </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">5. Terminación de la Alianza</h4>
+                    <p>
+                      TodoVisa podrá suspender o rescindir el contrato comercial con la agencia partner de manera inmediata ante el hallazgo de información tributaria falsa, cobros indebidos por encima de las tarifas oficiales homologadas, o conductas fraudulentas.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">1. Estructura de Ganancias y Comisiones</h4>
+                    <p>
+                      El Agente Consultor percibirá una retribución económica basada en las asesorías y tramitaciones completadas exitosamente. El modelo financiero se detalla a continuación:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>
+                        <strong>Comisión Base:</strong> El agente percibirá el <strong>70% del valor neto</strong> cobrado al cliente por la asesoría de visado.
+                      </li>
+                      <li>
+                        <strong>Bono de Excelencia:</strong> TodoVisa otorga un <strong>+10% adicional (total de 80%)</strong> para aquellos agentes que mantengan una calificación promedio de satisfacción del cliente de 4.8/5.0 estrellas o superior, medida en ciclos mensuales.
+                      </li>
+                      <li>
+                        <strong>Cuota de Plataforma:</strong> TodoVisa retiene un 5% sobre el valor del servicio para cubrir costos administrativos, procesamiento seguro de pagos, soporte en línea y mantenimiento de herramientas de IA.
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">2. Método y Frecuencia de Liquidación</h4>
+                    <p>
+                      Los ingresos acumulados se procesarán bajo las siguientes directrices de pago:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>
+                        <strong>Periodo de Pago:</strong> Las ganancias se liquidan de forma <strong>semanal todos los días viernes</strong>.
+                      </li>
+                      <li>
+                        <strong>Vía de Transferencia:</strong> Los pagos se realizarán mediante transferencia bancaria (ACH/SPEI), PayPal o Stripe a la cuenta registrada por el agente.
+                      </li>
+                      <li>
+                        <strong>Cierre de Casos:</strong> Una comisión es elegible para pago una vez que el cliente haya recibido la resolución o entrega final de su documentación y el caso se marque como cerrado en la plataforma.
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">3. Asignación de Clientes y Leads</h4>
+                    <p>
+                      TodoVisa gestionará un flujo continuo de leads previamente evaluados. El algoritmo asignará clientes a los agentes en base a:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>La especialidad del visado y el país de destino seleccionado por el agente.</li>
+                      <li>Los idiomas dominados y la disponibilidad declarada en el perfil.</li>
+                      <li>La calificación del agente (agentes con mayor reputación tendrán prioridad de asignación).</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">4. Obligaciones y Estándares de Servicio</h4>
+                    <p>
+                      Para pertenecer y mantenerse activo en la Red de Expertos TodoVisa, el agente se compromete a:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>Brindar asesoría veraz y legal conforme a las directrices consulares del país correspondiente.</li>
+                      <li>Mantener un tiempo de respuesta inferior a 24 horas hábiles en el chat interno para consultas de clientes activos.</li>
+                      <li>Actualizar el estado del expediente en la plataforma oportunamente.</li>
+                      <li>Mantener absoluta confidencialidad sobre los datos personales y documentos del solicitante.</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">5. Terminación y Retención por Incumplimiento</h4>
+                    <p>
+                      TodoVisa se reserva el derecho de suspender la cuenta del agente de forma temporal o definitiva en casos de:
+                    </p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5">
+                      <li>Falsificación de documentos o acreditaciones profesionales.</li>
+                      <li>Intentos de cobro extraoficiales por fuera de la pasarela de TodoVisa.</li>
+                      <li>Incumplimiento grave de confidencialidad (filtración de datos sensibles).</li>
+                      <li>Tasa de cancelación o abandono de casos asignados superior al 20% en un mes.</li>
+                    </ul>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Footer buttons */}

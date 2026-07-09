@@ -93,7 +93,7 @@ export default function AgentesPage() {
   ];
   const languages = ["Todos", "Español", "Inglés", "Francés", "Portugués"];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
-  const partnerTypes = ["Todos", "Agentes Tercerizados", "Agencias de Viajes B2B"];
+  const partnerTypes = ["Todos", "Asesores Independientes", "Agencias de Viajes B2B"];
 
   // Filter logic
   const filteredAgents = (agentsData as Agent[]).filter((agent) => {
@@ -120,7 +120,7 @@ export default function AgentesPage() {
 
     const matchesPartnerType =
       selectedPartnerType === "Todos" ||
-      (selectedPartnerType === "Agentes Tercerizados" && agent.partnerType === "outsourced_agent") ||
+      (selectedPartnerType === "Asesores Independientes" && agent.partnerType === "outsourced_agent") ||
       (selectedPartnerType === "Agencias de Viajes B2B" && agent.partnerType === "b2b_agency");
 
     return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability && matchesPartnerType;
@@ -358,7 +358,7 @@ export default function AgentesPage() {
                           </span>
                         ) : (
                           <span className="inline-flex items-center bg-emerald-50 text-emerald-700 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-200">
-                            💼 TERCERIZADO
+                            💼 ASESOR INDEPENDIENTE
                           </span>
                         )}
                       </div>

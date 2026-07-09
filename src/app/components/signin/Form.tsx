@@ -2,7 +2,7 @@
 
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 // Removed AuthService dependency as logic is moved to API routes
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
@@ -52,6 +52,9 @@ export function SignInForm() {
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
     const setUser = useAuthStore((state) => state.setUser);
+    const searchParams = useSearchParams();
+    const redirectParam = searchParams.get('redirect');
+    const redirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : '/';
 
     // Handles standard email/password login by calling a presumed /api/auth/signin endpoint
     const onSubmit: SubmitHandler<SignInInputs> = async (data) => {
@@ -185,7 +188,7 @@ export function SignInForm() {
                 });
             }
 
-            router.push('/');
+            router.push(redirect);
         } catch (error: unknown) {
             const errMessage = error instanceof Error ? error.message : String(error);
             setAuthError(errMessage || 'Error de red al iniciar sesión');
@@ -195,7 +198,7 @@ export function SignInForm() {
 
     const handleGoogleSignIn = async () => {
         try {
-            await handleGoogleSignInApi(`${window.location.origin}/`); 
+            await handleGoogleSignInApi(`${window.location.origin}${redirect}`); 
         } catch (error: unknown) {
             const errMessage = error instanceof Error ? error.message : String(error);
             setAuthError(errMessage || 'Error de red al iniciar sesión con Google');
