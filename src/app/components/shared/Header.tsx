@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
 import supabase from "@/app/lib/supabase"
+import { ROLES } from "@/app/constants/roles"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
     const user = useAuthStore((state) => state.user);
@@ -17,6 +18,55 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
         }, 300);
         return () => clearTimeout(timer);
     }, []);
+
+    useEffect(() => {
+        const syncSession = async () => {
+            if (!user) {
+                try {
+                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+                    if (supabaseUser) {
+                        const { data: profileData } = await supabase
+                            .from("profiles")
+                            .select("role")
+                            .eq("id", supabaseUser.id)
+                            .maybeSingle();
+
+                        const metadata = supabaseUser.user_metadata || {};
+                        const updatedUser = {
+                            id: supabaseUser.id,
+                            email: supabaseUser.email || '',
+                            firstName: metadata.first_name || metadata.full_name?.split(' ')[0] || metadata.name?.split(' ')[0] || '',
+                            lastName: metadata.last_name || metadata.full_name?.split(' ').slice(1).join(' ') || metadata.name?.split(' ').slice(1).join(' ') || '',
+                            phone: metadata.phone || '',
+                            country: metadata.country || '',
+                            viproScore: metadata.vipro_score || null,
+                            viproCompleted: metadata.vipro_completed || false,
+                            viproDestination: metadata.vipro_destination || null,
+                            hasPaidAdvisor: metadata.has_paid_advisor || false,
+                            assignedAgentId: metadata.assigned_agent_id || null,
+                            photoUrl: metadata.photo_url || metadata.avatar_url || null,
+                            avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
+                            lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
+                            ds160FullName: metadata.ds160_full_name || null,
+                            ds160PassportNum: metadata.ds160_passport_num || null,
+                            ds160BirthDate: metadata.ds160_birth_date || null,
+                            ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
+                            ds160HasAssets: metadata.ds160_has_assets ?? true,
+                            ds160Confirmed: metadata.ds160_confirmed || false,
+                            expedienteStatus: metadata.expediente_status || 'draft',
+                            role: (profileData?.role as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
+                        };
+                        useAuthStore.getState().setUser(updatedUser);
+                    }
+                } catch (e) {
+                    console.error("Error syncing Google/OAuth user session in Header:", e);
+                }
+            }
+        };
+        if (isMounted) {
+            syncSession();
+        }
+    }, [user, isMounted]);
 
     const userData = isMounted ? user : null;
 
@@ -152,8 +202,17 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             <span className="text-brand-dark font-bold text-sm">{userData.firstName + " " + userData.lastName}</span>
                                             <span className="text-brand-primary font-semibold text-xs">{userData.email}</span>
                                         </div>
-                                        <div className="w-12 h-12 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/10 group-hover:border-brand-primary/30 transition-colors">
-                                            <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
+                                        <div className="w-12 h-12 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/10 group-hover:border-brand-primary/30 transition-colors overflow-hidden">
+                                            {userData.photoUrl ? (
+                                                /* eslint-disable-next-line @next/next/no-img-element */
+                                                <img
+                                                    src={userData.photoUrl}
+                                                    alt="Avatar"
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
+                                            )}
                                         </div>
                                     </button>
                                     

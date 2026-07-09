@@ -5,6 +5,7 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useSearchParams, useRouter } from "next/navigation";
 import supabase from "../../lib/supabase";
+import { useAuthStore } from "../../store/authStore";
 
 interface AgentApplication {
   id: string;
@@ -33,6 +34,15 @@ interface AgentApplication {
   signed_at?: string | null;
   created_at: string;
   is_local?: boolean;
+  payout_settings?: {
+    method?: 'paypal' | 'ach';
+    paypal_email?: string;
+    bank_name?: string;
+    account_type?: string;
+    account_number?: string;
+    routing_code?: string;
+    tax_id?: string;
+  } | null;
 }
 
 function AgentPortalContent() {
@@ -40,6 +50,7 @@ function AgentPortalContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const idParam = searchParams.get("id");
+  const { user } = useAuthStore();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +90,36 @@ function AgentPortalContent() {
     app: false,
     mockRun: false,
   });
+
+  // Payout configuration states
+  const [payoutMethod, setPayoutMethod] = useState<'paypal' | 'ach'>('paypal');
+  const [paypalEmail, setPaypalEmail] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [accountType, setAccountType] = useState("Ahorros");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [routingCode, setRoutingCode] = useState("");
+  const [taxId, setTaxId] = useState("");
+  const [savingPayout, setSavingPayout] = useState(false);
+
+  useEffect(() => {
+    if (agent && agent.payout_settings) {
+      const ps = agent.payout_settings;
+      const timer = setTimeout(() => {
+        if (ps.method) setPayoutMethod(ps.method);
+        if (ps.paypal_email) setPaypalEmail(ps.paypal_email);
+        if (ps.bank_name) setBankName(ps.bank_name);
+        if (ps.account_type) setAccountType(ps.account_type);
+        if (ps.account_number) setAccountNumber(ps.account_number);
+        if (ps.routing_code) setRoutingCode(ps.routing_code);
+        if (ps.tax_id) setTaxId(ps.tax_id);
+        
+        if (ps.method) {
+          setOnboardingSteps(prev => ({ ...prev, payment: true }));
+        }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [agent]);
 
   const fetchAgent = async (appId: string) => {
     setLoading(true);
@@ -200,16 +241,66 @@ function AgentPortalContent() {
     }
   };
 
+  const fetchAgentByUser = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      // 1. Try fetching by user_id
+      let { data } = await supabase
+        .from("agent_applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      // 2. Fallback to email lookup if not found by user_id
+      if (!data && user.email) {
+        const { data: fallbackData } = await supabase
+          .from("agent_applications")
+          .select("*")
+          .eq("email", user.email.toLowerCase())
+          .maybeSingle();
+        data = fallbackData;
+      }
+
+      if (data) {
+        setAgent(data);
+        if (data.full_name) {
+          setSignatureName(data.full_name);
+        }
+      } else {
+        // Look up mock data from localstorage as fallback
+        const localDataStr = localStorage.getItem(`agent_app_${user.email?.toUpperCase()}`);
+        if (localDataStr) {
+          const localData = JSON.parse(localDataStr);
+          setAgent({ ...localData, is_local: true });
+          if (localData.full_name) {
+            setSignatureName(localData.full_name);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error loading agent application by user:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => {
       if (idParam) {
         fetchAgent(idParam);
+      } else if (user) {
+        fetchAgentByUser();
       } else {
         setLoading(false);
       }
     }, 0);
     return () => clearTimeout(timer);
-  }, [idParam]);
+  }, [idParam, user]);
 
   const handleLookupSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,6 +413,59 @@ function AgentPortalContent() {
   const getPlatformFee = () => getAgentShare() * 0.05;
   const getNetEarnings = () => getAgentShare() - getPlatformFee();
 
+  const savePayoutSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agent) return;
+
+    setSavingPayout(true);
+    const updatedSettings = {
+      method: payoutMethod,
+      paypal_email: payoutMethod === 'paypal' ? paypalEmail : "",
+      bank_name: payoutMethod === 'ach' ? bankName : "",
+      account_type: payoutMethod === 'ach' ? accountType : "",
+      account_number: payoutMethod === 'ach' ? accountNumber : "",
+      routing_code: payoutMethod === 'ach' ? routingCode : "",
+      tax_id: payoutMethod === 'ach' ? taxId : "",
+    };
+
+    try {
+      if (agent.is_local) {
+        const updated = {
+          ...agent,
+          payout_settings: updatedSettings,
+        };
+        localStorage.setItem(`agent_app_${agent.application_id}`, JSON.stringify(updated));
+        setAgent(updated);
+        setOnboardingSteps(prev => ({ ...prev, payment: true }));
+        showToast("¡Método de pago guardado localmente con éxito!", "success");
+      } else {
+        const { error: updateErr } = await supabase
+          .from("agent_applications")
+          .update({ payout_settings: updatedSettings })
+          .eq("application_id", agent.application_id);
+
+        if (updateErr) throw new Error(updateErr.message);
+
+        setAgent((prev) =>
+          prev
+            ? {
+                ...prev,
+                payout_settings: updatedSettings,
+              }
+            : null
+        );
+        setOnboardingSteps(prev => ({ ...prev, payment: true }));
+        showToast("¡Método de pago guardado exitosamente!", "success");
+      }
+    } catch (err: unknown) {
+      console.error(err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      showToast("Error al guardar método de pago: " + errorMsg, "error");
+    } finally {
+      setSavingPayout(false);
+    }
+  };
+
   return (
     <div className="min-h-screen w-full flex flex-col bg-background-main font-sans">
       <Header headerRef={headerRef} />
@@ -357,97 +501,8 @@ function AgentPortalContent() {
             </span>
           </div>
         )}
-        {/* NO ID OR LOOKUP SCREEN */}
-        {!idParam && (
-          <div className="max-w-xl mx-auto w-full bg-white border border-border-light rounded-xl p-8 my-10 shadow-lg flex flex-col gap-6 animate-in fade-in duration-300">
-            <div className="text-center">
-              <span className="text-5xl">📄</span>
-              <h3 className="text-xl font-bold font-serif italic text-text-primary mt-4 mb-2">Portal de Socios TodoVisa</h3>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                Accede a tu cuenta de socio de la red TodoVisa. Introduce tu Folio de Postulación para firmar contratos, simular ganancias y ver tu estado.
-              </p>
-            </div>
-
-            {/* Selector de Tipo de Socio */}
-            <div className="flex bg-background-main p-1.5 rounded-lg border border-border-light">
-              <button
-                type="button"
-                onClick={() => {
-                  setLookupId("TDA-SOFIA7");
-                }}
-                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                  lookupId.startsWith("TDA-") || !lookupId.startsWith("B2B-")
-                    ? "bg-white text-brand-primary shadow-sm border border-border-light/50 font-bold"
-                    : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                💼 Asesor Independiente
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLookupId("B2B-VOLAMOS");
-                }}
-                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                  lookupId.startsWith("B2B-")
-                    ? "bg-white text-brand-primary shadow-sm border border-border-light/50 font-bold"
-                    : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                🏢 Agencia de Viajes B2B
-              </button>
-            </div>
-
-            <form onSubmit={handleLookupSubmit} className="space-y-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Folio de Postulación</label>
-                <input
-                  type="text"
-                  value={lookupId}
-                  onChange={(e) => setLookupId(e.target.value)}
-                  placeholder="TDA-XXXXXX o B2B-XXXXXX"
-                  className="w-full text-center px-4 py-3.5 bg-background-main border border-border-light rounded-lg text-base font-mono font-bold focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all placeholder:text-text-muted text-text-primary"
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-3.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-md"
-              >
-                Ingresar al Portal de Socio →
-              </button>
-            </form>
-
-            <div className="bg-brand-light/35 border border-brand-primary/10 p-4 rounded-xl flex flex-col gap-2.5 text-xs text-text-secondary">
-              <p className="font-bold text-brand-primary">Códigos de prueba rápidos:</p>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    router.push("/agents/portal?id=TDA-SOFIA7");
-                  }}
-                  className="flex-1 py-2 px-3 border border-brand-primary/20 bg-white hover:bg-brand-light rounded-lg text-left text-[11px] font-medium text-text-primary cursor-pointer flex flex-col justify-between"
-                >
-                  <span className="text-brand-primary font-bold">💼 Asesor Independiente</span>
-                  <span className="font-mono mt-1 font-bold text-gray-500">TDA-SOFIA7</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    router.push("/agents/portal?id=B2B-VOLAMOS");
-                  }}
-                  className="flex-1 py-2 px-3 border border-brand-primary/20 bg-white hover:bg-brand-light rounded-lg text-left text-[11px] font-medium text-text-primary cursor-pointer flex flex-col justify-between"
-                >
-                  <span className="text-brand-primary font-bold">🏢 Agencia B2B Partner</span>
-                  <span className="font-mono mt-1 font-bold text-gray-500">B2B-VOLAMOS</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* LOADING STATE */}
-        {idParam && loading && (
+        {loading && (
           <div className="py-20 flex flex-col items-center justify-center text-center gap-4">
             <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
             <span className="text-sm text-text-secondary font-medium">Buscando expediente en la base de datos...</span>
@@ -455,8 +510,8 @@ function AgentPortalContent() {
         )}
 
         {/* ERROR STATE */}
-        {idParam && !loading && error && (
-          <div className="max-w-md mx-auto w-full bg-white border border-red-200 rounded-sm p-8 text-center my-10 shadow-sm">
+        {!loading && error && (
+          <div className="max-w-md mx-auto w-full bg-white border border-red-200 rounded-sm p-8 text-center my-10 shadow-sm animate-in fade-in duration-300">
             <span className="text-4xl text-red-500">⚠️</span>
             <h3 className="text-lg font-bold text-text-primary mt-4 mb-2">Error de Búsqueda</h3>
             <p className="text-xs text-red-600 mb-6 leading-relaxed">{error}</p>
@@ -464,7 +519,11 @@ function AgentPortalContent() {
               <button
                 onClick={() => {
                   setError(null);
-                  if (idParam) fetchAgent(idParam);
+                  if (idParam) {
+                    fetchAgent(idParam);
+                  } else {
+                    fetchAgentByUser();
+                  }
                 }}
                 className="w-full py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover cursor-pointer"
               >
@@ -474,14 +533,98 @@ function AgentPortalContent() {
                 onClick={() => router.push("/agents/portal")}
                 className="w-full py-2 bg-white border border-border-light text-text-secondary text-xs font-bold rounded-sm hover:bg-background-hover cursor-pointer"
               >
-                Consultar otro Folio
+                Volver al Inicio
               </button>
             </div>
           </div>
         )}
 
+        {/* NO AGENT FOUND OR MANUAL SEARCH */}
+        {!loading && !error && !agent && (
+          <div className="max-w-xl mx-auto w-full bg-white border border-border-light rounded-sm p-8 my-10 shadow-sm flex flex-col gap-6 animate-in fade-in duration-300 text-left">
+            <div className="text-center pb-4 border-b border-border-light">
+              <span className="text-4xl">💼</span>
+              <h3 className="text-lg font-bold text-text-primary mt-4 mb-2">Portal de Socios TodoVisa</h3>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                Aquí puedes firmar tu contrato, configurar tus comisiones y activar tu panel de acreditación.
+              </p>
+            </div>
+
+            {user ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-brand-light border border-border-light rounded-sm text-xs text-text-secondary leading-relaxed">
+                  No encontramos ninguna solicitud de socio activa para la cuenta vinculada al correo <strong className="text-text-primary">{user.email}</strong>.
+                </div>
+                <button
+                  onClick={() => router.push("/agents/apply")}
+                  className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer text-center block"
+                >
+                  Postularme como Consultor / Agencia
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  Por favor inicia sesión con tu cuenta registrada para acceder a tu contrato y panel de socio de forma automática.
+                </p>
+                <button
+                  onClick={() => router.push("/login?redirect=/agents/portal")}
+                  className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer text-center block"
+                >
+                  Iniciar Sesión
+                </button>
+              </div>
+            )}
+
+            {/* Manual Testing Lookup Form (collapsible) */}
+            <details className="mt-4 pt-4 border-t border-border-light">
+              <summary className="text-[10px] font-bold text-text-muted hover:text-text-secondary cursor-pointer uppercase tracking-wider select-none focus:outline-none">
+                ¿Ingresar con un Folio de prueba? (Desarrollo)
+              </summary>
+              <div className="mt-4 space-y-4">
+                <div className="flex bg-background-main p-1 rounded-sm border border-border-light">
+                  <button
+                    type="button"
+                    onClick={() => setLookupId("TDA-SOFIA7")}
+                    className={`flex-1 py-1.5 text-[10px] font-bold rounded-sm transition-all cursor-pointer ${
+                      lookupId.startsWith("TDA") ? "bg-white text-brand-primary border border-border-light shadow-sm" : "text-text-secondary"
+                    }`}
+                  >
+                    💼 Asesor de prueba
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLookupId("B2B-VOLAMOS")}
+                    className={`flex-1 py-1.5 text-[10px] font-bold rounded-sm transition-all cursor-pointer ${
+                      lookupId.startsWith("B2B") ? "bg-white text-brand-primary border border-border-light shadow-sm" : "text-text-secondary"
+                    }`}
+                  >
+                    🏢 Agencia de prueba
+                  </button>
+                </div>
+                <form onSubmit={handleLookupSubmit} className="space-y-3">
+                  <input
+                    type="text"
+                    value={lookupId}
+                    onChange={(e) => setLookupId(e.target.value)}
+                    placeholder="TDA-SOFIA7 o B2B-VOLAMOS"
+                    className="w-full text-center px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs font-mono font-bold focus:border-brand-primary focus:outline-none text-text-primary"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold rounded-sm transition-colors cursor-pointer"
+                  >
+                    Buscar Folio de Prueba
+                  </button>
+                </form>
+              </div>
+            </details>
+          </div>
+        )}
+
         {/* AGENT PORTAL WORKFLOW STATES */}
-        {idParam && !loading && agent && (
+        {!loading && !error && agent && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start w-full">
             
             {/* LEFT COLUMN - MAIN STATUS INFO AND SECTIONS */}
@@ -593,10 +736,10 @@ function AgentPortalContent() {
                           CONTRATO DE ALIANZA COMERCIAL Y DISTRIBUCIÓN DE SERVICIOS - AGENCIAS B2B
                         </h3>
                         <p>
-                          Conste por el presente documento el Contrato de Alianza Comercial y Distribución de Asesoría Consular B2B (en adelante, el "Acuerdo de Alianza"), celebrado entre:
+                          Conste por el presente documento el Contrato de Alianza Comercial y Distribución de Asesoría Consular B2B (en adelante, el &quot;Acuerdo de Alianza&quot;), celebrado entre:
                         </p>
                         <p>
-                          <strong>TodoVisa S.A. de C.V.</strong>, y la Agencia de Viajes socia cuyos datos se detallan en el Folio B2B <strong>{agent.application_id}</strong> (en adelante, la "Agencia").
+                          <strong>TodoVisa S.A. de C.V.</strong>, y la Agencia de Viajes socia cuyos datos se detallan en el Folio B2B <strong>{agent.application_id}</strong> (en adelante, la &quot;Agencia&quot;).
                         </p>
                         <div>
                           <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA PRIMERA: OBJETO DEL ACUERDO</h4>
@@ -892,6 +1035,152 @@ function AgentPortalContent() {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* CONFIGURACIÓN DE PAGO */}
+                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-6">
+                    <div className="border-b border-border-light pb-3">
+                      <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Configuración Financiera</span>
+                      <h3 className="text-lg font-bold text-text-primary mt-0.5 text-left">Método de Recepción de Ganancias</h3>
+                      <p className="text-xs text-text-secondary mt-1 text-left">
+                        Elige y registra el procesador donde TodoVisa transferirá tus liquidaciones de comisiones todos los viernes.
+                      </p>
+                    </div>
+
+                    <form onSubmit={savePayoutSettings} className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary text-left">
+                          Selecciona tu método preferido
+                        </label>
+                        <div className="grid grid-cols-2 gap-4">
+                          <button
+                            type="button"
+                            onClick={() => setPayoutMethod('paypal')}
+                            className={`py-3 px-4 rounded border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
+                              payoutMethod === 'paypal'
+                                ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
+                                : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
+                            }`}
+                          >
+                            <span>💙</span>
+                            <span>PayPal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayoutMethod('ach')}
+                            className={`py-3 px-4 rounded border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
+                              payoutMethod === 'ach'
+                                ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
+                                : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
+                            }`}
+                          >
+                            <span>🏦</span>
+                            <span>Transferencia ACH</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {payoutMethod === 'paypal' ? (
+                        <div className="space-y-4 animate-in fade-in duration-250">
+                          <div className="flex flex-col gap-1.5 text-left">
+                            <label htmlFor="paypal-email-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                              Dirección de Correo PayPal
+                            </label>
+                            <input
+                              id="paypal-email-input"
+                              type="email"
+                              value={paypalEmail}
+                              onChange={(e) => setPaypalEmail(e.target.value)}
+                              placeholder="ejemplo@paypal.com"
+                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
+                              required={payoutMethod === 'paypal'}
+                            />
+                            <span className="text-[9px] text-text-muted">
+                              El pago neto simulado se enviará a esta cuenta. Asegúrate de que acepte recepciones de pagos en USD.
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in duration-250">
+                          <div className="flex flex-col gap-1.5 text-left">
+                            <label htmlFor="bank-name-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                              Nombre del Banco
+                            </label>
+                            <input
+                              id="bank-name-input"
+                              type="text"
+                              value={bankName}
+                              onChange={(e) => setBankName(e.target.value)}
+                              placeholder="Banco Agrícola, BAC, etc."
+                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
+                              required={payoutMethod === 'ach'}
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 text-left">
+                            <label htmlFor="account-type-select" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                              Tipo de Cuenta
+                            </label>
+                            <select
+                              id="account-type-select"
+                              value={accountType}
+                              onChange={(e) => setAccountType(e.target.value)}
+                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
+                            >
+                              <option value="Ahorros">Cuenta de Ahorros</option>
+                              <option value="Corriente">Cuenta Corriente</option>
+                            </select>
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 text-left">
+                            <label htmlFor="account-number-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                              Número de Cuenta (ACH)
+                            </label>
+                            <input
+                              id="account-number-input"
+                              type="text"
+                              value={accountNumber}
+                              onChange={(e) => setAccountNumber(e.target.value)}
+                              placeholder="Número de cuenta de banco"
+                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
+                              required={payoutMethod === 'ach'}
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 text-left">
+                            <label htmlFor="tax-id-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                              DUI / Identificación Tributaria
+                            </label>
+                            <input
+                              id="tax-id-input"
+                              type="text"
+                              value={taxId}
+                              onChange={(e) => setTaxId(e.target.value)}
+                              placeholder="DUI del titular de la cuenta"
+                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
+                              required={payoutMethod === 'ach'}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={savingPayout}
+                          className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center justify-center gap-2 shadow-sm border-none"
+                        >
+                          {savingPayout ? (
+                            <>
+                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                              Guardando configuración...
+                            </>
+                          ) : (
+                            "💾 Guardar Configuración de Pago"
+                          )}
+                        </button>
+                      </div>
+                    </form>
                   </div>
 
                   {/* Dual card block: B2B team list vs individual profile preview */}

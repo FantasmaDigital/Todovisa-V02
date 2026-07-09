@@ -10,6 +10,7 @@ import { CheckoutModal } from "../components/shared/CheckoutModal";
 import agentsData from "../dummies/agents.json";
 import supabase from "../lib/supabase";
 import { MessageClientService } from "../service/MessageClientService";
+import { ROLES } from "../constants/roles";
 
 // Convert countries list to sorted array
 const countriesArray = Object.entries(countries)
@@ -21,11 +22,93 @@ const countriesArray = Object.entries(countries)
   }))
   .sort((a, b) => a.name.localeCompare(b.name));
 
+export interface Commission {
+  id: string;
+  agent_id: string;
+  client_folio: string;
+  client_name: string;
+  service_type: 'visa_us' | 'visa_uk' | 'vipro' | 'full_service' | 'other';
+  gross_amount: number;
+  commission_rate: number;
+  commission_amount: number;
+  status: 'pending' | 'processing' | 'paid';
+  paid_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface AgencyMember {
+  id: string;
+  agency_id: string;
+  member_id: string;
+  member_role: 'consultant' | 'supervisor';
+  joined_at: string;
+  profile?: {
+    first_name: string;
+    last_name: string;
+    email: string;
+  } | null;
+}
+
+export interface AgencyInvitation {
+  id: string;
+  agency_id: string;
+  email: string;
+  token: string;
+  status: 'pending' | 'accepted' | 'expired';
+  created_at: string;
+  expires_at: string;
+}
+
+export interface AgentApplicationData {
+  id: string;
+  application_id: string;
+  user_id?: string | null;
+  application_type?: 'individual' | 'agency' | null;
+  full_name: string;
+  email: string;
+  phone: string;
+  country_residence: string;
+  experience_years: string;
+  linkedin?: string | null;
+  specialties: string[];
+  target_countries: string[];
+  languages: string[];
+  biography: string;
+  status: string;
+  terms_accepted: boolean;
+  documents?: Record<string, string | null> | null;
+  admin_notes?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export default function PerfilUsuarioPage() {
   const headerRef = useRef(null);
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
+
+  // Partner / Agent application states
+  const [partnerApp, setPartnerApp] = useState<AgentApplicationData | null>(null);
+  const [allApplications, setAllApplications] = useState<AgentApplicationData[]>([]);
+  const [selectedApp, setSelectedApp] = useState<AgentApplicationData | null>(null);
+  const [adminNotesInput, setAdminNotesInput] = useState("");
+  const [isSavingAdmin, setIsSavingAdmin] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [isLoadingPartnerApp, setIsLoadingPartnerApp] = useState(false);
+
+  // Real Commissions & Agency Portal states
+  const [agentCommissions, setAgentCommissions] = useState<Commission[]>([]);
+  const [isLoadingCommissions, setIsLoadingCommissions] = useState(false);
+  const [agencyMembers, setAgencyMembers] = useState<AgencyMember[]>([]);
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [agencyInvitations, setAgencyInvitations] = useState<AgencyInvitation[]>([]);
+  const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
 
   // Form states
   const [firstName, setFirstName] = useState("");
@@ -35,6 +118,73 @@ export default function PerfilUsuarioPage() {
   
   // Tab State: "datos", "proceso", "asesor", "pagos"
   const [activeTab, setActiveTab] = useState("datos");
+
+  // Crop states
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [cropImageObj, setCropImageObj] = useState<HTMLImageElement | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [currentUploadFile, setCurrentUploadFile] = useState<File | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Dynamic calculations based on current zoom and image aspect ratio
+  const getPanBounds = () => {
+    if (!cropImageObj) return { maxPanX: 0, maxPanY: 0 };
+    const img = cropImageObj;
+    const minScale = Math.max(300 / img.width, 300 / img.height);
+    const baseWidth = img.width * minScale;
+    const baseHeight = img.height * minScale;
+    const scaledWidth = baseWidth * zoom;
+    const scaledHeight = baseHeight * zoom;
+    const maxPanX = Math.max(0, (scaledWidth - 300) / 2);
+    const maxPanY = Math.max(0, (scaledHeight - 300) / 2);
+    return { maxPanX, maxPanY };
+  };
+
+  const { maxPanX, maxPanY } = getPanBounds();
+
+  const handleZoomChange = (newZoom: number) => {
+    setZoom(newZoom);
+    if (cropImageObj) {
+      const img = cropImageObj;
+      const minScale = Math.max(300 / img.width, 300 / img.height);
+      const baseWidth = img.width * minScale;
+      const baseHeight = img.height * minScale;
+      const scaledWidth = baseWidth * newZoom;
+      const scaledHeight = baseHeight * newZoom;
+      const newMaxX = Math.max(0, (scaledWidth - 300) / 2);
+      const newMaxY = Math.max(0, (scaledHeight - 300) / 2);
+      setPanX(prev => Math.max(-newMaxX, Math.min(newMaxX, prev)));
+      setPanY(prev => Math.max(-newMaxY, Math.min(newMaxY, prev)));
+    }
+  };
+
+  useEffect(() => {
+    if (!canvasRef.current || !cropImageObj) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, 300, 300);
+
+    const img = cropImageObj;
+    const minScale = Math.max(300 / img.width, 300 / img.height);
+    const baseWidth = img.width * minScale;
+    const baseHeight = img.height * minScale;
+    const scaledWidth = baseWidth * zoom;
+    const scaledHeight = baseHeight * zoom;
+
+    const x = 150 - scaledWidth / 2 + panX;
+    const y = 150 - scaledHeight / 2 + panY;
+
+    ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, 298, 298);
+  }, [cropImageObj, zoom, panX, panY]);
 
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -61,7 +211,7 @@ export default function PerfilUsuarioPage() {
   const [expedienteStatus, setExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>(user?.expedienteStatus || 'draft');
   const [isDs160ModalOpen, setIsDs160ModalOpen] = useState(false);
   const [isDs160Closing, setIsDs160Closing] = useState(false);
-  const [dbPurchases, setDbPurchases] = useState<any[]>([]);
+  const [dbPurchases, setDbPurchases] = useState<Record<string, string | number | boolean | null>[]>([]);
 
   // Closes the DS-160 panel with an exit animation before unmounting
   const closeDs160Panel = () => {
@@ -86,14 +236,48 @@ export default function PerfilUsuarioPage() {
 
   // Preformulario state
   const [isPreformularioCompleted, setIsPreformularioCompleted] = useState(false);
-  const [viproEvaluations, setViproEvaluations] = useState<any[]>([]);
+  const [viproEvaluations, setViproEvaluations] = useState<{ id: string; destination_country: string; score?: number; created_at: string }[]>([]);
+  const [preformMetadata, setPreformMetadata] = useState<{ intake_type?: string; interview_waiver_eligible?: boolean | null } | null>(null);
 
   useEffect(() => {
     if (user?.id) {
       const completed = localStorage.getItem(`preformulario_completed_user_id_${user.id}`);
-      setIsPreformularioCompleted(completed === "true");
+      const timer = setTimeout(() => setIsPreformularioCompleted(completed === "true"), 0);
+      return () => clearTimeout(timer);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchPreformMetadata = async () => {
+      try {
+        const dest = user?.viproDestination || "US";
+        const { data, error } = await supabase
+          .from("preformularios")
+          .select("intake_type, interview_waiver_eligible")
+          .eq("user_id", user.id)
+          .eq("destination_country", dest)
+          .maybeSingle();
+
+        if (!error && data) {
+          setPreformMetadata(data);
+        } else {
+          // Check if there is anything in localstorage as fallback
+          const localIntakeType = localStorage.getItem(`preform_progress_intake_type_${dest}_${user.id}`);
+          const localWaiverEligible = localStorage.getItem(`preform_progress_waiver_eligible_${dest}_${user.id}`);
+          if (localIntakeType || localWaiverEligible) {
+            setPreformMetadata({
+              intake_type: localIntakeType || undefined,
+              interview_waiver_eligible: localWaiverEligible ? localWaiverEligible === "true" : null
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error loading preform metadata for profile:", err);
+      }
+    };
+    fetchPreformMetadata();
+  }, [user?.id, user?.viproDestination, isPreformularioCompleted]);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setToast({ message, type });
@@ -110,7 +294,7 @@ export default function PerfilUsuarioPage() {
     showToast(`Archivo "${fileName}" cargado con éxito.`, "success");
   };
 
-  const handleAvatarUpload = async (e: any) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -119,10 +303,21 @@ export default function PerfilUsuarioPage() {
       return;
     }
 
+    // 20MB file size limit validation (20 * 1024 * 1024 bytes)
+    if (file.size > 20 * 1024 * 1024) {
+      showToast("El archivo es demasiado grande. El tamaño máximo es 20MB.", "error");
+      return;
+    }
+
+    if (!user?.id) {
+      showToast("Sesión de usuario no válida.", "error");
+      return;
+    }
+
     const now = new Date();
     const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-    let changesThisMonth = user?.avatarChangesThisMonth || 0;
+    const changesThisMonth = user?.avatarChangesThisMonth || 0;
     const lastChangeMonth = user?.lastAvatarChangeMonth || "";
 
     if (lastChangeMonth === currentMonthStr) {
@@ -130,54 +325,79 @@ export default function PerfilUsuarioPage() {
         showToast("Límite alcanzado: Máximo 3 cambios de foto de perfil por mes.", "error");
         return;
       }
-      changesThisMonth += 1;
-    } else {
-      changesThisMonth = 1;
     }
 
+    // Load file and open crop modal
     const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64Original = reader.result as string;
-
-      // Client-side resizing helper using canvas
-      const resizeImage = (base64Str: string): Promise<string> => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.src = base64Str;
-          img.onload = () => {
-            const canvas = document.createElement("canvas");
-            const MAX_WIDTH = 120;
-            const MAX_HEIGHT = 120;
-            let width = img.width;
-            let height = img.height;
-
-            if (width > height) {
-              if (width > MAX_WIDTH) {
-                height *= MAX_WIDTH / width;
-                width = MAX_WIDTH;
-              }
-            } else {
-              if (height > MAX_HEIGHT) {
-                width *= MAX_HEIGHT / height;
-                height = MAX_HEIGHT;
-              }
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            ctx?.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL("image/jpeg", 0.7)); // compress to JPEG with 70% quality
-          };
-        });
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        setCropImageObj(img);
+        setZoom(1);
+        setPanX(0);
+        setPanY(0);
+        setCurrentUploadFile(file);
+        setIsCropModalOpen(true);
       };
+    };
+    reader.readAsDataURL(file);
+  };
 
-      try {
-        const compressedBase64 = await resizeImage(base64Original);
+  const handleCropAndUpload = async () => {
+    if (!canvasRef.current || !cropImageObj || !user?.id || !currentUploadFile) return;
+
+    setIsUploadingAvatar(true);
+
+    try {
+      const now = new Date();
+      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      let changesThisMonth = user?.avatarChangesThisMonth || 0;
+      const lastChangeMonth = user?.lastAvatarChangeMonth || "";
+
+      if (lastChangeMonth === currentMonthStr) {
+        changesThisMonth += 1;
+      } else {
+        changesThisMonth = 1;
+      }
+
+      const canvas = canvasRef.current;
+
+      // Crop canvas into a blob and upload it (optimizing to JPEG at 85% quality)
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          showToast("Error al procesar la imagen.", "error");
+          setIsUploadingAvatar(false);
+          return;
+        }
+
+        const fileExt = "jpg";
+        const filePath = `avatars/${user.id}-${Date.now()}.${fileExt}`;
+
+        // Upload cropped JPEG blob directly to 'todovisa' storage bucket
+        const { error: uploadError } = await supabase.storage
+          .from("todovisa")
+          .upload(filePath, blob, {
+            contentType: "image/jpeg",
+            cacheControl: "3600",
+            upsert: true,
+          });
+
+        if (uploadError) {
+          console.error("Error uploading avatar to Supabase storage:", uploadError.message);
+          showToast("Error al subir la imagen al almacenamiento. Inténtalo de nuevo.", "error");
+          setIsUploadingAvatar(false);
+          return;
+        }
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from("todovisa")
+          .getPublicUrl(filePath);
 
         const updatedUser = {
-          ...user!,
-          photoUrl: compressedBase64,
+          ...user,
+          photoUrl: publicUrl,
           avatarChangesThisMonth: changesThisMonth,
           lastAvatarChangeMonth: currentMonthStr,
         };
@@ -186,21 +406,28 @@ export default function PerfilUsuarioPage() {
 
         const { error } = await supabase.auth.updateUser({
           data: {
-            photo_url: compressedBase64,
+            photo_url: publicUrl,
             avatar_changes_this_month: changesThisMonth,
             last_avatar_change_month: currentMonthStr,
           }
         });
-        if (error) {
-          console.warn("Could not save avatar to Supabase, saved locally:", error.message);
-        }
-      } catch (err) {
-        console.error("Error processing avatar upload:", err);
-      }
 
-      showToast(`Foto de perfil actualizada. Cambios este mes: ${changesThisMonth}/3`, "success");
-    };
-    reader.readAsDataURL(file);
+        setIsUploadingAvatar(false);
+        setIsCropModalOpen(false);
+        setCropImageObj(null);
+
+        if (error) {
+          console.warn("Could not save avatar URL to Supabase auth:", error.message);
+          showToast("Se subió el archivo pero no se pudo actualizar tu perfil en la sesión.", "error");
+        } else {
+          showToast(`Foto de perfil actualizada. Cambios este mes: ${changesThisMonth}/3`, "success");
+        }
+      }, "image/jpeg", 0.85);
+    } catch (err) {
+      console.error("Error in crop and upload:", err);
+      showToast("Ocurrió un error inesperado al actualizar la foto de perfil.", "error");
+      setIsUploadingAvatar(false);
+    }
   };
 
   const handleSubmitExpediente = () => {
@@ -255,13 +482,23 @@ export default function PerfilUsuarioPage() {
         }
 
         if (supabaseUser && isSubscribed) {
+          const { data: profileData } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", supabaseUser.id)
+            .maybeSingle();
+
           const metadata = supabaseUser.user_metadata || {};
           
+          const googleFullName = metadata.full_name || metadata.name || '';
+          const fallbackFirstName = googleFullName.split(' ')[0] || '';
+          const fallbackLastName = googleFullName.split(' ').slice(1).join(' ') || '';
+
           const updatedUser = {
             id: supabaseUser.id,
             email: supabaseUser.email || '',
-            firstName: metadata.first_name || '',
-            lastName: metadata.last_name || '',
+            firstName: metadata.first_name || fallbackFirstName,
+            lastName: metadata.last_name || fallbackLastName,
             phone: metadata.phone || '',
             country: metadata.country || '',
             viproScore: metadata.vipro_score || null,
@@ -269,7 +506,7 @@ export default function PerfilUsuarioPage() {
             viproDestination: metadata.vipro_destination || null,
             hasPaidAdvisor: metadata.has_paid_advisor || false,
             assignedAgentId: metadata.assigned_agent_id || null,
-            photoUrl: metadata.photo_url || null,
+            photoUrl: metadata.photo_url || metadata.avatar_url || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
             ds160FullName: metadata.ds160_full_name || null,
@@ -279,6 +516,7 @@ export default function PerfilUsuarioPage() {
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
             expedienteStatus: metadata.expediente_status || 'draft',
+            role: (profileData?.role as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
           };
 
           if (
@@ -295,7 +533,8 @@ export default function PerfilUsuarioPage() {
             user.avatarChangesThisMonth !== updatedUser.avatarChangesThisMonth ||
             user.lastAvatarChangeMonth !== updatedUser.lastAvatarChangeMonth ||
             user.ds160Confirmed !== updatedUser.ds160Confirmed ||
-            user.expedienteStatus !== updatedUser.expedienteStatus
+            user.expedienteStatus !== updatedUser.expedienteStatus ||
+            user.role !== updatedUser.role
           ) {
             console.log("Syncing auth store state with Supabase Auth user metadata.");
             setTimeout(() => {
@@ -324,10 +563,254 @@ export default function PerfilUsuarioPage() {
     };
   }, []);
 
+  // Load partner application and admin list
+  useEffect(() => {
+    if (!user) return;
+
+    const loadPartnerData = async () => {
+      setIsLoadingPartnerApp(true);
+      try {
+        // Query current user's partner application (by user_id first, then by email fallback)
+        let data = null;
+        const { data: idData, error: idError } = await supabase
+          .from("agent_applications")
+          .select("*")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (idData) {
+          data = idData;
+        }
+
+        if ((!data || idError) && user.email) {
+          const { data: emailData } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .eq("email", user.email)
+            .maybeSingle();
+          if (emailData) {
+            data = emailData;
+          }
+        }
+
+        if (data) {
+          setPartnerApp(data);
+        }
+
+        // If current user is admin/moderator, fetch all applications
+        const isAdmin = user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR;
+        if (isAdmin) {
+          const { data: allData, error: allErr } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+          if (allData) {
+            setAllApplications(allData);
+          } else if (allErr) {
+            console.error("Error loading all agent applications:", allErr.message);
+          }
+        }
+      } catch (err) {
+        console.error("Unexpected error loading partner/admin data:", err);
+      } finally {
+        setIsLoadingPartnerApp(false);
+      }
+    };
+
+    loadPartnerData();
+  }, [user]);
+
+  // Admin action handlers: approve, reject, save comments
+  const handleAdminAction = async (appId: string, action: "approved" | "rejected" | "comment_only") => {
+    if (!user || !selectedApp) return;
+    setIsSavingAdmin(true);
+
+    const newStatus = action === "comment_only" ? selectedApp.status : action;
+    const updatePayload: Partial<AgentApplicationData> & { updated_at: string } = {
+      admin_notes: adminNotesInput,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (action !== "comment_only") {
+      updatePayload.status = newStatus;
+      updatePayload.approved_at = new Date().toISOString();
+      updatePayload.approved_by = user.id;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("agent_applications")
+        .update(updatePayload)
+        .eq("id", appId);
+
+      if (error) {
+        console.error("Error in admin action:", error.message);
+        showToast("Error al guardar los cambios en la base de datos.", "error");
+      } else {
+        showToast(
+          action === "approved"
+            ? "¡Solicitud aprobada con éxito!"
+            : action === "rejected"
+            ? "Solicitud rechazada/devuelta."
+            : "Comentarios guardados con éxito.",
+          "success"
+        );
+
+        // When approved, upgrade the applicant's role based on application type
+        if (action === "approved" && selectedApp?.user_id) {
+          const applicantType = selectedApp.application_type || "individual";
+          const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
+          await supabase
+            .from("profiles")
+            .update({ role: newRole })
+            .eq("id", selectedApp.user_id);
+        }
+
+        // Update selected app locally
+        setSelectedApp((prev: AgentApplicationData | null) => prev ? ({
+          ...prev,
+          ...updatePayload,
+        }) : null);
+
+        // Refresh entire application list from DB to reflect latest state
+        const { data: refreshedApps } = await supabase
+          .from("agent_applications")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (refreshedApps) setAllApplications(refreshedApps);
+
+        // Update partnerApp if the admin is reviewing their own application
+        if (partnerApp && partnerApp.id === appId) {
+          setPartnerApp((prev: AgentApplicationData | null) => prev ? ({
+            ...prev,
+            ...updatePayload,
+          }) : null);
+        }
+      }
+    } catch (err) {
+      console.error("Unexpected error saving admin changes:", err);
+      showToast("Error inesperado al guardar los cambios.", "error");
+    } finally {
+      setIsSavingAdmin(false);
+    }
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => setIsMounted(true), 0);
     return () => clearTimeout(timer);
   }, []);
+
+  // Auto-switch to agent portal tab when user role is agent/agency
+  useEffect(() => {
+    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY)) {
+      const t = setTimeout(() => setActiveTab("portal_agente"), 0);
+      return () => clearTimeout(t);
+    }
+  }, [user?.role]);
+
+  // Fetch agent commissions from Supabase
+  const loadCommissions = async () => {
+    if (!user) return;
+    setIsLoadingCommissions(true);
+    try {
+      const { data, error } = await supabase
+        .from("agent_commissions")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setAgentCommissions(data || []);
+    } catch (err) {
+      console.error("Error fetching commissions:", err);
+    } finally {
+      setIsLoadingCommissions(false);
+    }
+  };
+
+  // Fetch agency team members
+  const loadAgencyMembers = async () => {
+    if (!user || user.role !== ROLES.AGENCY) return;
+    setIsLoadingMembers(true);
+    try {
+      const { data, error } = await supabase
+        .from("agency_members")
+        .select("*, profile:member_id(first_name, last_name, email)")
+        .eq("agency_id", user.id);
+      if (error) throw error;
+      setAgencyMembers(data || []);
+    } catch (err) {
+      console.error("Error fetching agency members:", err);
+    } finally {
+      setIsLoadingMembers(false);
+    }
+  };
+
+  // Fetch agency invitations
+  const loadAgencyInvitations = async () => {
+    if (!user || user.role !== ROLES.AGENCY) return;
+    setIsLoadingInvitations(true);
+    try {
+      const { data, error } = await supabase
+        .from("agency_invitations")
+        .select("*")
+        .eq("agency_id", user.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setAgencyInvitations(data || []);
+    } catch (err) {
+      console.error("Error fetching agency invitations:", err);
+    } finally {
+      setIsLoadingInvitations(false);
+    }
+  };
+
+  // Invite Consultant function
+  const handleInviteConsultant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !inviteEmail.trim()) return;
+    setIsSendingInvite(true);
+    try {
+      // Generate a simple hex token of 32 characters
+      const randomArr = new Uint8Array(16);
+      crypto.getRandomValues(randomArr);
+      const token = Array.from(randomArr).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      const { error } = await supabase
+        .from("agency_invitations")
+        .insert({
+          agency_id: user.id,
+          email: inviteEmail.trim().toLowerCase(),
+          token,
+          status: "pending"
+        });
+
+      if (error) throw error;
+
+      showToast(`Invitación generada para ${inviteEmail.trim()}`, "success");
+      setInviteEmail("");
+      loadAgencyInvitations();
+    } catch (err: unknown) {
+      console.error("Error inviting consultant:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg || "Error al generar invitación.", "error");
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+
+  // Trigger loads when activeTab changes
+  useEffect(() => {
+    if (activeTab === "portal_agente" && user) {
+      const timer = setTimeout(() => {
+        loadCommissions();
+        if (user.role === ROLES.AGENCY) {
+          loadAgencyMembers();
+          loadAgencyInvitations();
+        }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, user?.id, user?.role]);
 
   // Sync state when user store loads
   useEffect(() => {
@@ -428,7 +911,7 @@ export default function PerfilUsuarioPage() {
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
-          setMessages(parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })));
+          setMessages(parsed.map((m: { id: string; text: string; sender: string; timestamp: string }) => ({ ...m, timestamp: new Date(m.timestamp) })));
           return;
         } catch (e) {
           console.error("Failed to parse stored mock messages:", e);
@@ -483,7 +966,7 @@ export default function PerfilUsuarioPage() {
         setIsSupabaseDbAvailable(true);
         if (data && data.length > 0) {
           setMessages(
-            data.map((msg: any) => ({
+            data.map((msg: { id: string; sender: string; text: string; timestamp?: string }) => ({
               id: msg.id,
               sender: msg.sender,
               text: msg.text,
@@ -516,8 +999,9 @@ export default function PerfilUsuarioPage() {
             prepopulateMockMessages();
           }
         }
-      } catch (err: any) {
-        console.warn("API messages fetch error. Falling back to simulated chat:", err.message);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("API messages fetch error. Falling back to simulated chat:", msg);
         setIsSupabaseDbAvailable(false);
         prepopulateMockMessages();
       }
@@ -629,22 +1113,57 @@ export default function PerfilUsuarioPage() {
     );
   }
 
-  const handleSaveData = (e: React.FormEvent) => {
+  const handleSaveData = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName.trim() || !lastName.trim()) {
       showToast("Por favor completa el nombre y apellido.", "error");
       return;
     }
 
-    setUser({
-      ...user,
+    const updatedUser = {
+      ...user!,
       firstName,
       lastName,
       phone,
       country: countryCode,
-    });
+    };
 
-    showToast("¡Cambios guardados con éxito!", "success");
+    setUser(updatedUser);
+
+    try {
+      // Also update the database profiles table
+      const { error: dbProfileErr } = await supabase
+        .from("profiles")
+        .upsert({
+          id: user!.id,
+          email: user!.email,
+          first_name: firstName,
+          last_name: lastName,
+          updated_at: new Date().toISOString()
+        });
+
+      if (dbProfileErr) {
+        console.warn("Could not save profile details to public.profiles table:", dbProfileErr.message);
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          phone: phone,
+          country: countryCode,
+        }
+      });
+      if (error) {
+        console.warn("Could not save profile metadata to Supabase auth:", error.message);
+        showToast("¡Cambios guardados localmente! No se pudo sincronizar en la nube.", "info");
+      } else {
+        showToast("¡Cambios guardados con éxito!", "success");
+      }
+    } catch (err) {
+      console.error("Error saving profile:", err);
+      showToast("¡Cambios guardados localmente!", "success");
+    }
   };
 
   const handleLogout = () => {
@@ -772,9 +1291,29 @@ export default function PerfilUsuarioPage() {
       <div className="w-full bg-brand-primary py-12 px-6 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         <div className="w-[80%] mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
-          {/* Avatar gigante */}
-          <div className="w-20 h-20 bg-brand-light border-4 border-white/20 rounded-full flex items-center justify-center shadow-lg text-white font-bold text-3xl select-none">
-            {firstName.charAt(0).toUpperCase()}
+          {/* Avatar gigante en el banner (clickable) */}
+          <div className="relative group w-20 h-20 bg-brand-light border-4 border-white/20 rounded-full flex items-center justify-center shadow-lg overflow-hidden select-none">
+            {user?.photoUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={user.photoUrl}
+                alt="Foto de Perfil"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-white font-bold text-3xl">{firstName.charAt(0).toUpperCase()}</span>
+            )}
+            {/* Hover overlay para cambiar foto */}
+            <label className="absolute inset-0 bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer text-[9px] font-bold">
+              <span className="text-sm">📸</span>
+              <span className="mt-0.5 leading-none">CAMBIAR</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+                className="hidden"
+              />
+            </label>
           </div>
           
           <div className="text-center md:text-left text-white">
@@ -782,8 +1321,14 @@ export default function PerfilUsuarioPage() {
             <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
               Hola, {firstName} {lastName}
             </h1>
-            <p className="text-xs text-white/90 font-medium">
-              ID de Usuario: <span className="font-mono text-white/70">{user.id.substring(0, 8)}...</span> • Registrado desde El Salvador
+            <p className="text-xs text-white/90 font-medium flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>ID de Usuario: <span className="font-mono text-white/70">{user.id.substring(0, 8)}...</span></span>
+              <span className="text-white/40 hidden sm:inline">•</span>
+              <span>Registrado desde El Salvador</span>
+              <span className="text-white/40 hidden sm:inline">•</span>
+              <span className="bg-white/10 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center">
+                Cambios de foto: <span className="font-semibold ml-1">{user?.avatarChangesThisMonth || 0}/3 este mes</span>
+              </span>
             </p>
           </div>
 
@@ -808,67 +1353,39 @@ export default function PerfilUsuarioPage() {
         <aside className="w-full lg:w-1/4 flex-shrink-0">
           <div className="bg-white rounded-lg border border-border-light overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
             
-            {/* Info rápida */}
-            <div className="p-6 text-center border-b border-border-light bg-background-main/30">
-              <div className="relative w-16 h-16 mx-auto mb-3 group">
-                {user?.photoUrl ? (
-                  <img
-                    src={user.photoUrl}
-                    alt="Foto de Perfil"
-                    className="w-16 h-16 rounded-full object-cover border border-brand-primary/30 shadow-sm"
-                  />
-                ) : (
-                  <div className="w-16 h-16 bg-brand-primary text-white rounded-full flex items-center justify-center font-bold text-xl shadow-sm">
-                    {firstName.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                {/* Upload button overlay */}
-                <label className="absolute inset-0 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer text-[9px] font-bold leading-normal">
-                  <span className="text-xs">📸</span>
-                  <span>CAMBIAR</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-              
-              {/* Profile Image monthly changes status */}
-              <p className="text-[9px] text-text-secondary mb-2">
-                Cambios de foto este mes: <span className="font-semibold text-text-primary">{user?.avatarChangesThisMonth || 0}/3</span>
-              </p>
-
-              {/* Upload button */}
-              <div className="mb-4">
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-border-light hover:border-brand-primary/30 hover:bg-brand-light/10 rounded-full text-[10px] font-bold text-brand-primary cursor-pointer transition-all shadow-sm">
-                  <span>📸</span>
-                  <span>Seleccionar Imagen</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              <h3 className="font-bold text-text-primary text-md leading-snug">{firstName} {lastName}</h3>
-              <p className="text-xs text-text-secondary mt-1">{user.email}</p>
-              
-
-            </div>
-
             {/* Navegación Vertical */}
             <nav className="p-2 flex flex-col gap-1">
-              {[
-                { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                { id: "proceso", label: "Seguimiento de Trámite", icon: "✈️" },
-                { id: "vipro", label: "Evaluación VIPRO", icon: "📊" },
-                { id: "asesor", label: "Mi Asesor Asignado", icon: "🤝" },
-                { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" }
-              ].map((tab) => (
+              {(() => {
+                const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
+                const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
+
+                // --- Tabs for approved agents / agencies ---
+                if (isAgent) {
+                  return [
+                    { id: "datos", label: "Mis Datos", icon: "👤" },
+                    { id: "portal_agente", label: user.role === ROLES.AGENCY ? "Portal Empresa" : "Portal Agente", icon: "🏢" },
+                    { id: "solicitud", label: "Mi Acreditación", icon: "🏅" },
+                  ];
+                }
+
+                // --- Tabs for admin / moderator ---
+                if (isStaff) {
+                  return [
+                    { id: "datos", label: "Mis Datos Personales", icon: "👤" },
+                    { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderador de Socios 🛡️" : "Administrar Socios 🛠️", icon: "⚙️" },
+                  ];
+                }
+
+                // --- Default tabs for regular users ---
+                return [
+                  { id: "datos", label: "Mis Datos Personales", icon: "👤" },
+                  { id: "proceso", label: "Seguimiento de Trámite", icon: "✈️" },
+                  { id: "vipro", label: "Evaluación VIPRO", icon: "📊" },
+                  { id: "asesor", label: "Mi Asesor Asignado", icon: "🤝" },
+                  { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" },
+                  ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio", icon: "💼" }] : []),
+                ];
+              })().map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -957,6 +1474,8 @@ export default function PerfilUsuarioPage() {
                       </select>
                     </div>
                   </div>
+
+
 
                   <div className="pt-4">
                     <button
@@ -1391,60 +1910,123 @@ export default function PerfilUsuarioPage() {
                   </div>
 
                   {/* Paso 5 */}
-                  {/* Paso 5 */}
-                  <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
-                    }`}>
-                      5
-                    </div>
-                    <div className={`flex-1 rounded-md p-4 border ${
-                      expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
-                    }`}>
-                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                        <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                          Paso 5: Programación de Cita y Simulacro Consular
-                        </h4>
-                        {expedienteStatus === 'approved' && (
-                          <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
-                            LISTO PARA AGENDAR
-                          </span>
-                        )}
+                  {preformMetadata?.interview_waiver_eligible === true ? (
+                    /* Paso 5 para Exención de Entrevista */
+                    <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
+                        expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
+                      }`}>
+                        5
                       </div>
-                      <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"}`}>
-                        Obtención de fechas en el CAS / Embajada y entrenamiento intensivo con tu asesor. Ponte en contacto con tu asesor por el chat para coordinar los horarios de simulación en Zoom.
-                      </p>
+                      <div className={`flex-1 rounded-md p-4 border ${
+                        expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
+                      }`}>
+                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                          <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
+                            Paso 5: Programación de Entrega y Preparación de Carpeta
+                          </h4>
+                          {expedienteStatus === 'approved' && (
+                            <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
+                              LISTO PARA AGENDAR
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"}`}>
+                          Obtención de confirmación de exención (Waiver Letter) y programación para depositar tu expediente en la oficina autorizada (CAS o sucursal de Courier autorizada). Ponte en contacto con tu asesor por el chat para coordinar este paso.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* Paso 5 Estándar */
+                    <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
+                        expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
+                      }`}>
+                        5
+                      </div>
+                      <div className={`flex-1 rounded-md p-4 border ${
+                        expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
+                      }`}>
+                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                          <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
+                            Paso 5: Programación de Cita y Simulacro Consular
+                          </h4>
+                          {expedienteStatus === 'approved' && (
+                            <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
+                              LISTO PARA AGENDAR
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"}`}>
+                          Obtención de fechas en el CAS / Embajada y entrenamiento intensivo con tu asesor. Ponte en contacto con tu asesor por el chat para coordinar los horarios de simulación en Zoom.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Paso 6 */}
-                  <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                    <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                      6
+                  {preformMetadata?.interview_waiver_eligible === true ? (
+                    /* Paso 6 para Exención de Entrevista */
+                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                        6
+                      </div>
+                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
+                        <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Depósito de Documentos (CAS / Buzón Courier)</h4>
+                        <p className="text-xs text-text-muted">Entrega física de tu pasaporte actual, visa anterior, fotografía 5x5 cm fondo blanco y confirmación de exención en la oficina autorizada.</p>
+                      </div>
                     </div>
-                    <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                      <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Entrevista Consular (Presentación y Decisión)</h4>
-                      <p className="text-xs text-text-muted">Asistencia a la Embajada para la entrevista formal con el oficial consular.</p>
+                  ) : (
+                    /* Paso 6 Estándar */
+                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                        6
+                      </div>
+                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
+                        <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Entrevista Consular (Presentación y Decisión)</h4>
+                        <p className="text-xs text-text-muted">Asistencia a la Embajada para la entrevista formal con el oficial consular.</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Paso 7 */}
-                  <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                    <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                      7
-                    </div>
-                    <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                        <h4 className="text-sm font-bold text-text-secondary">Paso 7: Soporte Post-Entrevista y Siguientes Pasos</h4>
-                        {user?.hasPaidAdvisor && (
-                          <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
-                            SIEMPRE ACTIVO
-                          </span>
-                        )}
+                  {preformMetadata?.interview_waiver_eligible === true ? (
+                    /* Paso 7 para Exención de Entrevista */
+                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                        7
                       </div>
-                      <p className="text-xs text-text-muted">Seguimiento tras la resolución de tu visa. Tu asesor certificado seguirá disponible por chat para orientarte en la logística o siguientes trámites.</p>
+                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
+                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                          <h4 className="text-sm font-bold text-text-secondary">Paso 7: Retorno de Pasaporte y Monitoreo de Visa</h4>
+                          {user?.hasPaidAdvisor && (
+                            <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
+                              SIEMPRE ACTIVO
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-text-muted">Seguimiento de la emisión de tu visa renovada y monitoreo de la devolución de tu pasaporte físico a la sucursal de envío seleccionada.</p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* Paso 7 Estándar */
+                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                        7
+                      </div>
+                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
+                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                          <h4 className="text-sm font-bold text-text-secondary">Paso 7: Soporte Post-Entrevista y Siguientes Pasos</h4>
+                          {user?.hasPaidAdvisor && (
+                            <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
+                              SIEMPRE ACTIVO
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-text-muted">Seguimiento tras la resolución de tu visa. Tu asesor certificado seguirá disponible por chat para orientarte en la logística o siguientes trámites.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2078,6 +2660,687 @@ export default function PerfilUsuarioPage() {
               </div>
             )}
 
+            {/* TAB: MI SOLICITUD DE SOCIO */}
+            {activeTab === "solicitud" && (
+              isLoadingPartnerApp ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                  <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
+                  <span className="text-xs text-text-secondary font-medium">Cargando detalles de solicitud...</span>
+                </div>
+              ) : partnerApp ? (
+                <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">Mi Solicitud de Socio</h2>
+                    <p className="text-xs text-text-secondary mt-1">Revisa el estado de tu postulación para unirte como agente consultor o agencia socia.</p>
+                  </div>
+                  <span className={`self-start sm:self-center text-xs font-bold px-3 py-1 rounded-full border ${
+                    partnerApp.status === "approved" || partnerApp.status === "active"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                      : partnerApp.status === "rejected"
+                      ? "bg-red-50 text-red-700 border-red-100"
+                      : partnerApp.status === "pending"
+                      ? "bg-amber-50 text-amber-700 border-amber-100"
+                      : "bg-gray-50 text-gray-700 border-gray-200"
+                  }`}>
+                    {partnerApp.status === "approved" || partnerApp.status === "active"
+                      ? "✓ Aprobada"
+                      : partnerApp.status === "rejected"
+                      ? "✕ Devuelta / Rechazada"
+                      : partnerApp.status === "pending"
+                      ? "🕒 Pendiente de Revisión"
+                      : "📝 Borrador"}
+                  </span>
+                </div>
+
+                <div className="space-y-6">
+                  {/* Status Banner */}
+                  <div className={`p-4 rounded-md border text-left ${
+                    partnerApp.status === "approved" || partnerApp.status === "active"
+                      ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
+                      : partnerApp.status === "rejected"
+                      ? "bg-red-50/50 border-red-200 text-red-800"
+                      : "bg-amber-50/50 border-amber-200 text-amber-800"
+                  }`}>
+                    <h4 className="font-bold text-sm mb-1">
+                      {partnerApp.status === "approved" || partnerApp.status === "active"
+                        ? "¡Tu solicitud ha sido aprobada!"
+                        : partnerApp.status === "rejected"
+                        ? "Tu solicitud requiere cambios"
+                        : "Postulación recibida"}
+                    </h4>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      {partnerApp.status === "approved" || partnerApp.status === "active"
+                        ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
+                        : partnerApp.status === "rejected"
+                        ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
+                        : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
+                    </p>
+                  </div>
+
+                  {/* Admin Notes */}
+                  {partnerApp.admin_notes && (
+                    <div className="bg-gray-50 border border-border-light rounded-md p-5 text-left">
+                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider mb-2">Comentarios y Observaciones del Administrador:</h4>
+                      <p className="text-xs text-text-secondary leading-relaxed bg-white border border-border-light p-3.5 rounded font-mono whitespace-pre-line">
+                        {partnerApp.admin_notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Document and details summary */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="border border-border-light rounded-md p-4 space-y-3 bg-white text-left">
+                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Detalles de la Postulación</h4>
+                      <div className="space-y-2 text-xs">
+                        <p><span className="text-text-secondary font-semibold">ID Solicitud:</span> <span className="font-mono">{partnerApp.application_id}</span></p>
+                        <p><span className="text-text-secondary font-semibold">Tipo de Socio:</span> {partnerApp.documents?.partner_type === "b2b_agency" ? "Agencia B2B Partner" : "Asesor Consultor Independiente"}</p>
+                        <p><span className="text-text-secondary font-semibold">Nombre/Razón Social:</span> {partnerApp.full_name}</p>
+                        <p><span className="text-text-secondary font-semibold">Correo de Contacto:</span> {partnerApp.email}</p>
+                        <p><span className="text-text-secondary font-semibold">Teléfono:</span> {partnerApp.phone}</p>
+                        <p><span className="text-text-secondary font-semibold">País de Residencia:</span> {partnerApp.country_residence}</p>
+                        <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {partnerApp.experience_years} años</p>
+                      </div>
+                    </div>
+
+                    <div className="border border-border-light rounded-md p-4 space-y-3 bg-white text-left">
+                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Documentos Adjuntos</h4>
+                      <div className="space-y-2 text-xs">
+                        {Object.entries(partnerApp.documents || {}).map(([key, val]) => {
+                          if (["partner_type", "b2b_details", "last_saved_step"].includes(key) || !val) return null;
+                          const cleanName = typeof val === 'string'
+                            ? (val.includes('/') ? val.substring(val.lastIndexOf('/') + 1) : val)
+                            : (val as { name?: string })?.name || key;
+                          const displayLabel = key === "dui" ? "DUI/INE/Acta Constitutiva"
+                            : key === "certificacion" ? "Certificación/Identificación RL"
+                            : key === "antecedentes" ? "Antecedentes/Registro Tributario"
+                            : key === "domicilio" ? "Comprobante de Domicilio"
+                            : key === "titulo" ? "Título Profesional/Brochure"
+                            : key === "cv" ? "CV/Licencia Turística"
+                            : key;
+                          const url = typeof val === 'string' ? val : (val as { url?: string })?.url;
+                          return (
+                            <div key={key} className="flex justify-between items-center py-1 border-b border-gray-55 last:border-0">
+                              <span className="font-semibold text-text-secondary">{displayLabel}:</span>
+                              {url ? (
+                                <a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-bold hover:underline">
+                                  Ver Documento ↗
+                                </a>
+                              ) : (
+                                <span className="text-text-muted italic">{cleanName}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions for editing application */}
+                  {(partnerApp.status === "rejected" || partnerApp.status === "draft") && (
+                    <div className="flex justify-end pt-4">
+                      <button
+                        onClick={() => router.push("/agents/apply")}
+                        className="px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
+                      >
+                        Corregir o Modificar Postulación →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-text-secondary/70 italic animate-fadeIn">
+                No se encontró ninguna postulación de socio asociada a tu cuenta.
+              </div>
+            ))}
+
+            {/* TAB: ADMINISTRAR SOCIOS (ADMIN PANEL) */}
+            {activeTab === "admin_socios" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+              <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4 text-left">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">
+                      {user && user.role === ROLES.MODERATOR
+                        ? "Moderador: Revisión de Socios"
+                        : "Administrar Solicitudes de Socios"}
+                    </h2>
+                    <p className="text-xs text-text-secondary mt-1">Revisa y evalúa las postulaciones de consultores independientes y agencias de viaje B2B.</p>
+                  </div>
+                  
+                  {/* Status Filters */}
+                  <div className="flex gap-1.5 self-start">
+                    {[
+                      { id: "all", label: "Todas" },
+                      { id: "pending", label: "Pendientes" },
+                      { id: "approved", label: "Aprobadas" },
+                      { id: "rejected", label: "Rechazadas" }
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        onClick={() => setStatusFilter(filter.id)}
+                        className={`px-3 py-1.5 text-[10px] font-bold rounded uppercase tracking-wider transition-all cursor-pointer ${
+                          statusFilter === filter.id
+                            ? "bg-brand-primary text-white shadow-sm"
+                            : "bg-gray-100 text-text-secondary hover:bg-gray-200"
+                        }`}
+                      >
+                        {filter.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {!selectedApp ? (
+                  /* APPLICATIONS LISTING */
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
+                          <th className="py-3 px-4">Código</th>
+                          <th className="py-3 px-4">Postulante / Empresa</th>
+                          <th className="py-3 px-4">Tipo</th>
+                          <th className="py-3 px-4">Fecha</th>
+                          <th className="py-3 px-4">Estado</th>
+                          <th className="py-3 px-4 text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-light text-xs">
+                        {allApplications
+                          .filter((app) => statusFilter === "all" || app.status === statusFilter)
+                          .length > 0 ? (
+                            allApplications
+                              .filter((app) => statusFilter === "all" || app.status === statusFilter)
+                              .map((app) => (
+                                <tr key={app.id} className="hover:bg-background-main/10 transition-colors">
+                                  <td className="py-4 px-4 font-mono font-medium text-text-primary">{app.application_id}</td>
+                                  <td className="py-4 px-4">
+                                    <div>
+                                      <p className="font-bold text-text-primary">{app.full_name}</p>
+                                      <p className="text-[10px] text-text-secondary">{app.email}</p>
+                                    </div>
+                                  </td>
+                                  <td className="py-4 px-4 text-text-secondary">
+                                    {app.documents?.partner_type === "b2b_agency" ? "🏢 Agencia B2B" : "👤 Consultor Ind."}
+                                  </td>
+                                  <td className="py-4 px-4 text-text-secondary">
+                                    {new Date(app.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  </td>
+                                  <td className="py-4 px-4">
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                      app.status === "approved" || app.status === "active"
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                        : app.status === "rejected"
+                                        ? "bg-red-50 text-red-700 border-red-100"
+                                        : "bg-amber-50 text-amber-700 border-amber-100"
+                                    }`}>
+                                      {app.status === "approved" || app.status === "active"
+                                        ? "APROBADO"
+                                        : app.status === "rejected"
+                                        ? "RECHAZADO"
+                                        : "PENDIENTE"}
+                                    </span>
+                                  </td>
+                                  <td className="py-4 px-4 text-right">
+                                    <button
+                                      onClick={() => {
+                                        setSelectedApp(app);
+                                        setAdminNotesInput(app.admin_notes || "");
+                                      }}
+                                      className="px-3 py-1 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-sm"
+                                    >
+                                      Evaluar 🔎
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                          ) : (
+                            <tr>
+                              <td colSpan={6} className="py-8 text-center text-text-muted italic">
+                                No se encontraron solicitudes registradas para este filtro.
+                              </td>
+                            </tr>
+                          )}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  /* SINGLE APPLICATION REVIEW DETAIL */
+                  <div className="space-y-6">
+                    <button
+                      onClick={() => setSelectedApp(null)}
+                      className="text-brand-primary text-xs font-bold hover:underline cursor-pointer border-0 bg-transparent flex items-center gap-1"
+                    >
+                      ← Volver a la lista de solicitudes
+                    </button>
+
+                    <div className="bg-gray-50 border border-border-light rounded-md p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-left">
+                      <div>
+                        <h3 className="font-bold text-text-primary text-base">Evaluando Postulación: {selectedApp.full_name}</h3>
+                        <p className="text-xs text-text-secondary mt-0.5">ID: <span className="font-mono font-semibold">{selectedApp.application_id}</span> • Registro: {new Date(selectedApp.created_at).toLocaleString()}</p>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <button
+                          disabled={isSavingAdmin}
+                          onClick={() => handleAdminAction(selectedApp.id, "approved")}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          ✓ Aprobar Socio
+                        </button>
+                        <button
+                          disabled={isSavingAdmin}
+                          onClick={() => handleAdminAction(selectedApp.id, "rejected")}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          ✕ Denegar / Observar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Detailed info grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      <div className="lg:col-span-2 space-y-6">
+                        {/* Profile Info */}
+                        <div className="border border-border-light rounded-md p-5 bg-white space-y-4 text-left">
+                          <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Perfil del Postulante</h4>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                            <p><span className="text-text-secondary font-semibold">Correo:</span> {selectedApp.email}</p>
+                            <p><span className="text-text-secondary font-semibold">Teléfono:</span> {selectedApp.phone}</p>
+                            <p><span className="text-text-secondary font-semibold">País Residencia:</span> {selectedApp.country_residence}</p>
+                            <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {selectedApp.experience_years} años</p>
+                            <p><span className="text-text-secondary font-semibold">Enlace Profesional/Sitio:</span> {selectedApp.linkedin ? <a href={selectedApp.linkedin} target="_blank" rel="noopener noreferrer" className="text-brand-primary hover:underline">{selectedApp.linkedin}</a> : "No provisto"}</p>
+                          </div>
+
+                          <div className="text-xs space-y-2.5 pt-2 border-t border-gray-100">
+                            <p><span className="text-text-secondary font-bold uppercase tracking-wider text-[10px]">Idiomas:</span> {selectedApp.languages?.join(", ") || "No especificado"}</p>
+                            <p><span className="text-text-secondary font-bold uppercase tracking-wider text-[10px]">Especialidades:</span> {selectedApp.specialties?.join(", ") || "No especificado"}</p>
+                            <p><span className="text-text-secondary font-bold uppercase tracking-wider text-[10px]">Destinos Objetivo:</span> {selectedApp.target_countries?.join(", ") || "No especificado"}</p>
+                          </div>
+                        </div>
+
+                        {/* Biography / Description */}
+                        <div className="border border-border-light rounded-md p-5 bg-white space-y-3 text-left">
+                          <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Biografía / Presentación Corporativa</h4>
+                          <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-line bg-gray-50 border border-border-light/60 p-4 rounded font-sans">
+                            {selectedApp.biography}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Documents sidebar & Comments box */}
+                      <div className="space-y-6">
+                        {/* Documents */}
+                        <div className="border border-border-light rounded-md p-5 bg-white space-y-4 text-left">
+                          <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Documentación Adjunta</h4>
+                          <div className="space-y-3 text-xs">
+                            {Object.entries(selectedApp.documents || {}).map(([key, val]) => {
+                              if (["partner_type", "b2b_details", "last_saved_step"].includes(key) || !val) return null;
+                              const cleanName = typeof val === 'string'
+                                ? (val.includes('/') ? val.substring(val.lastIndexOf('/') + 1) : val)
+                                : (val as { name?: string })?.name || key;
+                              const displayLabel = key === "dui" ? "DUI/INE/Acta Constitutiva"
+                                : key === "certificacion" ? "Certificación/Identificación RL"
+                                : key === "antecedentes" ? "Antecedentes/Registro Tributario"
+                                : key === "domicilio" ? "Comprobante de Domicilio"
+                                : key === "titulo" ? "Título Profesional/Brochure"
+                                : key === "cv" ? "CV/Licencia Turística"
+                                : key;
+                              const url = typeof val === 'string' ? val : (val as { url?: string })?.url;
+                              return (
+                                <div key={key} className="flex flex-col gap-1 py-2 border-b border-gray-100 last:border-0">
+                                  <span className="font-bold text-text-secondary text-[10px] uppercase tracking-wider">{displayLabel}:</span>
+                                  {url ? (
+                                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-bold hover:underline flex items-center gap-1 mt-0.5">
+                                      <span>📎</span>
+                                      <span>Ver documento adjunto</span>
+                                    </a>
+                                  ) : (
+                                    <span className="text-text-muted italic">{cleanName}</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Admin Notes / Review Comments */}
+                        <div className="border border-border-light rounded-md p-5 bg-white space-y-4">
+                          <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light text-left">Comentarios del Revisor</h4>
+                          
+                          <div className="space-y-3">
+                            <label className="block text-[10px] text-text-secondary font-semibold text-left">OBSERVACIONES / DETALLE DE CAMBIOS REQUERIDOS:</label>
+                            <textarea
+                              value={adminNotesInput}
+                              onChange={(e) => setAdminNotesInput(e.target.value)}
+                              placeholder="Escribe comentarios, observaciones sobre los documentos subidos, o aclaraciones de información faltante..."
+                              rows={5}
+                              className="w-full p-2.5 bg-background-main border border-border-light rounded text-xs focus:border-border-focus focus:ring-1 focus:ring-border-focus font-sans text-left"
+                            />
+                            
+                            <button
+                              disabled={isSavingAdmin}
+                              onClick={() => handleAdminAction(selectedApp.id, "comment_only")}
+                              className="w-full py-2 bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold rounded-sm transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              {isSavingAdmin ? "Guardando..." : "✓ Guardar Comentarios"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* TAB: PORTAL AGENTE / EMPRESA */}
+            {activeTab === "portal_agente" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
+              <div className="animate-fadeIn">
+                {/* Header */}
+                <div className="mb-6 pb-4 border-b border-border-light flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">
+                      {user.role === ROLES.AGENCY ? "Portal Empresa" : "Portal Agente"}
+                    </h2>
+                    <p className="text-xs text-text-secondary mt-1">
+                      {user.role === ROLES.AGENCY
+                        ? "Agencia acreditada en la red TodoVisa."
+                        : "Consultor independiente acreditado en la red TodoVisa."}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-brand-light border border-border-light text-brand-primary text-[10px] font-bold uppercase tracking-wider flex-shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block animate-pulse" />
+                    Cuenta Activa
+                  </span>
+                </div>
+
+                {/* Welcome note */}
+                <p className="text-sm text-text-secondary leading-relaxed mb-6">
+                  Bienvenido, <span className="font-semibold text-text-primary">{user.firstName}</span>. Tu cuenta ha sido activada como{" "}
+                  <span className="font-semibold text-text-primary">
+                    {user.role === ROLES.AGENCY ? "empresa socia" : "agente consultor"}
+                  </span>
+                  {" "}de la red TodoVisa. Desde aquí puedes gestionar tus clientes, revisar comisiones y acceder a herramientas exclusivas.
+                </p>
+
+                {/* Quick Access Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                  <button
+                    onClick={() => router.push("/agents/portal")}
+                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl flex-shrink-0 mt-0.5">🖥️</span>
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                          {user.role === ROLES.AGENCY ? "Panel de Empresa" : "Panel de Agente"}
+                        </h3>
+                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                          Gestiona tus casos, clientes asignados y comisiones semanales.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab("solicitud")}
+                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl flex-shrink-0 mt-0.5">🏅</span>
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                          Mi Acreditación
+                        </h3>
+                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                          Revisa tu expediente de postulación y documentos aprobados.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => router.push("/agents/portal#comisiones")}
+                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl flex-shrink-0 mt-0.5">💰</span>
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                          Simulador de Comisiones
+                        </h3>
+                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                          Calcula tus ganancias semanales según número de referidos activos.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => router.push("/agents/portal#configuracion")}
+                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl flex-shrink-0 mt-0.5">⚙️</span>
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                          Métodos de Cobro
+                        </h3>
+                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                          Configura tu cuenta de PayPal o transferencia ACH para recibir pagos.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Info note */}
+                <div className="flex items-start gap-3 bg-brand-light border border-border-light rounded-sm p-4 text-left mb-6">
+                  <span className="text-sm flex-shrink-0 mt-0.5">ℹ️</span>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Como {user.role === ROLES.AGENCY ? "empresa socia" : "agente consultor"} acreditado(a),
+                    ya no necesitas contratar servicios de visa individuales. En su lugar, gestionas casos de
+                    clientes directamente desde el{" "}
+                    <button
+                      onClick={() => router.push("/agents/portal")}
+                      className="text-brand-primary font-semibold hover:underline focus:outline-none"
+                    >
+                      Panel de {user.role === ROLES.AGENCY ? "Empresa" : "Agente"}
+                    </button>
+                    {" "}y recibes comisiones por cada caso completado exitosamente.
+                  </p>
+                </div>
+
+                {/* Dashboard de Comisiones Reales */}
+                <div className="border border-border-light rounded-sm p-5 bg-white space-y-6 text-left mb-6">
+                  <div>
+                    <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Resumen de Comisiones</h3>
+                    <p className="text-xs text-text-secondary">Monitorea tus ingresos generados a través de TodoVisa.</p>
+                  </div>
+
+                  {/* KPI summary cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-4 border border-border-light rounded-sm bg-background-main">
+                      <div className="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Total Ganado</div>
+                      <div className="text-lg font-bold text-text-primary mt-1">
+                        ${agentCommissions.reduce((acc, curr) => curr.status === "paid" ? acc + curr.commission_amount : acc, 0).toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="p-4 border border-border-light rounded-sm bg-background-main">
+                      <div className="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Pendiente de Cobro</div>
+                      <div className="text-lg font-bold text-text-primary mt-1">
+                        ${agentCommissions.reduce((acc, curr) => curr.status === "pending" || curr.status === "processing" ? acc + curr.commission_amount : acc, 0).toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="p-4 border border-border-light rounded-sm bg-background-main">
+                      <div className="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Tasa de Comisión</div>
+                      <div className="text-lg font-bold text-brand-primary mt-1">15%</div>
+                    </div>
+                  </div>
+
+                  {/* Commissions table */}
+                  <div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Detalle de Operaciones</h4>
+                    {isLoadingCommissions ? (
+                      <p className="text-xs text-text-muted">Cargando transacciones...</p>
+                    ) : agentCommissions.length === 0 ? (
+                      <p className="text-xs text-text-muted italic">No se registran comisiones devengadas.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b border-border-light bg-background-main text-[10px] uppercase tracking-wider text-text-secondary">
+                              <th className="py-2.5 px-3 font-semibold">Folio</th>
+                              <th className="py-2.5 px-3 font-semibold">Cliente</th>
+                              <th className="py-2.5 px-3 font-semibold">Servicio</th>
+                              <th className="py-2.5 px-3 font-semibold">Monto Bruto</th>
+                              <th className="py-2.5 px-3 font-semibold">Comisión</th>
+                              <th className="py-2.5 px-3 font-semibold">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border-light text-text-secondary">
+                            {agentCommissions.map((c) => (
+                              <tr key={c.id} className="hover:bg-background-main/50">
+                                <td className="py-2.5 px-3 font-mono font-bold text-text-primary">{c.client_folio}</td>
+                                <td className="py-2.5 px-3">{c.client_name}</td>
+                                <td className="py-2.5 px-3 capitalize">{c.service_type.replace("_", " ")}</td>
+                                <td className="py-2.5 px-3">${Number(c.gross_amount).toFixed(2)}</td>
+                                <td className="py-2.5 px-3 font-bold text-text-primary">${Number(c.commission_amount).toFixed(2)}</td>
+                                <td className="py-2.5 px-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    c.status === "paid"
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                      : c.status === "processing"
+                                      ? "bg-blue-50 text-blue-700 border border-blue-100"
+                                      : "bg-amber-50 text-amber-700 border border-amber-100"
+                                  }`}>
+                                    {c.status === "paid" ? "Pagado" : c.status === "processing" ? "En Proceso" : "Pendiente"}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sección exclusiva para empresas (Gestión de asesores) */}
+                {user.role === ROLES.AGENCY && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
+                    {/* Equipo / Asesores Activos */}
+                    <div className="border border-border-light rounded-sm p-5 bg-white space-y-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Miembros del Equipo</h3>
+                        <p className="text-xs text-text-secondary">Asesores autorizados bajo la acreditación de tu agencia.</p>
+                      </div>
+
+                      {isLoadingMembers ? (
+                        <p className="text-xs text-text-muted">Cargando equipo...</p>
+                      ) : agencyMembers.length === 0 ? (
+                        <p className="text-xs text-text-muted italic">Aún no tienes consultores registrados.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {agencyMembers.map((m) => (
+                            <div key={m.id} className="flex items-center justify-between p-3 border border-border-light rounded-sm bg-background-main">
+                              <div>
+                                <div className="text-xs font-bold text-text-primary">
+                                  {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : "Asesor TodoVisa"}
+                                </div>
+                                <div className="text-[10px] text-text-secondary">{m.profile?.email || ""}</div>
+                              </div>
+                              <span className="px-2 py-0.5 bg-brand-light border border-border-light text-brand-primary text-[9px] font-bold uppercase rounded-sm">
+                                {m.member_role === "supervisor" ? "Supervisor" : "Asesor"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Invitar Asesor */}
+                    <div className="border border-border-light rounded-sm p-5 bg-white space-y-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Invitar Asesor</h3>
+                        <p className="text-xs text-text-secondary">Genera invitaciones para que consultores se vinculen a tu agencia.</p>
+                      </div>
+
+                      <form onSubmit={handleInviteConsultant} className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] text-text-secondary font-bold uppercase tracking-wider mb-1.5">Correo del Consultor</label>
+                          <input
+                            type="email"
+                            required
+                            placeholder="consultor@example.com"
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs focus:border-border-focus focus:ring-1 focus:ring-border-focus transition-all text-text-primary"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={isSendingInvite}
+                          className="w-full py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors shadow-sm cursor-pointer"
+                        >
+                          {isSendingInvite ? "Generando..." : "Enviar Invitación"}
+                        </button>
+                      </form>
+
+                      {/* Lista de Invitaciones Pendientes */}
+                      <div className="pt-2">
+                        <h4 className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-2.5">Invitaciones Enviadas</h4>
+                        {isLoadingInvitations ? (
+                          <p className="text-[10px] text-text-muted">Cargando invitaciones...</p>
+                        ) : agencyInvitations.length === 0 ? (
+                          <p className="text-[10px] text-text-muted italic">No hay invitaciones registradas.</p>
+                        ) : (
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {agencyInvitations.map((inv) => (
+                              <div key={inv.id} className="p-2.5 border border-border-light rounded-sm bg-background-main text-[10px] flex flex-col gap-1.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-bold text-text-primary truncate mr-1.5">{inv.email}</span>
+                                  <span className={`px-1.5 py-0.5 rounded-sm text-[8px] font-bold ${
+                                    inv.status === "accepted"
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                      : inv.status === "expired"
+                                      ? "bg-red-50 text-red-700 border border-red-100"
+                                      : "bg-amber-50 text-amber-700 border border-amber-100"
+                                  }`}>
+                                    {inv.status === "accepted" ? "Aceptado" : inv.status === "expired" ? "Expirado" : "Pendiente"}
+                                  </span>
+                                </div>
+                                {inv.status === "pending" && (
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      readOnly
+                                      value={`${window.location.origin}/agents/join?token=${inv.token}`}
+                                      className="flex-1 px-1.5 py-1 bg-white border border-border-light rounded-sm text-[8px] font-mono select-all focus:outline-none"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(`${window.location.origin}/agents/join?token=${inv.token}`);
+                                        showToast("Enlace de invitación copiado al portapapeles", "success");
+                                      }}
+                                      className="px-2 py-1 bg-gray-800 text-white font-bold rounded-sm hover:bg-gray-900 transition-colors"
+                                    >
+                                      Copiar
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
         </section>
 
@@ -2292,6 +3555,120 @@ export default function PerfilUsuarioPage() {
               >
                 <span>✓</span>
                 <span>Confirmar y Guardar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cropping Modal */}
+      {isCropModalOpen && cropImageObj && (
+        <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col border border-border-light animate-in fade-in zoom-in duration-200">
+            <div className="px-6 py-4 border-b border-border-light flex items-center justify-between">
+              <h3 className="text-sm font-serif font-bold text-text-primary">Ajustar Foto de Perfil</h3>
+              <button 
+                type="button"
+                onClick={() => {
+                  setIsCropModalOpen(false);
+                  setCropImageObj(null);
+                }}
+                className="text-text-secondary hover:text-text-primary font-semibold text-lg cursor-pointer border-0 bg-transparent"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 flex flex-col items-center gap-5">
+              <p className="text-xs text-text-secondary text-center leading-relaxed">
+                Usa el zoom y desplaza la imagen para encuadrarla dentro del recuadro de la foto cuadrada.
+              </p>
+
+              <div className="relative w-[300px] h-[300px] bg-background-main border border-border-light shadow-inner overflow-hidden rounded-lg flex items-center justify-center">
+                <canvas 
+                  ref={canvasRef} 
+                  width={300} 
+                  height={300} 
+                  className="max-w-full max-h-full block shadow-md"
+                />
+              </div>
+
+              <div className="w-full space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary">
+                    <span>Acercar / Alejar (Zoom)</span>
+                    <span>{(zoom * 100).toFixed(0)}%</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min={1} 
+                    max={3} 
+                    step={0.01} 
+                    value={zoom} 
+                    onChange={(e) => handleZoomChange(Number(e.target.value))}
+                    className="w-full accent-brand-primary h-1.5 bg-border-light rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary">
+                    <span>Desplazar Horizontal (X)</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min={-maxPanX} 
+                    max={maxPanX} 
+                    step={1} 
+                    value={panX} 
+                    disabled={maxPanX === 0}
+                    onChange={(e) => setPanX(Number(e.target.value))}
+                    className="w-full accent-brand-primary h-1.5 bg-border-light rounded-lg appearance-none cursor-pointer disabled:opacity-50"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary">
+                    <span>Desplazar Vertical (Y)</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min={-maxPanY} 
+                    max={maxPanY} 
+                    step={1} 
+                    value={panY} 
+                    disabled={maxPanY === 0}
+                    onChange={(e) => setPanY(Number(e.target.value))}
+                    className="w-full accent-brand-primary h-1.5 bg-border-light rounded-lg appearance-none cursor-pointer disabled:opacity-50"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-background-main/30 border-t border-border-light flex gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCropModalOpen(false);
+                  setCropImageObj(null);
+                }}
+                className="flex-1 px-4 py-2 border border-border-light text-text-secondary hover:text-text-primary text-xs font-semibold rounded-sm transition-colors cursor-pointer bg-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCropAndUpload}
+                disabled={isUploadingAvatar}
+                className="flex-1 px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors shadow-md cursor-pointer disabled:opacity-75 flex items-center justify-center gap-1.5 border-0"
+              >
+                {isUploadingAvatar ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Subiendo...</span>
+                  </>
+                ) : (
+                  <span>Guardar y Aplicar</span>
+                )}
               </button>
             </div>
           </div>

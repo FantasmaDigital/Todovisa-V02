@@ -102,8 +102,8 @@ export default function AgentApplyPage() {
   const [applicationId, setApplicationId] = useState("");
   const [showTermsModal, setShowTermsModal] = useState(false);
 
-  // Document uploads: key -> { name, progress }
-  type DocFile = { name: string; progress: number | null };
+  // Document uploads: key -> { name, url, progress }
+  type DocFile = { name: string; url?: string; progress: number | null };
   const [docs, setDocs] = useState<Record<string, DocFile | null>>(() => {
     const defaultDocs = {
       dui: null,
@@ -126,6 +126,11 @@ export default function AgentApplyPage() {
   });
 
   const [progressRestored, setProgressRestored] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Auto-save form progress to local storage
   useEffect(() => {
@@ -233,17 +238,18 @@ export default function AgentApplyPage() {
         status: "draft",
         documents: {
           partner_type: updatedData.applicantType,
-          dui: isB2b ? null : updatedDocs.dui?.name || null,
-          certificacion: isB2b ? null : updatedDocs.certificacion?.name || null,
-          antecedentes: isB2b ? null : updatedDocs.antecedentes?.name || null,
-          domicilio: isB2b ? null : updatedDocs.domicilio?.name || null,
-          titulo: isB2b ? null : updatedDocs.titulo?.name || null,
-          cv: isB2b ? null : updatedDocs.cv?.name || null,
-          actaConstitutiva: isB2b ? updatedDocs.actaConstitutiva?.name || null : null,
-          identificacionRepresentante: isB2b ? updatedDocs.identificacionRepresentante?.name || null : null,
-          registroTributario: isB2b ? updatedDocs.registroTributario?.name || null : null,
-          domicilioEmpresa: isB2b ? updatedDocs.domicilioEmpresa?.name || null : null,
-          brochureServicios: isB2b ? updatedDocs.brochureServicios?.name || null : null,
+          dui: isB2b ? null : updatedDocs.dui?.url || updatedDocs.dui?.name || null,
+          certificacion: isB2b ? null : updatedDocs.certificacion?.url || updatedDocs.certificacion?.name || null,
+          antecedentes: isB2b ? null : updatedDocs.antecedentes?.url || updatedDocs.antecedentes?.name || null,
+          domicilio: isB2b ? null : updatedDocs.domicilio?.url || updatedDocs.domicilio?.name || null,
+          titulo: isB2b ? null : updatedDocs.titulo?.url || updatedDocs.titulo?.name || null,
+          cv: isB2b ? null : updatedDocs.cv?.url || updatedDocs.cv?.name || null,
+          actaConstitutiva: isB2b ? updatedDocs.dui?.url || updatedDocs.dui?.name || null : null,
+          identificacionRepresentante: isB2b ? updatedDocs.certificacion?.url || updatedDocs.certificacion?.name || null : null,
+          registroTributario: isB2b ? updatedDocs.antecedentes?.url || updatedDocs.antecedentes?.name || null : null,
+          domicilioEmpresa: isB2b ? updatedDocs.domicilio?.url || updatedDocs.domicilio?.name || null : null,
+          brochureServicios: isB2b ? updatedDocs.titulo?.url || updatedDocs.titulo?.name || null : null,
+          licenciaTuristica: isB2b ? updatedDocs.cv?.url || updatedDocs.cv?.name || null : null,
           b2b_details: isB2b ? {
             companyName: updatedData.companyName,
             taxId: updatedData.taxId,
@@ -316,18 +322,24 @@ export default function AgentApplyPage() {
             termsAccepted: data.terms_accepted || false,
           });
 
+          const getDocFileValue = (val: any): DocFile | null => {
+            if (!val) return null;
+            if (typeof val === 'string') {
+              const name = val.includes('/') ? val.substring(val.lastIndexOf('/') + 1) : val;
+              const cleanName = name.includes('-') ? name.substring(name.indexOf('-') + 1) : name;
+              const finalName = cleanName.includes('-') ? cleanName.substring(cleanName.indexOf('-') + 1) : cleanName;
+              return { name: finalName, url: val, progress: null };
+            }
+            return val;
+          };
+
           setDocs({
-            dui: dbDocs.dui ? { name: dbDocs.dui, progress: null } : null,
-            certificacion: dbDocs.certificacion ? { name: dbDocs.certificacion, progress: null } : null,
-            antecedentes: dbDocs.antecedentes ? { name: dbDocs.antecedentes, progress: null } : null,
-            domicilio: dbDocs.domicilio ? { name: dbDocs.domicilio, progress: null } : null,
-            titulo: dbDocs.titulo ? { name: dbDocs.titulo, progress: null } : null,
-            cv: dbDocs.cv ? { name: dbDocs.cv, progress: null } : null,
-            actaConstitutiva: dbDocs.actaConstitutiva ? { name: dbDocs.actaConstitutiva, progress: null } : null,
-            identificacionRepresentante: dbDocs.identificacionRepresentante ? { name: dbDocs.identificacionRepresentante, progress: null } : null,
-            registroTributario: dbDocs.registroTributario ? { name: dbDocs.registroTributario, progress: null } : null,
-            domicilioEmpresa: dbDocs.domicilioEmpresa ? { name: dbDocs.domicilioEmpresa, progress: null } : null,
-            brochureServicios: dbDocs.brochureServicios ? { name: dbDocs.brochureServicios, progress: null } : null,
+            dui: getDocFileValue(isB2b ? dbDocs.actaConstitutiva : dbDocs.dui),
+            certificacion: getDocFileValue(isB2b ? dbDocs.identificacionRepresentante : dbDocs.certificacion),
+            antecedentes: getDocFileValue(isB2b ? dbDocs.registroTributario : dbDocs.antecedentes),
+            domicilio: getDocFileValue(isB2b ? dbDocs.domicilioEmpresa : dbDocs.domicilio),
+            titulo: getDocFileValue(isB2b ? dbDocs.brochureServicios : dbDocs.titulo),
+            cv: getDocFileValue(isB2b ? dbDocs.licenciaTuristica : dbDocs.cv),
           });
 
           const lastSavedStep = dbDocs.last_saved_step || 3;
@@ -351,25 +363,52 @@ export default function AgentApplyPage() {
     return true;
   };
 
-  const handleDocUpload = (key: string, file: File) => {
-    setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 0 } }));
+  const handleDocUpload = async (key: string, file: File) => {
+    setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 10 } }));
     if (errors[`doc_${key}`]) setErrors((prev) => ({ ...prev, [`doc_${key}`]: "" }));
-    let p = 0;
-    const iv = setInterval(() => {
-      p += 20;
-      if (p >= 100) {
-        clearInterval(iv);
-        setDocs((prev) => {
-          const nextDocs = { ...prev, [key]: { name: file.name, progress: null } };
-          if (step > 2) {
-            saveDraftToSupabase(formData, nextDocs, step);
-          }
-          return nextDocs;
+
+    try {
+      const uniqueId = user?.id || Math.random().toString(36).substring(2, 11);
+      const filePath = `agent-documents/${uniqueId}/${key}-${Date.now()}-${file.name}`;
+      
+      setDocs((prev) => (prev[key] ? { ...prev, [key]: { name: file.name, progress: 40 } } : prev));
+
+      const { error: uploadError } = await supabase.storage
+        .from("todovisa")
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: true,
         });
-      } else {
-        setDocs((prev) => (prev[key] ? { ...prev, [key]: { name: prev[key]!.name, progress: p } } : prev));
+
+      if (uploadError) {
+        console.error("Error uploading document to Supabase storage:", uploadError.message);
+        setDocs((prev) => ({ ...prev, [key]: null }));
+        setErrors((prev) => ({ ...prev, [`doc_${key}`]: `Error de carga: ${uploadError.message}` }));
+        showToast("Error al subir el archivo al almacenamiento.", "error");
+        return;
       }
-    }, 120);
+
+      setDocs((prev) => (prev[key] ? { ...prev, [key]: { name: file.name, progress: 85 } } : prev));
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("todovisa")
+        .getPublicUrl(filePath);
+
+      setDocs((prev) => {
+        const nextDocs = { ...prev, [key]: { name: file.name, url: publicUrl, progress: null } };
+        if (step > 2) {
+          saveDraftToSupabase(formData, nextDocs, step);
+        }
+        return nextDocs;
+      });
+
+      showToast("Documento subido con éxito.", "success");
+    } catch (err) {
+      console.error("Unexpected error in document upload:", err);
+      setDocs((prev) => ({ ...prev, [key]: null }));
+      setErrors((prev) => ({ ...prev, [`doc_${key}`]: "Error inesperado al subir el archivo." }));
+      showToast("Error inesperado al subir el archivo.", "error");
+    }
   };
 
   const removeDoc = (key: string) => setDocs((prev) => {
@@ -464,9 +503,9 @@ export default function AgentApplyPage() {
       }
     } else if (step === 5) {
       if (isB2b) {
-        if (!docs.actaConstitutiva) newErrors.doc_actaConstitutiva = "El Registro de Comercio o Acta Constitutiva es obligatorio.";
-        if (!docs.identificacionRepresentante) newErrors.doc_identificacionRepresentante = "La identificación del representante legal es obligatoria.";
-        if (!docs.registroTributario) newErrors.doc_registroTributario = "El comprobante de Registro Tributario (RFC/RUC) es obligatorio.";
+        if (!docs.dui) newErrors.doc_dui = "El Registro de Comercio o Acta Constitutiva es obligatorio.";
+        if (!docs.certificacion) newErrors.doc_certificacion = "La identificación del representante legal es obligatoria.";
+        if (!docs.antecedentes) newErrors.doc_antecedentes = "El comprobante de Registro Tributario (RFC/RUC) es obligatorio.";
       } else {
         if (!docs.dui) newErrors.doc_dui = "El Documento de Identidad (DUI/INE/Pasaporte) es obligatorio.";
       }
@@ -549,18 +588,18 @@ export default function AgentApplyPage() {
         status: "pending",
         documents: {
           partner_type: formData.applicantType,
-          dui: isB2b ? null : docs.dui?.name || null,
-          certificacion: isB2b ? null : docs.certificacion?.name || null,
-          antecedentes: isB2b ? null : docs.antecedentes?.name || null,
-          domicilio: isB2b ? null : docs.domicilio?.name || null,
-          titulo: isB2b ? null : docs.titulo?.name || null,
-          cv: isB2b ? null : docs.cv?.name || null,
-          actaConstitutiva: isB2b ? docs.dui?.name || null : null,
-          identificacionRepresentante: isB2b ? docs.certificacion?.name || null : null,
-          registroTributario: isB2b ? docs.antecedentes?.name || null : null,
-          domicilioEmpresa: isB2b ? docs.domicilio?.name || null : null,
-          brochureServicios: isB2b ? docs.titulo?.name || null : null,
-          licenciaTuristica: isB2b ? docs.cv?.name || null : null,
+          dui: isB2b ? null : docs.dui?.url || docs.dui?.name || null,
+          certificacion: isB2b ? null : docs.certificacion?.url || docs.certificacion?.name || null,
+          antecedentes: isB2b ? null : docs.antecedentes?.url || docs.antecedentes?.name || null,
+          domicilio: isB2b ? null : docs.domicilio?.url || docs.domicilio?.name || null,
+          titulo: isB2b ? null : docs.titulo?.url || docs.titulo?.name || null,
+          cv: isB2b ? null : docs.cv?.url || docs.cv?.name || null,
+          actaConstitutiva: isB2b ? docs.dui?.url || docs.dui?.name || null : null,
+          identificacionRepresentante: isB2b ? docs.certificacion?.url || docs.certificacion?.name || null : null,
+          registroTributario: isB2b ? docs.antecedentes?.url || docs.antecedentes?.name || null : null,
+          domicilioEmpresa: isB2b ? docs.domicilio?.url || docs.domicilio?.name || null : null,
+          brochureServicios: isB2b ? docs.titulo?.url || docs.titulo?.name || null : null,
+          licenciaTuristica: isB2b ? docs.cv?.url || docs.cv?.name || null : null,
           b2b_details: isB2b ? {
             companyName: formData.companyName,
             taxId: formData.taxId,
@@ -651,6 +690,21 @@ export default function AgentApplyPage() {
       setIsSubmitting(false);
     }
   };
+
+  if (!isMounted) {
+    return (
+      <div className="flex flex-col min-h-screen bg-background-main font-sans">
+        <Header />
+        <main className="w-[80%] mx-auto py-12 flex-grow flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4 py-20">
+            <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-text-secondary font-medium">Cargando formulario de postulación...</span>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-background-main font-sans">

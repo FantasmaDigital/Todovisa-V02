@@ -27,8 +27,9 @@ const handleGoogleSignUpApi = async (redirectTo: string) => {
         }
 
         const result = await response.json();
-        if (result.data?.url) {
-            window.location.href = result.data.url;
+        const redirectUrl = result.url || result.data?.url;
+        if (redirectUrl) {
+            window.location.href = redirectUrl;
         }
     } catch (error: unknown) {
         const errMessage = error instanceof Error ? error.message : String(error);
@@ -114,6 +115,10 @@ export default function SignUpForm() {
 
             const result = await response.json();
 
+            // Set the session in client-side Supabase client to enable auth updates
+            if (result.data?.session) {
+                await supabase.auth.setSession(result.data.session);
+            }
 
             if (result.data?.user) {
                 const userObj = result.data.user;

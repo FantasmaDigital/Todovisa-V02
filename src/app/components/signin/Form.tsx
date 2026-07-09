@@ -30,8 +30,9 @@ const handleGoogleSignInApi = async (redirectTo: string) => {
         }
 
         const result = await response.json();
-        if (result.data?.url) {
-            window.location.href = result.data.url;
+        const redirectUrl = result.url || result.data?.url;
+        if (redirectUrl) {
+            window.location.href = redirectUrl;
         }
     } catch (error: unknown) {
         const errMessage = error instanceof Error ? error.message : String(error);
@@ -79,6 +80,11 @@ export function SignInForm() {
             
             const result = await response.json();
 
+            // Set the session in client-side Supabase client to enable auth updates
+            if (result.data?.session) {
+                await supabase.auth.setSession(result.data.session);
+            }
+
             // Check if the user data was successfully retrieved and set in the store
             if (result.data?.user) {
                 const userObj = result.data.user;
@@ -102,9 +108,9 @@ export function SignInForm() {
                         .eq("status", "completed");
 
                     if (purchases && purchases.length > 0) {
-                        hasPaidVipro = purchases.some((p: any) => p.product_type === "vipro" || p.product_type === "advisor");
-                        hasPaidAdvisor = purchases.some((p: any) => p.product_type === "advisor");
-                        const advisorPurchase = purchases.find((p: any) => p.product_type === "advisor");
+                        hasPaidVipro = purchases.some((p: { product_type: string; agent_id?: string | null }) => p.product_type === "vipro" || p.product_type === "advisor");
+                        hasPaidAdvisor = purchases.some((p: { product_type: string; agent_id?: string | null }) => p.product_type === "advisor");
+                        const advisorPurchase = purchases.find((p: { product_type: string; agent_id?: string | null }) => p.product_type === "advisor");
                         assignedAgentId = advisorPurchase?.agent_id || null;
                     }
                 } catch (err) {

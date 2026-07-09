@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { UserRole } from '../constants/roles';
+
 
 export interface UserData {
   id: string;
@@ -25,6 +27,7 @@ export interface UserData {
   ds160HasAssets?: boolean;
   ds160Confirmed?: boolean;
   expedienteStatus?: 'draft' | 'submitted' | 'approved';
+  role?: UserRole;
 }
 
 interface AuthState {
@@ -43,12 +46,7 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage', // Nombre para el localStorage
       partialize: (state) => ({
-        user: state.user
-          ? {
-              ...state.user,
-              photoUrl: null, // Exclude heavy image from localStorage to prevent QuotaExceededError
-            }
-          : null,
+        user: state.user,
       }),
     }
   )

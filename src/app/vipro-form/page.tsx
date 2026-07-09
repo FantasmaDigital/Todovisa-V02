@@ -6,8 +6,17 @@ import { useEffect, useRef, useState, Suspense, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
-import agentsData from "../dummies/agents.json";
 import supabase from "../lib/supabase";
+
+const countryMap: Record<string, { emoji: string; name: string }> = {
+    US: { emoji: "🇺🇸", name: "Estados Unidos" },
+    CA: { emoji: "🇨🇦", name: "Canadá" },
+    MX: { emoji: "🇲🇽", name: "México" },
+    UK: { emoji: "🇬🇧", name: "Inglaterra" },
+    CN: { emoji: "🇨🇳", name: "China" },
+    AU: { emoji: "🇦🇺", name: "Australia" },
+    IN: { emoji: "🇮🇳", name: "India" }
+};
 
 function ViproFormContent() {
     const headerRef = useRef(null);
@@ -75,30 +84,13 @@ function ViproFormContent() {
         checkActiveProgress();
     }, [user]);
 
-    const countryMap: Record<string, { emoji: string; name: string }> = {
-        US: { emoji: "🇺🇸", name: "Estados Unidos" },
-        CA: { emoji: "🇨🇦", name: "Canadá" },
-        MX: { emoji: "🇲🇽", name: "México" },
-        UK: { emoji: "🇬🇧", name: "Inglaterra" },
-        CN: { emoji: "🇨🇳", name: "China" },
-        AU: { emoji: "🇦🇺", name: "Australia" },
-        IN: { emoji: "🇮🇳", name: "India" }
-    };
 
-    const assignedAgent = useMemo(() => {
-        return user?.assignedAgentId 
-            ? (agentsData as any[]).find(a => a.id === user.assignedAgentId) 
-            : (user?.hasPaidAdvisor ? agentsData[0] : null);
-    }, [user?.assignedAgentId, user?.hasPaidAdvisor]);
+
+
 
     const availableCountries = useMemo(() => {
-        return Object.entries(countryMap).filter(([_, details]) => {
-            if (user?.hasPaidAdvisor && assignedAgent) {
-                return assignedAgent.countries.includes(details.name);
-            }
-            return true;
-        });
-    }, [assignedAgent, user?.hasPaidAdvisor]);
+        return Object.entries(countryMap);
+    }, []);
 
     const handleSelectCountry = (code: string) => {
         setSelectedCountryCode(code);
@@ -119,9 +111,6 @@ function ViproFormContent() {
 
         if (user.hasPaidVipro) {
             router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`);
-        } else if (user.hasPaidAdvisor) {
-            alert("Cuentas con el Servicio Completo. No requieres realizar la Evaluación Express VIPRO ya que tu asesor asignado se encargará del llenado oficial y asesoría personalizada. Serás redirigido al Portal de Asesoría.");
-            router.push("/agents/portal");
         } else {
             setIsCheckoutOpen(true);
         }

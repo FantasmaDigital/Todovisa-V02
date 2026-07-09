@@ -142,18 +142,6 @@ function ViproEvaluationContent() {
     const isSupported = countryCode in countryConfigs;
     const currentConfig = countryConfigs[countryCode];
 
-    const assignedAgent = useMemo(() => {
-        return user?.assignedAgentId 
-            ? (agentsData as Agent[]).find(a => a.id === user.assignedAgentId) 
-            : null;
-    }, [user]);
-
-    const isSupportedByAgent = useMemo(() => {
-        if (!assignedAgent || !isSupported) return true;
-        const currentCountryName = countryConfigs[countryCode]?.name;
-        return currentCountryName ? assignedAgent.countries.includes(currentCountryName) : false;
-    }, [assignedAgent, isSupported, countryCode]);
-
     // State Variables
     const [started, setStarted] = useState(false);
     const [showIntake, setShowIntake] = useState(true);
@@ -476,44 +464,7 @@ function ViproEvaluationContent() {
         );
     }
 
-    if (isSupported && !isSupportedByAgent) {
-        const countryInfo = countryConfigs[countryCode];
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-16 md:py-24 flex flex-col justify-center items-center flex-1 text-center font-sans">
-                    <div className="bg-white rounded-[2rem] p-10 md:p-16 shadow-lg border border-border-light max-w-2xl w-full flex flex-col items-center gap-8 animate-in fade-in zoom-in duration-300">
-                        <span className="text-8xl animate-bounce">⚠️</span>
-                        <h1 className="text-3xl md:text-4xl font-serif text-text-primary tracking-tight font-semibold">
-                            Destino No Compatible
-                        </h1>
-                        <span className="text-xs font-semibold tracking-wider text-amber-600 bg-amber-50 border border-amber-200 px-4 py-2 rounded-full uppercase">
-                            Cambio Requerido
-                        </span>
-                        <p className="text-text-secondary leading-relaxed text-base">
-                            Tu asesor consular asignado, <strong>{assignedAgent?.name}</strong>, no brinda asesoramiento para <strong>{countryInfo.name}</strong>. Para realizar la evaluación VIPRO de este destino, debes seleccionar un país que tu asesor soporte o cambiar de asesor.
-                        </p>
-                        <div className="w-full h-px bg-border-light"></div>
-                        <div className="flex flex-col sm:flex-row gap-4 w-full justify-center">
-                            <button 
-                                onClick={() => router.push('/vipro-form')}
-                                className="px-8 py-3.5 rounded-xl border border-border-light text-text-primary font-semibold hover:bg-background-hover transition-colors shadow-sm cursor-pointer"
-                            >
-                                Seleccionar otro país
-                            </button>
-                            <button 
-                                onClick={() => router.push('/profile?tab=proceso')}
-                                className="px-8 py-3.5 rounded-xl bg-brand-primary text-white font-semibold hover:bg-brand-hover transition-colors shadow-md cursor-pointer"
-                            >
-                                Ir a mi Perfil
-                            </button>
-                        </div>
-                    </div>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
+
 
     if (!isSupported) {
         // Render Coming Soon Page
