@@ -9,7 +9,7 @@ import { countries } from "countries-list";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import agentsData from "../dummies/agents.json";
 import supabase from "../lib/supabase";
-import { MessageClientService } from "../service/MessageClientService";
+import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
 
 // Convert countries list to sorted array
@@ -115,7 +115,7 @@ export default function PerfilUsuarioPage() {
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [countryCode, setCountryCode] = useState("SV");
-  
+
   // Tab State: "datos", "proceso", "asesor", "pagos"
   const [activeTab, setActiveTab] = useState("datos");
 
@@ -211,7 +211,7 @@ export default function PerfilUsuarioPage() {
   const [expedienteStatus, setExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>(user?.expedienteStatus || 'draft');
   const [isDs160ModalOpen, setIsDs160ModalOpen] = useState(false);
   const [isDs160Closing, setIsDs160Closing] = useState(false);
-  const [dbPurchases, setDbPurchases] = useState<Record<string, string | number | boolean | null>[]>([]);
+  const [dbPurchases, setDbPurchases] = useState<any[]>([]);
 
   // Closes the DS-160 panel with an exit animation before unmounting
   const closeDs160Panel = () => {
@@ -441,7 +441,7 @@ export default function PerfilUsuarioPage() {
     }
     setExpedienteStatus('submitted');
     showToast("¡Expediente enviado con éxito! Tu asesora Sofía Rodríguez ha sido notificada.", "success");
-    
+
     // Defer prepending system message
     setTimeout(() => {
       const newSystemMessage = {
@@ -451,7 +451,7 @@ export default function PerfilUsuarioPage() {
         timestamp: new Date()
       };
       setMessages(prev => [...prev, newSystemMessage]);
-      
+
       // Also automatically approve the expediente after a short delay (e.g. 6 seconds) to simulate the agent review!
       setTimeout(() => {
         setExpedienteStatus('approved');
@@ -489,7 +489,7 @@ export default function PerfilUsuarioPage() {
             .maybeSingle();
 
           const metadata = supabaseUser.user_metadata || {};
-          
+
           const googleFullName = metadata.full_name || metadata.name || '';
           const fallbackFirstName = googleFullName.split(' ')[0] || '';
           const fallbackLastName = googleFullName.split(' ').slice(1).join(' ') || '';
@@ -652,8 +652,8 @@ export default function PerfilUsuarioPage() {
           action === "approved"
             ? "¡Solicitud aprobada con éxito!"
             : action === "rejected"
-            ? "Solicitud rechazada/devuelta."
-            : "Comentarios guardados con éxito.",
+              ? "Solicitud rechazada/devuelta."
+              : "Comentarios guardados con éxito.",
           "success"
         );
 
@@ -868,11 +868,9 @@ export default function PerfilUsuarioPage() {
           setViproEvaluations([
             {
               id: "vipro-fallback",
-              user_id: user.id,
               destination_country: user.viproDestination || "US",
               score: user.viproScore || 85,
               created_at: new Date().toISOString(),
-              is_completed: true
             }
           ]);
         }
@@ -966,8 +964,8 @@ export default function PerfilUsuarioPage() {
         setIsSupabaseDbAvailable(true);
         if (data && data.length > 0) {
           setMessages(
-            data.map((msg: { id: string; sender: string; text: string; timestamp?: string }) => ({
-              id: msg.id,
+            data.map((msg: ClientMessageData) => ({
+              id: msg.id || "",
               sender: msg.sender,
               text: msg.text,
               timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
@@ -1055,7 +1053,7 @@ export default function PerfilUsuarioPage() {
       });
     }
   };
-  
+
   useEffect(() => {
     if (activeTab === "asesor" && user?.hasPaidAdvisor) {
       // Small timeout to ensure DOM update has completed before querying scrollHeight
@@ -1221,7 +1219,7 @@ export default function PerfilUsuarioPage() {
     setTimeout(async () => {
       let responseText = "";
       const userText = textToSend.toLowerCase();
-      
+
       if (userText.includes("hola") || userText.includes("buenas") || userText.includes("buen")) {
         responseText = `¡Hola de nuevo, ${firstName}! Estoy atenta a tus mensajes. ¿Te gustaría que programemos nuestra primera llamada por Zoom para revisar tus documentos?`;
       } else if (userText.includes("documento") || userText.includes("requisito") || userText.includes("papel") || userText.includes("solvencia")) {
@@ -1315,7 +1313,7 @@ export default function PerfilUsuarioPage() {
               />
             </label>
           </div>
-          
+
           <div className="text-center md:text-left text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5">Panel del Aplicante</p>
             <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
@@ -1348,11 +1346,11 @@ export default function PerfilUsuarioPage() {
 
       {/* Grid Principal */}
       <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8">
-        
+
         {/* Columna Izquierda: Tarjeta de Resumen y Menú */}
         <aside className="w-full lg:w-1/4 flex-shrink-0">
           <div className="bg-white rounded-lg border border-border-light overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
-            
+
             {/* Navegación Vertical */}
             <nav className="p-2 flex flex-col gap-1">
               {(() => {
@@ -1389,11 +1387,10 @@ export default function PerfilUsuarioPage() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${
-                    activeTab === tab.id
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
                       ? "bg-brand-light text-brand-primary font-semibold"
                       : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
-                  }`}
+                    }`}
                 >
                   <span className="text-base">{tab.icon}</span>
                   <span>{tab.label}</span>
@@ -1406,7 +1403,7 @@ export default function PerfilUsuarioPage() {
         {/* Columna Derecha: Contenido del Tab Activo */}
         <section className="w-full lg:w-3/4">
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
-            
+
             {/* TAB: DATOS PERSONALES */}
             {activeTab === "datos" && (
               <div>
@@ -1546,14 +1543,12 @@ export default function PerfilUsuarioPage() {
 
                   {/* Paso 2 */}
                   <div className="flex gap-4 relative">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      (user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
-                    }`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
+                      }`}>
                       {(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "✓" : "2"}
                     </div>
-                    <div className={`flex-1 rounded-md p-4 border ${
-                      (user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
-                    }`}>
+                    <div className={`flex-1 rounded-md p-4 border ${(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
+                      }`}>
                       {user.hasPaidAdvisor ? (
                         /* Preformulario for Servicio Completo */
                         <>
@@ -1653,29 +1648,26 @@ export default function PerfilUsuarioPage() {
 
                   {/* Paso 3 */}
                   <div className="flex gap-4 relative transition-all">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      user.hasPaidAdvisor
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${user.hasPaidAdvisor
                         ? "bg-brand-primary text-white"
                         : "bg-amber-500 text-white animate-pulse"
-                    }`}>
+                      }`}>
                       {user.hasPaidAdvisor ? "✓" : "3"}
                     </div>
-                    <div className={`flex-1 rounded-md p-4 border ${
-                      user.hasPaidAdvisor
+                    <div className={`flex-1 rounded-md p-4 border ${user.hasPaidAdvisor
                         ? "bg-background-main/30 border-border-light"
                         : "bg-white border-amber-200 shadow-sm"
-                    }`}>
+                      }`}>
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className="text-sm font-bold text-text-primary">Paso 3: Asignación de Agente Consular</h4>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                          user.hasPaidAdvisor 
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.hasPaidAdvisor
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : "bg-amber-50 text-amber-800 border-amber-200"
-                        }`}>
+                          }`}>
                           {user.hasPaidAdvisor ? "COMPLETADO" : "ACCION REQUERIDA"}
                         </span>
                       </div>
-                      
+
                       {user.hasPaidAdvisor ? (
                         <div>
                           <p className="text-xs text-text-secondary">
@@ -1706,39 +1698,36 @@ export default function PerfilUsuarioPage() {
 
                   {/* Paso 4 */}
                   <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                      expedienteStatus === 'approved'
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved'
                         ? "bg-emerald-500 text-white animate-none"
                         : user.hasPaidAdvisor
-                        ? "bg-amber-500 text-white animate-pulse"
-                        : "bg-gray-200 text-text-muted"
-                    }`}>
+                          ? "bg-amber-500 text-white animate-pulse"
+                          : "bg-gray-200 text-text-muted"
+                      }`}>
                       {expedienteStatus === 'approved' ? "✓" : "4"}
                     </div>
-                    <div className={`flex-1 border rounded-md p-4 ${
-                      expedienteStatus === 'approved'
+                    <div className={`flex-1 border rounded-md p-4 ${expedienteStatus === 'approved'
                         ? "bg-white border-emerald-200 shadow-sm"
                         : user.hasPaidAdvisor
-                        ? "bg-white border-amber-200 shadow-sm"
-                        : "bg-background-main/50 border-border-light"
-                    }`}>
+                          ? "bg-white border-amber-200 shadow-sm"
+                          : "bg-background-main/50 border-border-light"
+                      }`}>
                       <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                         <h4 className={`text-sm font-bold ${user.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
                           Paso 4: Armado de Expediente y Formulario Consular
                         </h4>
                         {user.hasPaidAdvisor && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                            expedienteStatus === 'approved'
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${expedienteStatus === 'approved'
                               ? "bg-emerald-50 text-emerald-800 border-emerald-200 animate-none"
                               : expedienteStatus === 'submitted'
-                              ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse"
-                              : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
-                          }`}>
+                                ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse"
+                                : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
+                            }`}>
                             {expedienteStatus === 'approved'
                               ? "COMPLETADO"
                               : expedienteStatus === 'submitted'
-                              ? "EN AUDITORÍA"
-                              : "EN PROGRESO"}
+                                ? "EN AUDITORÍA"
+                                : "EN PROGRESO"}
                           </span>
                         )}
                       </div>
@@ -1769,10 +1758,10 @@ export default function PerfilUsuarioPage() {
                                   </span>
                                   <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
                                     Subir
-                                    <input 
-                                      type="file" 
-                                      accept="image/*,application/pdf" 
-                                      className="hidden" 
+                                    <input
+                                      type="file"
+                                      accept="image/*,application/pdf"
+                                      className="hidden"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) handleFileUpload('passport', file.name);
@@ -1794,10 +1783,10 @@ export default function PerfilUsuarioPage() {
                                   </span>
                                   <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
                                     Subir
-                                    <input 
-                                      type="file" 
-                                      accept="image/*,application/pdf" 
-                                      className="hidden" 
+                                    <input
+                                      type="file"
+                                      accept="image/*,application/pdf"
+                                      className="hidden"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) handleFileUpload('dui', file.name);
@@ -1819,10 +1808,10 @@ export default function PerfilUsuarioPage() {
                                   </span>
                                   <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
                                     Subir
-                                    <input 
-                                      type="file" 
-                                      accept="image/*,application/pdf" 
-                                      className="hidden" 
+                                    <input
+                                      type="file"
+                                      accept="image/*,application/pdf"
+                                      className="hidden"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) handleFileUpload('workCert', file.name);
@@ -1844,10 +1833,10 @@ export default function PerfilUsuarioPage() {
                                   </span>
                                   <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
                                     Subir
-                                    <input 
-                                      type="file" 
-                                      accept="image/*,application/pdf" 
-                                      className="hidden" 
+                                    <input
+                                      type="file"
+                                      accept="image/*,application/pdf"
+                                      className="hidden"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) handleFileUpload('bankStatements', file.name);
@@ -1865,9 +1854,8 @@ export default function PerfilUsuarioPage() {
                               <span className="text-xs font-bold text-amber-950 uppercase tracking-wide">
                                 📝 Formulario Consular DS-160
                               </span>
-                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
-                                ds160Confirmed ? "bg-emerald-100 border-emerald-200 text-emerald-800" : "bg-amber-100 border-amber-200 text-amber-800"
-                              }`}>
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${ds160Confirmed ? "bg-emerald-100 border-emerald-200 text-emerald-800" : "bg-amber-100 border-amber-200 text-amber-800"
+                                }`}>
                                 {ds160Confirmed ? "Confirmado" : "Pendiente de Revisión"}
                               </span>
                             </div>
@@ -1889,19 +1877,18 @@ export default function PerfilUsuarioPage() {
                               type="button"
                               onClick={handleSubmitExpediente}
                               disabled={expedienteStatus === 'submitted' || expedienteStatus === 'approved'}
-                              className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-sm ${
-                                expedienteStatus === 'submitted'
+                              className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-sm ${expedienteStatus === 'submitted'
                                   ? "bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed"
                                   : expedienteStatus === 'approved'
-                                  ? "bg-emerald-600 text-white cursor-not-allowed"
-                                  : "bg-brand-primary hover:bg-brand-hover text-white cursor-pointer"
-                              }`}
+                                    ? "bg-emerald-600 text-white cursor-not-allowed"
+                                    : "bg-brand-primary hover:bg-brand-hover text-white cursor-pointer"
+                                }`}
                             >
                               {expedienteStatus === 'submitted'
                                 ? "⏳ Expediente en Auditoría por tu Asesor"
                                 : expedienteStatus === 'approved'
-                                ? "✅ Expediente Aprobado y DS-160 Cerrado"
-                                : "🚀 Enviar Expediente Completo a Auditoría"}
+                                  ? "✅ Expediente Aprobado y DS-160 Cerrado"
+                                  : "🚀 Enviar Expediente Completo a Auditoría"}
                             </button>
                           </div>
                         </div>
@@ -1913,14 +1900,12 @@ export default function PerfilUsuarioPage() {
                   {preformMetadata?.interview_waiver_eligible === true ? (
                     /* Paso 5 para Exención de Entrevista */
                     <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                        expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
-                      }`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
+                        }`}>
                         5
                       </div>
-                      <div className={`flex-1 rounded-md p-4 border ${
-                        expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
-                      }`}>
+                      <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
+                        }`}>
                         <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                           <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
                             Paso 5: Programación de Entrega y Preparación de Carpeta
@@ -1939,14 +1924,12 @@ export default function PerfilUsuarioPage() {
                   ) : (
                     /* Paso 5 Estándar */
                     <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
-                        expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
-                      }`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
+                        }`}>
                         5
                       </div>
-                      <div className={`flex-1 rounded-md p-4 border ${
-                        expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
-                      }`}>
+                      <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
+                        }`}>
                         <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                           <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
                             Paso 5: Programación de Cita y Simulacro Consular
@@ -2056,11 +2039,10 @@ export default function PerfilUsuarioPage() {
                           <p className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Puntaje</p>
                           <p className="text-2xl font-black text-emerald-600">{user.viproScore || 85}/100</p>
                         </div>
-                        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md uppercase border ${
-                          (user.viproScore || 85) >= 80 
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md uppercase border ${(user.viproScore || 85) >= 80
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : "bg-amber-50 text-amber-800 border-amber-200"
-                        }`}>
+                          }`}>
                           {(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión"}
                         </span>
                       </div>
@@ -2077,84 +2059,84 @@ export default function PerfilUsuarioPage() {
                             <thead>
                               <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
                                 <th className="py-3 px-4">Destino</th>
-                                  <th className="py-3 px-4">Fecha</th>
-                                  <th className="py-3 px-4">Calificación</th>
-                                  <th className="py-3 px-4 text-right">Acción</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-border-light text-xs">
-                                {viproEvaluations.map((evaluation) => {
-                                  const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
-                                  const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
-                                  return (
-                                    <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
-                                      <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
-                                        <span className="text-lg">{countryEmoji}</span>
-                                        <span>{countryName}</span>
-                                      </td>
-                                      <td className="py-4 px-4 text-text-secondary">
-                                        {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                                      </td>
-                                      <td className="py-4 px-4 font-bold text-text-primary">
-                                        {evaluation.score || 85} / 100
-                                      </td>
-                                      <td className="py-4 px-4 text-right">
-                                        <button
-                                          onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
-                                          className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
-                                        >
-                                          Ver
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
+                                <th className="py-3 px-4">Fecha</th>
+                                <th className="py-3 px-4">Calificación</th>
+                                <th className="py-3 px-4 text-right">Acción</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border-light text-xs">
+                              {viproEvaluations.map((evaluation) => {
+                                const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
+                                const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
+                                return (
+                                  <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
+                                    <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
+                                      <span className="text-lg">{countryEmoji}</span>
+                                      <span>{countryName}</span>
+                                    </td>
+                                    <td className="py-4 px-4 text-text-secondary">
+                                      {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </td>
+                                    <td className="py-4 px-4 font-bold text-text-primary">
+                                      {evaluation.score || 85} / 100
+                                    </td>
+                                    <td className="py-4 px-4 text-right">
+                                      <button
+                                        onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
+                                        className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
+                                      >
+                                        Ver
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                      )}
+                      </div>
+                    )}
+                  </div>
+                ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
+                  <div className="bg-white rounded-3xl border border-amber-200 p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                    <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
+                      📊
                     </div>
-                  ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
-                    <div className="bg-white rounded-3xl border border-amber-200 p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
-                      <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
-                        📊
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Habilitada</h3>
-                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
-                          Tienes acceso a la evaluación pre-consular VIPRO. Realiza el cuestionario ahora para calificar tu perfil y obtener recomendaciones dinámicas.
-                        </p>
-                        <button
-                          onClick={() => router.push("/vipro-form")}
-                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
-                        >
-                          Comenzar Evaluación VIPRO
-                        </button>
-                      </div>
+                    <div>
+                      <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Habilitada</h3>
+                      <p className="text-xs text-text-secondary leading-relaxed mb-6">
+                        Tienes acceso a la evaluación pre-consular VIPRO. Realiza el cuestionario ahora para calificar tu perfil y obtener recomendaciones dinámicas.
+                      </p>
+                      <button
+                        onClick={() => router.push("/vipro-form")}
+                        className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
+                      >
+                        Comenzar Evaluación VIPRO
+                      </button>
                     </div>
-                  ) : (
-                    <div className="bg-white rounded-3xl border border-border-light p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
-                      <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center text-2xl font-bold border border-brand-primary/10">
-                        🔒
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Bloqueada</h3>
-                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
-                          La evaluación de viabilidad pre-consular VIPRO analiza a profundidad tu lazo familiar, laboral y solvencia con recomendaciones personalizadas. Habilítala ahora adquiriendo tu acceso.
-                        </p>
-                        <button
-                          onClick={() => router.push("/vipro-form")}
-                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
-                        >
-                          Adquirir Evaluación Express ($19.99 USD)
-                        </button>
-                      </div>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-3xl border border-border-light p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center text-2xl font-bold border border-brand-primary/10">
+                      🔒
                     </div>
-                  )}
+                    <div>
+                      <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Bloqueada</h3>
+                      <p className="text-xs text-text-secondary leading-relaxed mb-6">
+                        La evaluación de viabilidad pre-consular VIPRO analiza a profundidad tu lazo familiar, laboral y solvencia con recomendaciones personalizadas. Habilítala ahora adquiriendo tu acceso.
+                      </p>
+                      <button
+                        onClick={() => router.push("/vipro-form")}
+                        className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
+                      >
+                        Adquirir Evaluación Express ($19.99 USD)
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
-{/* TAB: MI ASESOR */}
+            {/* TAB: MI ASESOR */}
             {activeTab === "asesor" && (
               <div>
                 <div className="mb-6 pb-4 border-b border-border-light">
@@ -2205,7 +2187,8 @@ export default function PerfilUsuarioPage() {
                           </button>
                         </div>
                       )}
-                      <style dangerouslySetInnerHTML={{ __html: `
+                      <style dangerouslySetInnerHTML={{
+                        __html: `
                         .custom-scrollbar::-webkit-scrollbar {
                           width: 6px;
                         }
@@ -2294,11 +2277,10 @@ export default function PerfilUsuarioPage() {
                                     />
                                   )}
                                   <div className="flex flex-col">
-                                    <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                                      isSelf 
-                                        ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none" 
+                                    <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
+                                        ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
                                         : "bg-white border border-border-light text-text-primary rounded-tl-none"
-                                    }`}>
+                                      }`}>
                                       <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
                                     </div>
                                     <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
@@ -2395,7 +2377,7 @@ export default function PerfilUsuarioPage() {
                           <p className="text-xs text-brand-primary font-semibold mt-0.5">{assignedAgent.title}</p>
                           <p className="text-[11px] text-text-secondary mt-1">Disponibilidad Inmediata • ⭐ {assignedAgent.rating.toFixed(1)} ({assignedAgent.reviewsCount} reseñas)</p>
                         </div>
-                        
+
                         <button
                           onClick={() => {
                             setCheckoutAgent(assignedAgent);
@@ -2407,76 +2389,75 @@ export default function PerfilUsuarioPage() {
                         </button>
                       </div>
                     </div>
-                      {/* Completed VIPRO evaluations table */}
-                      <div className="mt-8 pt-8 border-t border-border-light">
-                        <div className="mb-4 text-left">
-                          <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider flex items-center gap-1.5">
-                            📋 Historial de Evaluaciones VIPRO
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-1">Revisa el listado de tus evaluaciones de viabilidad pre-consular completadas y sus recomendaciones de mejora.</p>
-                        </div>
-
-                        {viproEvaluations.length > 0 ? (
-                          <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
-                            <table className="w-full text-left border-collapse">
-                              <thead>
-                                <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
-                                  <th className="py-3 px-4">Destino</th>
-                                  <th className="py-3 px-4">Fecha</th>
-                                  <th className="py-3 px-4">Calificación</th>
-                                  <th className="py-3 px-4">Resultado</th>
-                                  <th className="py-3 px-4 text-right">Acción</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-border-light text-xs">
-                                {viproEvaluations.map((evaluation) => {
-                                  const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
-                                  const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
-                                  const score = evaluation.score || 85;
-                                  const isFavorable = score >= 80;
-                                  return (
-                                    <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
-                                      <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
-                                        <span className="text-lg">{countryEmoji}</span>
-                                        <span>{countryName}</span>
-                                      </td>
-                                      <td className="py-4 px-4 text-text-secondary">
-                                        {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                                      </td>
-                                      <td className="py-4 px-4 font-bold text-text-primary">
-                                        {score} / 100
-                                      </td>
-                                      <td className="py-4 px-4">
-                                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                                          isFavorable
-                                            ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                            : "bg-amber-50 text-amber-800 border-amber-100"
-                                        }`}>
-                                          {isFavorable ? "FAVORABLE" : "REVISIÓN"}
-                                        </span>
-                                      </td>
-                                      <td className="py-4 px-4 text-right">
-                                        <button
-                                          onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
-                                          className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
-                                        >
-                                          Ver Detalles
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        ) : (
-                          <div className="bg-white border border-border-light rounded-xl p-6 text-center text-text-muted text-xs shadow-sm">
-                            No has completado ninguna evaluación VIPRO todavía.
-                          </div>
-                        )}
+                    {/* Completed VIPRO evaluations table */}
+                    <div className="mt-8 pt-8 border-t border-border-light">
+                      <div className="mb-4 text-left">
+                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider flex items-center gap-1.5">
+                          📋 Historial de Evaluaciones VIPRO
+                        </h3>
+                        <p className="text-xs text-text-secondary mt-1">Revisa el listado de tus evaluaciones de viabilidad pre-consular completadas y sus recomendaciones de mejora.</p>
                       </div>
+
+                      {viproEvaluations.length > 0 ? (
+                        <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
+                                <th className="py-3 px-4">Destino</th>
+                                <th className="py-3 px-4">Fecha</th>
+                                <th className="py-3 px-4">Calificación</th>
+                                <th className="py-3 px-4">Resultado</th>
+                                <th className="py-3 px-4 text-right">Acción</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border-light text-xs">
+                              {viproEvaluations.map((evaluation) => {
+                                const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
+                                const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
+                                const score = evaluation.score || 85;
+                                const isFavorable = score >= 80;
+                                return (
+                                  <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
+                                    <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
+                                      <span className="text-lg">{countryEmoji}</span>
+                                      <span>{countryName}</span>
+                                    </td>
+                                    <td className="py-4 px-4 text-text-secondary">
+                                      {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </td>
+                                    <td className="py-4 px-4 font-bold text-text-primary">
+                                      {score} / 100
+                                    </td>
+                                    <td className="py-4 px-4">
+                                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${isFavorable
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                          : "bg-amber-50 text-amber-800 border-amber-100"
+                                        }`}>
+                                        {isFavorable ? "FAVORABLE" : "REVISIÓN"}
+                                      </span>
+                                    </td>
+                                    <td className="py-4 px-4 text-right">
+                                      <button
+                                        onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
+                                        className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
+                                      >
+                                        Ver Detalles
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="bg-white border border-border-light rounded-xl p-6 text-center text-text-muted text-xs shadow-sm">
+                          No has completado ninguna evaluación VIPRO todavía.
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -2522,11 +2503,10 @@ export default function PerfilUsuarioPage() {
                                 ${parseFloat(purchase.amount).toFixed(2)} USD
                               </td>
                               <td className="py-4 px-4">
-                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                                  purchase.status === "completed"
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${purchase.status === "completed"
                                     ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                                     : "bg-amber-50 text-amber-800 border-amber-100"
-                                }`}>
+                                  }`}>
                                   {purchase.status.toUpperCase()}
                                 </span>
                               </td>
@@ -2568,11 +2548,10 @@ export default function PerfilUsuarioPage() {
                             <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
                             <td className="py-4 px-4 font-bold text-text-primary">$19.99 USD</td>
                             <td className="py-4 px-4">
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                                user.hasPaidVipro || user.hasPaidAdvisor
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidVipro || user.hasPaidAdvisor
                                   ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                                   : "bg-amber-50 text-amber-800 border-amber-100"
-                              }`}>
+                                }`}>
                                 {user.hasPaidVipro || user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
                               </span>
                             </td>
@@ -2598,7 +2577,7 @@ export default function PerfilUsuarioPage() {
                               )}
                             </td>
                           </tr>
-                          
+
                           <tr className={user.hasPaidAdvisor ? "" : "opacity-90"}>
                             <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-ASES-3820</td>
                             <td className="py-4 px-4">
@@ -2612,11 +2591,10 @@ export default function PerfilUsuarioPage() {
                               {user.hasPaidAdvisor ? "$112.50 USD" : "$150.00 USD"}
                             </td>
                             <td className="py-4 px-4">
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                                user.hasPaidAdvisor 
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100" 
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidAdvisor
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                                   : "bg-amber-50 text-amber-800 border-amber-100"
-                              }`}>
+                                }`}>
                                 {user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
                               </span>
                             </td>
@@ -2669,131 +2647,129 @@ export default function PerfilUsuarioPage() {
                 </div>
               ) : partnerApp ? (
                 <div className="animate-fadeIn">
-                <div className="mb-6 pb-4 border-b border-border-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
-                  <div>
-                    <h2 className="text-lg font-bold text-text-primary">Mi Solicitud de Socio</h2>
-                    <p className="text-xs text-text-secondary mt-1">Revisa el estado de tu postulación para unirte como agente consultor o agencia socia.</p>
-                  </div>
-                  <span className={`self-start sm:self-center text-xs font-bold px-3 py-1 rounded-full border ${
-                    partnerApp.status === "approved" || partnerApp.status === "active"
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                      : partnerApp.status === "rejected"
-                      ? "bg-red-50 text-red-700 border-red-100"
-                      : partnerApp.status === "pending"
-                      ? "bg-amber-50 text-amber-700 border-amber-100"
-                      : "bg-gray-50 text-gray-700 border-gray-200"
-                  }`}>
-                    {partnerApp.status === "approved" || partnerApp.status === "active"
-                      ? "✓ Aprobada"
-                      : partnerApp.status === "rejected"
-                      ? "✕ Devuelta / Rechazada"
-                      : partnerApp.status === "pending"
-                      ? "🕒 Pendiente de Revisión"
-                      : "📝 Borrador"}
-                  </span>
-                </div>
-
-                <div className="space-y-6">
-                  {/* Status Banner */}
-                  <div className={`p-4 rounded-md border text-left ${
-                    partnerApp.status === "approved" || partnerApp.status === "active"
-                      ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
-                      : partnerApp.status === "rejected"
-                      ? "bg-red-50/50 border-red-200 text-red-800"
-                      : "bg-amber-50/50 border-amber-200 text-amber-800"
-                  }`}>
-                    <h4 className="font-bold text-sm mb-1">
-                      {partnerApp.status === "approved" || partnerApp.status === "active"
-                        ? "¡Tu solicitud ha sido aprobada!"
+                  <div className="mb-6 pb-4 border-b border-border-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+                    <div>
+                      <h2 className="text-lg font-bold text-text-primary">Mi Solicitud de Socio</h2>
+                      <p className="text-xs text-text-secondary mt-1">Revisa el estado de tu postulación para unirte como agente consultor o agencia socia.</p>
+                    </div>
+                    <span className={`self-start sm:self-center text-xs font-bold px-3 py-1 rounded-full border ${partnerApp.status === "approved" || partnerApp.status === "active"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                         : partnerApp.status === "rejected"
-                        ? "Tu solicitud requiere cambios"
-                        : "Postulación recibida"}
-                    </h4>
-                    <p className="text-xs leading-relaxed opacity-90">
+                          ? "bg-red-50 text-red-700 border-red-100"
+                          : partnerApp.status === "pending"
+                            ? "bg-amber-50 text-amber-700 border-amber-100"
+                            : "bg-gray-50 text-gray-700 border-gray-200"
+                      }`}>
                       {partnerApp.status === "approved" || partnerApp.status === "active"
-                        ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
+                        ? "✓ Aprobada"
                         : partnerApp.status === "rejected"
-                        ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
-                        : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
-                    </p>
+                          ? "✕ Devuelta / Rechazada"
+                          : partnerApp.status === "pending"
+                            ? "🕒 Pendiente de Revisión"
+                            : "📝 Borrador"}
+                    </span>
                   </div>
 
-                  {/* Admin Notes */}
-                  {partnerApp.admin_notes && (
-                    <div className="bg-gray-50 border border-border-light rounded-md p-5 text-left">
-                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider mb-2">Comentarios y Observaciones del Administrador:</h4>
-                      <p className="text-xs text-text-secondary leading-relaxed bg-white border border-border-light p-3.5 rounded font-mono whitespace-pre-line">
-                        {partnerApp.admin_notes}
+                  <div className="space-y-6">
+                    {/* Status Banner */}
+                    <div className={`p-4 rounded-md border text-left ${partnerApp.status === "approved" || partnerApp.status === "active"
+                        ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
+                        : partnerApp.status === "rejected"
+                          ? "bg-red-50/50 border-red-200 text-red-800"
+                          : "bg-amber-50/50 border-amber-200 text-amber-800"
+                      }`}>
+                      <h4 className="font-bold text-sm mb-1">
+                        {partnerApp.status === "approved" || partnerApp.status === "active"
+                          ? "¡Tu solicitud ha sido aprobada!"
+                          : partnerApp.status === "rejected"
+                            ? "Tu solicitud requiere cambios"
+                            : "Postulación recibida"}
+                      </h4>
+                      <p className="text-xs leading-relaxed opacity-90">
+                        {partnerApp.status === "approved" || partnerApp.status === "active"
+                          ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
+                          : partnerApp.status === "rejected"
+                            ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
+                            : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
                       </p>
                     </div>
-                  )}
 
-                  {/* Document and details summary */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="border border-border-light rounded-md p-4 space-y-3 bg-white text-left">
-                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Detalles de la Postulación</h4>
-                      <div className="space-y-2 text-xs">
-                        <p><span className="text-text-secondary font-semibold">ID Solicitud:</span> <span className="font-mono">{partnerApp.application_id}</span></p>
-                        <p><span className="text-text-secondary font-semibold">Tipo de Socio:</span> {partnerApp.documents?.partner_type === "b2b_agency" ? "Agencia B2B Partner" : "Asesor Consultor Independiente"}</p>
-                        <p><span className="text-text-secondary font-semibold">Nombre/Razón Social:</span> {partnerApp.full_name}</p>
-                        <p><span className="text-text-secondary font-semibold">Correo de Contacto:</span> {partnerApp.email}</p>
-                        <p><span className="text-text-secondary font-semibold">Teléfono:</span> {partnerApp.phone}</p>
-                        <p><span className="text-text-secondary font-semibold">País de Residencia:</span> {partnerApp.country_residence}</p>
-                        <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {partnerApp.experience_years} años</p>
+                    {/* Admin Notes */}
+                    {partnerApp.admin_notes && (
+                      <div className="bg-gray-50 border border-border-light rounded-md p-5 text-left">
+                        <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider mb-2">Comentarios y Observaciones del Administrador:</h4>
+                        <p className="text-xs text-text-secondary leading-relaxed bg-white border border-border-light p-3.5 rounded font-mono whitespace-pre-line">
+                          {partnerApp.admin_notes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Document and details summary */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="border border-border-light rounded-md p-4 space-y-3 bg-white text-left">
+                        <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Detalles de la Postulación</h4>
+                        <div className="space-y-2 text-xs">
+                          <p><span className="text-text-secondary font-semibold">ID Solicitud:</span> <span className="font-mono">{partnerApp.application_id}</span></p>
+                          <p><span className="text-text-secondary font-semibold">Tipo de Socio:</span> {partnerApp.documents?.partner_type === "b2b_agency" ? "Agencia B2B Partner" : "Asesor Consultor Independiente"}</p>
+                          <p><span className="text-text-secondary font-semibold">Nombre/Razón Social:</span> {partnerApp.full_name}</p>
+                          <p><span className="text-text-secondary font-semibold">Correo de Contacto:</span> {partnerApp.email}</p>
+                          <p><span className="text-text-secondary font-semibold">Teléfono:</span> {partnerApp.phone}</p>
+                          <p><span className="text-text-secondary font-semibold">País de Residencia:</span> {partnerApp.country_residence}</p>
+                          <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {partnerApp.experience_years} años</p>
+                        </div>
+                      </div>
+
+                      <div className="border border-border-light rounded-md p-4 space-y-3 bg-white text-left">
+                        <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Documentos Adjuntos</h4>
+                        <div className="space-y-2 text-xs">
+                          {Object.entries(partnerApp.documents || {}).map(([key, val]) => {
+                            if (["partner_type", "b2b_details", "last_saved_step"].includes(key) || !val) return null;
+                            const cleanName = typeof val === 'string'
+                              ? (val.includes('/') ? val.substring(val.lastIndexOf('/') + 1) : val)
+                              : (val as { name?: string })?.name || key;
+                            const displayLabel = key === "dui" ? "DUI/INE/Acta Constitutiva"
+                              : key === "certificacion" ? "Certificación/Identificación RL"
+                                : key === "antecedentes" ? "Antecedentes/Registro Tributario"
+                                  : key === "domicilio" ? "Comprobante de Domicilio"
+                                    : key === "titulo" ? "Título Profesional/Brochure"
+                                      : key === "cv" ? "CV/Licencia Turística"
+                                        : key;
+                            const url = typeof val === 'string' ? val : (val as { url?: string })?.url;
+                            return (
+                              <div key={key} className="flex justify-between items-center py-1 border-b border-gray-55 last:border-0">
+                                <span className="font-semibold text-text-secondary">{displayLabel}:</span>
+                                {url ? (
+                                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-bold hover:underline">
+                                    Ver Documento ↗
+                                  </a>
+                                ) : (
+                                  <span className="text-text-muted italic">{cleanName}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="border border-border-light rounded-md p-4 space-y-3 bg-white text-left">
-                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Documentos Adjuntos</h4>
-                      <div className="space-y-2 text-xs">
-                        {Object.entries(partnerApp.documents || {}).map(([key, val]) => {
-                          if (["partner_type", "b2b_details", "last_saved_step"].includes(key) || !val) return null;
-                          const cleanName = typeof val === 'string'
-                            ? (val.includes('/') ? val.substring(val.lastIndexOf('/') + 1) : val)
-                            : (val as { name?: string })?.name || key;
-                          const displayLabel = key === "dui" ? "DUI/INE/Acta Constitutiva"
-                            : key === "certificacion" ? "Certificación/Identificación RL"
-                            : key === "antecedentes" ? "Antecedentes/Registro Tributario"
-                            : key === "domicilio" ? "Comprobante de Domicilio"
-                            : key === "titulo" ? "Título Profesional/Brochure"
-                            : key === "cv" ? "CV/Licencia Turística"
-                            : key;
-                          const url = typeof val === 'string' ? val : (val as { url?: string })?.url;
-                          return (
-                            <div key={key} className="flex justify-between items-center py-1 border-b border-gray-55 last:border-0">
-                              <span className="font-semibold text-text-secondary">{displayLabel}:</span>
-                              {url ? (
-                                <a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-bold hover:underline">
-                                  Ver Documento ↗
-                                </a>
-                              ) : (
-                                <span className="text-text-muted italic">{cleanName}</span>
-                              )}
-                            </div>
-                          );
-                        })}
+                    {/* Actions for editing application */}
+                    {(partnerApp.status === "rejected" || partnerApp.status === "draft") && (
+                      <div className="flex justify-end pt-4">
+                        <button
+                          onClick={() => router.push("/agents/apply")}
+                          className="px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
+                        >
+                          Corregir o Modificar Postulación →
+                        </button>
                       </div>
-                    </div>
+                    )}
                   </div>
-
-                  {/* Actions for editing application */}
-                  {(partnerApp.status === "rejected" || partnerApp.status === "draft") && (
-                    <div className="flex justify-end pt-4">
-                      <button
-                        onClick={() => router.push("/agents/apply")}
-                        className="px-6 py-2.5 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                      >
-                        Corregir o Modificar Postulación →
-                      </button>
-                    </div>
-                  )}
                 </div>
-              </div>
-            ) : (
-              <div className="text-center py-12 text-text-secondary/70 italic animate-fadeIn">
-                No se encontró ninguna postulación de socio asociada a tu cuenta.
-              </div>
-            ))}
+              ) : (
+                <div className="text-center py-12 text-text-secondary/70 italic animate-fadeIn">
+                  No se encontró ninguna postulación de socio asociada a tu cuenta.
+                </div>
+              ))}
 
             {/* TAB: ADMINISTRAR SOCIOS (ADMIN PANEL) */}
             {activeTab === "admin_socios" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
@@ -2807,7 +2783,7 @@ export default function PerfilUsuarioPage() {
                     </h2>
                     <p className="text-xs text-text-secondary mt-1">Revisa y evalúa las postulaciones de consultores independientes y agencias de viaje B2B.</p>
                   </div>
-                  
+
                   {/* Status Filters */}
                   <div className="flex gap-1.5 self-start">
                     {[
@@ -2819,11 +2795,10 @@ export default function PerfilUsuarioPage() {
                       <button
                         key={filter.id}
                         onClick={() => setStatusFilter(filter.id)}
-                        className={`px-3 py-1.5 text-[10px] font-bold rounded uppercase tracking-wider transition-all cursor-pointer ${
-                          statusFilter === filter.id
+                        className={`px-3 py-1.5 text-[10px] font-bold rounded uppercase tracking-wider transition-all cursor-pointer ${statusFilter === filter.id
                             ? "bg-brand-primary text-white shadow-sm"
                             : "bg-gray-100 text-text-secondary hover:bg-gray-200"
-                        }`}
+                          }`}
                       >
                         {filter.label}
                       </button>
@@ -2849,58 +2824,57 @@ export default function PerfilUsuarioPage() {
                         {allApplications
                           .filter((app) => statusFilter === "all" || app.status === statusFilter)
                           .length > 0 ? (
-                            allApplications
-                              .filter((app) => statusFilter === "all" || app.status === statusFilter)
-                              .map((app) => (
-                                <tr key={app.id} className="hover:bg-background-main/10 transition-colors">
-                                  <td className="py-4 px-4 font-mono font-medium text-text-primary">{app.application_id}</td>
-                                  <td className="py-4 px-4">
-                                    <div>
-                                      <p className="font-bold text-text-primary">{app.full_name}</p>
-                                      <p className="text-[10px] text-text-secondary">{app.email}</p>
-                                    </div>
-                                  </td>
-                                  <td className="py-4 px-4 text-text-secondary">
-                                    {app.documents?.partner_type === "b2b_agency" ? "🏢 Agencia B2B" : "👤 Consultor Ind."}
-                                  </td>
-                                  <td className="py-4 px-4 text-text-secondary">
-                                    {new Date(app.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                                  </td>
-                                  <td className="py-4 px-4">
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                                      app.status === "approved" || app.status === "active"
-                                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                        : app.status === "rejected"
+                          allApplications
+                            .filter((app) => statusFilter === "all" || app.status === statusFilter)
+                            .map((app) => (
+                              <tr key={app.id} className="hover:bg-background-main/10 transition-colors">
+                                <td className="py-4 px-4 font-mono font-medium text-text-primary">{app.application_id}</td>
+                                <td className="py-4 px-4">
+                                  <div>
+                                    <p className="font-bold text-text-primary">{app.full_name}</p>
+                                    <p className="text-[10px] text-text-secondary">{app.email}</p>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-4 text-text-secondary">
+                                  {app.documents?.partner_type === "b2b_agency" ? "🏢 Agencia B2B" : "👤 Consultor Ind."}
+                                </td>
+                                <td className="py-4 px-4 text-text-secondary">
+                                  {new Date(app.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${app.status === "approved" || app.status === "active"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                      : app.status === "rejected"
                                         ? "bg-red-50 text-red-700 border-red-100"
                                         : "bg-amber-50 text-amber-700 border-amber-100"
                                     }`}>
-                                      {app.status === "approved" || app.status === "active"
-                                        ? "APROBADO"
-                                        : app.status === "rejected"
+                                    {app.status === "approved" || app.status === "active"
+                                      ? "APROBADO"
+                                      : app.status === "rejected"
                                         ? "RECHAZADO"
                                         : "PENDIENTE"}
-                                    </span>
-                                  </td>
-                                  <td className="py-4 px-4 text-right">
-                                    <button
-                                      onClick={() => {
-                                        setSelectedApp(app);
-                                        setAdminNotesInput(app.admin_notes || "");
-                                      }}
-                                      className="px-3 py-1 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-sm"
-                                    >
-                                      Evaluar 🔎
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))
-                          ) : (
-                            <tr>
-                              <td colSpan={6} className="py-8 text-center text-text-muted italic">
-                                No se encontraron solicitudes registradas para este filtro.
-                              </td>
-                            </tr>
-                          )}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-right">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedApp(app);
+                                      setAdminNotesInput(app.admin_notes || "");
+                                    }}
+                                    className="px-3 py-1 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-sm"
+                                  >
+                                    Evaluar 🔎
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-text-muted italic">
+                              No se encontraron solicitudes registradas para este filtro.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -2919,7 +2893,7 @@ export default function PerfilUsuarioPage() {
                         <h3 className="font-bold text-text-primary text-base">Evaluando Postulación: {selectedApp.full_name}</h3>
                         <p className="text-xs text-text-secondary mt-0.5">ID: <span className="font-mono font-semibold">{selectedApp.application_id}</span> • Registro: {new Date(selectedApp.created_at).toLocaleString()}</p>
                       </div>
-                      
+
                       <div className="flex gap-2">
                         <button
                           disabled={isSavingAdmin}
@@ -2944,7 +2918,7 @@ export default function PerfilUsuarioPage() {
                         {/* Profile Info */}
                         <div className="border border-border-light rounded-md p-5 bg-white space-y-4 text-left">
                           <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Perfil del Postulante</h4>
-                          
+
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                             <p><span className="text-text-secondary font-semibold">Correo:</span> {selectedApp.email}</p>
                             <p><span className="text-text-secondary font-semibold">Teléfono:</span> {selectedApp.phone}</p>
@@ -2982,11 +2956,11 @@ export default function PerfilUsuarioPage() {
                                 : (val as { name?: string })?.name || key;
                               const displayLabel = key === "dui" ? "DUI/INE/Acta Constitutiva"
                                 : key === "certificacion" ? "Certificación/Identificación RL"
-                                : key === "antecedentes" ? "Antecedentes/Registro Tributario"
-                                : key === "domicilio" ? "Comprobante de Domicilio"
-                                : key === "titulo" ? "Título Profesional/Brochure"
-                                : key === "cv" ? "CV/Licencia Turística"
-                                : key;
+                                  : key === "antecedentes" ? "Antecedentes/Registro Tributario"
+                                    : key === "domicilio" ? "Comprobante de Domicilio"
+                                      : key === "titulo" ? "Título Profesional/Brochure"
+                                        : key === "cv" ? "CV/Licencia Turística"
+                                          : key;
                               const url = typeof val === 'string' ? val : (val as { url?: string })?.url;
                               return (
                                 <div key={key} className="flex flex-col gap-1 py-2 border-b border-gray-100 last:border-0">
@@ -3008,7 +2982,7 @@ export default function PerfilUsuarioPage() {
                         {/* Admin Notes / Review Comments */}
                         <div className="border border-border-light rounded-md p-5 bg-white space-y-4">
                           <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light text-left">Comentarios del Revisor</h4>
-                          
+
                           <div className="space-y-3">
                             <label className="block text-[10px] text-text-secondary font-semibold text-left">OBSERVACIONES / DETALLE DE CAMBIOS REQUERIDOS:</label>
                             <textarea
@@ -3018,7 +2992,7 @@ export default function PerfilUsuarioPage() {
                               rows={5}
                               className="w-full p-2.5 bg-background-main border border-border-light rounded text-xs focus:border-border-focus focus:ring-1 focus:ring-border-focus font-sans text-left"
                             />
-                            
+
                             <button
                               disabled={isSavingAdmin}
                               onClick={() => handleAdminAction(selectedApp.id, "comment_only")}
@@ -3065,75 +3039,181 @@ export default function PerfilUsuarioPage() {
                 </p>
 
                 {/* Quick Access Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                  <button
-                    onClick={() => router.push("/agents/portal")}
-                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xl flex-shrink-0 mt-0.5">🖥️</span>
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                          {user.role === ROLES.AGENCY ? "Panel de Empresa" : "Panel de Agente"}
-                        </h3>
-                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                          Gestiona tus casos, clientes asignados y comisiones semanales.
-                        </p>
+                {user.role === ROLES.AGENCY ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                    <button
+                      onClick={() => router.push("/agents/portal")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F5A5;&#xFE0F;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Panel de Empresa
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Gestiona tus casos, clientes asignados y comisiones.
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
 
-                  <button
-                    onClick={() => setActiveTab("solicitud")}
-                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xl flex-shrink-0 mt-0.5">🏅</span>
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                          Mi Acreditación
-                        </h3>
-                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                          Revisa tu expediente de postulación y documentos aprobados.
-                        </p>
+                    <button
+                      onClick={() => setActiveTab("datos")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F3A8;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Personalizar Perfil
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Actualiza el nombre, logo, y datos de tu empresa.
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
 
-                  <button
-                    onClick={() => router.push("/agents/portal#comisiones")}
-                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xl flex-shrink-0 mt-0.5">💰</span>
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                          Simulador de Comisiones
-                        </h3>
-                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                          Calcula tus ganancias semanales según número de referidos activos.
-                        </p>
+                    <button
+                      onClick={() => router.push("/profile/team")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F465;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Invitar Agentes
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Env&#237;a invitaciones para que asesores se unan a tu equipo.
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
 
-                  <button
-                    onClick={() => router.push("/agents/portal#configuracion")}
-                    className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xl flex-shrink-0 mt-0.5">⚙️</span>
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                          Métodos de Cobro
-                        </h3>
-                        <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                          Configura tu cuenta de PayPal o transferencia ACH para recibir pagos.
-                        </p>
+                    <button
+                      onClick={() => router.push("/profile/accreditation")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F3C5;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Mi Acreditaci&#243;n
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Revisa tu postulaci&#243;n y documentaci&#243;n de socio aprobada.
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                </div>
+                    </button>
+
+                    <button
+                      onClick={() => router.push("/profile/commissions")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F4B0;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Comisiones Realizadas
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Historial y balance de comisiones completadas por tus asesores.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => router.push("/profile/payouts")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x2699;&#xFE0F;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            M&#233;todos de Cobro
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Registra tu cuenta de PayPal o transferencia para recibir comisiones.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                    <button
+                      onClick={() => router.push("/agents/portal")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F5A5;&#xFE0F;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Panel de Agente
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Gestiona tus casos, clientes asignados y comisiones semanales.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => router.push("/profile/accreditation")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F3C5;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Mi Acreditaci&#243;n
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Revisa tu expediente de postulaci&#243;n y documentos aprobados.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => router.push("/profile/commissions")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F4B0;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            Comisiones Realizadas
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Historial y desglose de comisiones devengadas de tus asesor&#237;as.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => router.push("/profile/payouts")}
+                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0 mt-0.5">&#x2699;&#xFE0F;</span>
+                        <div>
+                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
+                            M&#233;todos de Cobro
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+                            Configura tu cuenta de PayPal o transferencia para recibir comisiones.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                )}
 
                 {/* Info note */}
                 <div className="flex items-start gap-3 bg-brand-light border border-border-light rounded-sm p-4 text-left mb-6">
@@ -3152,192 +3232,6 @@ export default function PerfilUsuarioPage() {
                   </p>
                 </div>
 
-                {/* Dashboard de Comisiones Reales */}
-                <div className="border border-border-light rounded-sm p-5 bg-white space-y-6 text-left mb-6">
-                  <div>
-                    <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Resumen de Comisiones</h3>
-                    <p className="text-xs text-text-secondary">Monitorea tus ingresos generados a través de TodoVisa.</p>
-                  </div>
-
-                  {/* KPI summary cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="p-4 border border-border-light rounded-sm bg-background-main">
-                      <div className="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Total Ganado</div>
-                      <div className="text-lg font-bold text-text-primary mt-1">
-                        ${agentCommissions.reduce((acc, curr) => curr.status === "paid" ? acc + curr.commission_amount : acc, 0).toFixed(2)}
-                      </div>
-                    </div>
-                    <div className="p-4 border border-border-light rounded-sm bg-background-main">
-                      <div className="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Pendiente de Cobro</div>
-                      <div className="text-lg font-bold text-text-primary mt-1">
-                        ${agentCommissions.reduce((acc, curr) => curr.status === "pending" || curr.status === "processing" ? acc + curr.commission_amount : acc, 0).toFixed(2)}
-                      </div>
-                    </div>
-                    <div className="p-4 border border-border-light rounded-sm bg-background-main">
-                      <div className="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Tasa de Comisión</div>
-                      <div className="text-lg font-bold text-brand-primary mt-1">15%</div>
-                    </div>
-                  </div>
-
-                  {/* Commissions table */}
-                  <div>
-                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Detalle de Operaciones</h4>
-                    {isLoadingCommissions ? (
-                      <p className="text-xs text-text-muted">Cargando transacciones...</p>
-                    ) : agentCommissions.length === 0 ? (
-                      <p className="text-xs text-text-muted italic">No se registran comisiones devengadas.</p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="border-b border-border-light bg-background-main text-[10px] uppercase tracking-wider text-text-secondary">
-                              <th className="py-2.5 px-3 font-semibold">Folio</th>
-                              <th className="py-2.5 px-3 font-semibold">Cliente</th>
-                              <th className="py-2.5 px-3 font-semibold">Servicio</th>
-                              <th className="py-2.5 px-3 font-semibold">Monto Bruto</th>
-                              <th className="py-2.5 px-3 font-semibold">Comisión</th>
-                              <th className="py-2.5 px-3 font-semibold">Estado</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border-light text-text-secondary">
-                            {agentCommissions.map((c) => (
-                              <tr key={c.id} className="hover:bg-background-main/50">
-                                <td className="py-2.5 px-3 font-mono font-bold text-text-primary">{c.client_folio}</td>
-                                <td className="py-2.5 px-3">{c.client_name}</td>
-                                <td className="py-2.5 px-3 capitalize">{c.service_type.replace("_", " ")}</td>
-                                <td className="py-2.5 px-3">${Number(c.gross_amount).toFixed(2)}</td>
-                                <td className="py-2.5 px-3 font-bold text-text-primary">${Number(c.commission_amount).toFixed(2)}</td>
-                                <td className="py-2.5 px-3">
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    c.status === "paid"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                      : c.status === "processing"
-                                      ? "bg-blue-50 text-blue-700 border border-blue-100"
-                                      : "bg-amber-50 text-amber-700 border border-amber-100"
-                                  }`}>
-                                    {c.status === "paid" ? "Pagado" : c.status === "processing" ? "En Proceso" : "Pendiente"}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Sección exclusiva para empresas (Gestión de asesores) */}
-                {user.role === ROLES.AGENCY && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
-                    {/* Equipo / Asesores Activos */}
-                    <div className="border border-border-light rounded-sm p-5 bg-white space-y-4">
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Miembros del Equipo</h3>
-                        <p className="text-xs text-text-secondary">Asesores autorizados bajo la acreditación de tu agencia.</p>
-                      </div>
-
-                      {isLoadingMembers ? (
-                        <p className="text-xs text-text-muted">Cargando equipo...</p>
-                      ) : agencyMembers.length === 0 ? (
-                        <p className="text-xs text-text-muted italic">Aún no tienes consultores registrados.</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {agencyMembers.map((m) => (
-                            <div key={m.id} className="flex items-center justify-between p-3 border border-border-light rounded-sm bg-background-main">
-                              <div>
-                                <div className="text-xs font-bold text-text-primary">
-                                  {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : "Asesor TodoVisa"}
-                                </div>
-                                <div className="text-[10px] text-text-secondary">{m.profile?.email || ""}</div>
-                              </div>
-                              <span className="px-2 py-0.5 bg-brand-light border border-border-light text-brand-primary text-[9px] font-bold uppercase rounded-sm">
-                                {m.member_role === "supervisor" ? "Supervisor" : "Asesor"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Invitar Asesor */}
-                    <div className="border border-border-light rounded-sm p-5 bg-white space-y-4">
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Invitar Asesor</h3>
-                        <p className="text-xs text-text-secondary">Genera invitaciones para que consultores se vinculen a tu agencia.</p>
-                      </div>
-
-                      <form onSubmit={handleInviteConsultant} className="space-y-3">
-                        <div>
-                          <label className="block text-[10px] text-text-secondary font-bold uppercase tracking-wider mb-1.5">Correo del Consultor</label>
-                          <input
-                            type="email"
-                            required
-                            placeholder="consultor@example.com"
-                            value={inviteEmail}
-                            onChange={(e) => setInviteEmail(e.target.value)}
-                            className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs focus:border-border-focus focus:ring-1 focus:ring-border-focus transition-all text-text-primary"
-                          />
-                        </div>
-                        <button
-                          type="submit"
-                          disabled={isSendingInvite}
-                          className="w-full py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors shadow-sm cursor-pointer"
-                        >
-                          {isSendingInvite ? "Generando..." : "Enviar Invitación"}
-                        </button>
-                      </form>
-
-                      {/* Lista de Invitaciones Pendientes */}
-                      <div className="pt-2">
-                        <h4 className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-2.5">Invitaciones Enviadas</h4>
-                        {isLoadingInvitations ? (
-                          <p className="text-[10px] text-text-muted">Cargando invitaciones...</p>
-                        ) : agencyInvitations.length === 0 ? (
-                          <p className="text-[10px] text-text-muted italic">No hay invitaciones registradas.</p>
-                        ) : (
-                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                            {agencyInvitations.map((inv) => (
-                              <div key={inv.id} className="p-2.5 border border-border-light rounded-sm bg-background-main text-[10px] flex flex-col gap-1.5">
-                                <div className="flex justify-between items-center">
-                                  <span className="font-bold text-text-primary truncate mr-1.5">{inv.email}</span>
-                                  <span className={`px-1.5 py-0.5 rounded-sm text-[8px] font-bold ${
-                                    inv.status === "accepted"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                      : inv.status === "expired"
-                                      ? "bg-red-50 text-red-700 border border-red-100"
-                                      : "bg-amber-50 text-amber-700 border border-amber-100"
-                                  }`}>
-                                    {inv.status === "accepted" ? "Aceptado" : inv.status === "expired" ? "Expirado" : "Pendiente"}
-                                  </span>
-                                </div>
-                                {inv.status === "pending" && (
-                                  <div className="flex items-center gap-1.5">
-                                    <input
-                                      readOnly
-                                      value={`${window.location.origin}/agents/join?token=${inv.token}`}
-                                      className="flex-1 px-1.5 py-1 bg-white border border-border-light rounded-sm text-[8px] font-mono select-all focus:outline-none"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(`${window.location.origin}/agents/join?token=${inv.token}`);
-                                        showToast("Enlace de invitación copiado al portapapeles", "success");
-                                      }}
-                                      className="px-2 py-1 bg-gray-800 text-white font-bold rounded-sm hover:bg-gray-900 transition-colors"
-                                    >
-                                      Copiar
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -3374,27 +3268,24 @@ export default function PerfilUsuarioPage() {
       {/* DS-160 SIDE PANEL */}
       {isDs160ModalOpen && (
         <div
-          className={`fixed inset-0 z-[300] flex ${
-            isDs160Closing ? 'pointer-events-none' : ''
-          }`}
+          className={`fixed inset-0 z-[300] flex ${isDs160Closing ? 'pointer-events-none' : ''
+            }`}
           onClick={closeDs160Panel}
         >
           {/* Backdrop */}
           <div
-            className={`flex-1 bg-black/50 backdrop-blur-sm ${
-              isDs160Closing
+            className={`flex-1 bg-black/50 backdrop-blur-sm ${isDs160Closing
                 ? 'animate-out fade-out duration-[280ms]'
                 : 'animate-in fade-in duration-200'
-            }`}
+              }`}
           />
 
           {/* Side Panel */}
           <div
-            className={`w-full max-w-md bg-white flex flex-col shadow-2xl ${
-              isDs160Closing
+            className={`w-full max-w-md bg-white flex flex-col shadow-2xl ${isDs160Closing
                 ? 'animate-out slide-out-to-right duration-[280ms]'
                 : 'animate-in slide-in-from-right duration-300'
-            }`}
+              }`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Panel Header */}
@@ -3414,12 +3305,11 @@ export default function PerfilUsuarioPage() {
               </div>
 
               {/* Status pill */}
-              <div className={`mt-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold border ${
-                ds160Confirmed
+              <div className={`mt-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold border ${ds160Confirmed
                   ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
                   : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${ ds160Confirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${ds160Confirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
                 {ds160Confirmed ? 'DATOS CONFIRMADOS EN SUPABASE' : 'PENDIENTE DE CONFIRMACIÓN'}
               </div>
             </div>
@@ -3487,11 +3377,10 @@ export default function PerfilUsuarioPage() {
                       key={String(opt.value)}
                       type="button"
                       onClick={() => setDs160Data({ ...ds160Data, hasAssets: opt.value })}
-                      className={`py-2.5 px-3 rounded-sm text-xs font-semibold border transition-all text-left ${
-                        ds160Data.hasAssets === opt.value
+                      className={`py-2.5 px-3 rounded-sm text-xs font-semibold border transition-all text-left ${ds160Data.hasAssets === opt.value
                           ? 'bg-brand-primary text-white border-brand-primary'
                           : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/40'
-                      }`}
+                        }`}
                     >
                       {opt.label}
                     </button>
@@ -3567,7 +3456,7 @@ export default function PerfilUsuarioPage() {
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col border border-border-light animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-border-light flex items-center justify-between">
               <h3 className="text-sm font-serif font-bold text-text-primary">Ajustar Foto de Perfil</h3>
-              <button 
+              <button
                 type="button"
                 onClick={() => {
                   setIsCropModalOpen(false);
@@ -3585,10 +3474,10 @@ export default function PerfilUsuarioPage() {
               </p>
 
               <div className="relative w-[300px] h-[300px] bg-background-main border border-border-light shadow-inner overflow-hidden rounded-lg flex items-center justify-center">
-                <canvas 
-                  ref={canvasRef} 
-                  width={300} 
-                  height={300} 
+                <canvas
+                  ref={canvasRef}
+                  width={300}
+                  height={300}
                   className="max-w-full max-h-full block shadow-md"
                 />
               </div>
@@ -3599,12 +3488,12 @@ export default function PerfilUsuarioPage() {
                     <span>Acercar / Alejar (Zoom)</span>
                     <span>{(zoom * 100).toFixed(0)}%</span>
                   </div>
-                  <input 
-                    type="range" 
-                    min={1} 
-                    max={3} 
-                    step={0.01} 
-                    value={zoom} 
+                  <input
+                    type="range"
+                    min={1}
+                    max={3}
+                    step={0.01}
+                    value={zoom}
                     onChange={(e) => handleZoomChange(Number(e.target.value))}
                     className="w-full accent-brand-primary h-1.5 bg-border-light rounded-lg appearance-none cursor-pointer"
                   />
@@ -3614,12 +3503,12 @@ export default function PerfilUsuarioPage() {
                   <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary">
                     <span>Desplazar Horizontal (X)</span>
                   </div>
-                  <input 
-                    type="range" 
-                    min={-maxPanX} 
-                    max={maxPanX} 
-                    step={1} 
-                    value={panX} 
+                  <input
+                    type="range"
+                    min={-maxPanX}
+                    max={maxPanX}
+                    step={1}
+                    value={panX}
                     disabled={maxPanX === 0}
                     onChange={(e) => setPanX(Number(e.target.value))}
                     className="w-full accent-brand-primary h-1.5 bg-border-light rounded-lg appearance-none cursor-pointer disabled:opacity-50"
@@ -3630,12 +3519,12 @@ export default function PerfilUsuarioPage() {
                   <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary">
                     <span>Desplazar Vertical (Y)</span>
                   </div>
-                  <input 
-                    type="range" 
-                    min={-maxPanY} 
-                    max={maxPanY} 
-                    step={1} 
-                    value={panY} 
+                  <input
+                    type="range"
+                    min={-maxPanY}
+                    max={maxPanY}
+                    step={1}
+                    value={panY}
                     disabled={maxPanY === 0}
                     onChange={(e) => setPanY(Number(e.target.value))}
                     className="w-full accent-brand-primary h-1.5 bg-border-light rounded-lg appearance-none cursor-pointer disabled:opacity-50"
@@ -3677,22 +3566,19 @@ export default function PerfilUsuarioPage() {
 
       {/* Toast Alert Component */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-[400] flex items-center gap-3 px-5 py-4 rounded-lg shadow-2xl border animate-in slide-in-from-bottom-4 duration-300 max-w-sm ${
-          toast.type === 'success'
+        <div className={`fixed bottom-6 right-6 z-[400] flex items-center gap-3 px-5 py-4 rounded-lg shadow-2xl border animate-in slide-in-from-bottom-4 duration-300 max-w-sm ${toast.type === 'success'
             ? 'bg-white border-emerald-200'
             : toast.type === 'error'
-            ? 'bg-white border-red-200'
-            : 'bg-white border-blue-200'
-        }`}>
-          <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm ${
-            toast.type === 'success' ? 'bg-emerald-100 text-emerald-600' : toast.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
+              ? 'bg-white border-red-200'
+              : 'bg-white border-blue-200'
           }`}>
+          <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm ${toast.type === 'success' ? 'bg-emerald-100 text-emerald-600' : toast.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
+            }`}>
             {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : 'i'}
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-xs font-semibold leading-snug ${
-              toast.type === 'success' ? 'text-emerald-800' : toast.type === 'error' ? 'text-red-800' : 'text-blue-800'
-            }`}>{toast.message}</p>
+            <p className={`text-xs font-semibold leading-snug ${toast.type === 'success' ? 'text-emerald-800' : toast.type === 'error' ? 'text-red-800' : 'text-blue-800'
+              }`}>{toast.message}</p>
           </div>
           <button
             onClick={() => setToast(null)}

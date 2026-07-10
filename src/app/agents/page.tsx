@@ -7,7 +7,6 @@ import agentsData from "../dummies/agents.json";
 import { useAuthStore } from "../store/authStore";
 import { useRouter } from "next/navigation";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
-import supabase from "../lib/supabase";
 
 interface Agent {
   id: string;
@@ -28,57 +27,11 @@ interface Agent {
   agencyName?: string;
 }
 
-const mapDbAgentToAgent = (dbAgent: any): Agent => {
-  const isAgency = dbAgent.application_id?.startsWith("B2B-") || dbAgent.application_type === "agency";
-  
-  let title = dbAgent.specialties && dbAgent.specialties.length > 0
-    ? `Especialista en Visas de ${dbAgent.specialties.join(" y ")}`
-    : (isAgency ? "Agencia B2B Partner de TodoVisa" : "Asesor Consultor Certificado");
-  
-  if (isAgency && dbAgent.biography?.includes("corporativa")) {
-    title = "Agencia Certificada TodoVisa B2B";
-  }
-
-  const photo = dbAgent.documents?.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(dbAgent.full_name)}&background=0D8ABC&color=fff&size=256`;
-
-  const languagesList = Array.isArray(dbAgent.languages) ? dbAgent.languages : ["Español"];
-  const countriesList = Array.isArray(dbAgent.target_countries) ? dbAgent.target_countries : ["Estados Unidos"];
-  const specialtiesList = Array.isArray(dbAgent.specialties) ? dbAgent.specialties : ["Turismo"];
-  
-  let rating = 4.9;
-  if (dbAgent.full_name?.includes("Ana María")) rating = 5.0;
-  if (dbAgent.full_name?.includes("Carlos")) rating = 4.8;
-  if (dbAgent.full_name?.includes("Mariana")) rating = 4.6;
-
-  const reviewsCount = Math.floor(50 + (parseInt(dbAgent.id?.slice(0, 4), 16) || 0) % 150) || 84;
-
-  return {
-    id: dbAgent.id || dbAgent.application_id,
-    name: dbAgent.full_name,
-    title: title,
-    photo: photo,
-    rating: rating,
-    reviewsCount: reviewsCount,
-    languages: languagesList,
-    countries: countriesList,
-    specialties: specialtiesList,
-    experience: dbAgent.experience_years ? `${dbAgent.experience_years} años` : "5 años",
-    availability: "Inmediata",
-    bio: dbAgent.biography || "Asesor certificado en la red TodoVisa para el acompañamiento en perfiles consulares complejos.",
-    whatsapp: `https://wa.me/${dbAgent.phone?.replace(/[^0-9]/g, "") || "50378901234"}?text=Hola%20${encodeURIComponent(dbAgent.full_name.split(" ")[0])},%20me%20gustaria%20recibir%20asesoria%20para%20mi%20visa.`,
-    featured: dbAgent.status === "active",
-    partnerType: isAgency ? "b2b_agency" : "outsourced_agent",
-    agencyName: isAgency ? dbAgent.full_name : undefined
-  };
-};
-
 export default function AgentesPage() {
   const headerRef = useRef(null);
   const router = useRouter();
   const { user } = useAuthStore();
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  
+
   // State for filters
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCountry, setSelectedCountry] = useState("Todos");
@@ -86,36 +39,9 @@ export default function AgentesPage() {
   const [selectedLanguage, setSelectedLanguage] = useState("Todos");
   const [selectedAvailability, setSelectedAvailability] = useState("Todos");
   const [selectedPartnerType, setSelectedPartnerType] = useState("Todos");
-  
+
   // State for active modal agent
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
-
-  useEffect(() => {
-    const fetchAgents = async () => {
-      setIsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from("agent_applications")
-          .select("*")
-          .or("status.eq.approved,status.eq.active");
-
-        if (!error && data && data.length > 0) {
-          const mapped = data.map(mapDbAgentToAgent);
-          const dbIds = new Set(mapped.map(m => m.id));
-          const uniqueDummies = (agentsData as Agent[]).filter(d => !dbIds.has(d.id));
-          setAgents([...mapped, ...uniqueDummies]);
-        } else {
-          setAgents(agentsData as Agent[]);
-        }
-      } catch (err) {
-        console.error("Error fetching agents from DB:", err);
-        setAgents(agentsData as Agent[]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchAgents();
-  }, []);
 
   // Checkout modal states
   const [checkoutAgent, setCheckoutAgent] = useState<Agent | null>(null);
@@ -139,7 +65,7 @@ export default function AgentesPage() {
       }, 1500);
       return;
     }
-    
+
     if (user.hasPaidAdvisor) {
       showToast("Ya tienes contratada una asesoría activa. Redirigiendo a tu chat...", "info");
       setTimeout(() => {
@@ -170,7 +96,7 @@ export default function AgentesPage() {
   const partnerTypes = ["Todos", "Asesores Independientes", "Agencias de Viajes B2B"];
 
   // Filter logic
-  const filteredAgents = agents.filter((agent) => {
+  const filteredAgents = (agentsData as Agent[]).filter((agent) => {
     const matchesSearch =
       agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       agent.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -228,7 +154,7 @@ export default function AgentesPage() {
       </div>
 
       <main className="w-[80%] mx-auto py-12 flex-1 flex flex-col lg:flex-row gap-8">
-        
+
         {/* Panel Izquierdo: Filtros */}
         <aside className="w-full lg:w-1/4 flex-shrink-0">
           <div className="bg-white rounded-lg border border-border-light p-6 sticky top-28 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
@@ -368,7 +294,7 @@ export default function AgentesPage() {
 
         {/* Panel Derecho: Resultados y Cartas */}
         <section className="w-full lg:w-3/4 flex flex-col">
-          
+
           {/* Contador y metadatos */}
           <div className="flex items-center justify-between mb-6">
             <p className="text-sm font-medium text-text-secondary">
@@ -377,12 +303,7 @@ export default function AgentesPage() {
           </div>
 
           {/* Estado vacío si no hay resultados */}
-          {isLoading ? (
-            <div className="w-full py-20 flex flex-col items-center justify-center gap-3">
-              <div className="w-10 h-10 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-sm text-text-secondary font-medium">Cargando asesores autorizados...</span>
-            </div>
-          ) : filteredAgents.length === 0 ? (
+          {filteredAgents.length === 0 ? (
             <div className="w-full py-16 px-6 bg-white border border-border-light rounded-lg flex flex-col items-center justify-center text-center">
               <svg className="w-16 h-16 text-text-muted mb-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
@@ -444,7 +365,7 @@ export default function AgentesPage() {
                       <p className="text-xs text-text-secondary font-medium leading-relaxed mt-1">
                         {agent.title}
                       </p>
-                      
+
                       {/* Calificación y Experiencia */}
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <div className="flex items-center text-amber-500 text-sm">
@@ -509,7 +430,7 @@ export default function AgentesPage() {
                     >
                       Ver Perfil
                     </button>
-                    
+
                     <button
                       onClick={() => handleHireAgent(agent)}
                       className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 shadow-sm"
@@ -528,7 +449,7 @@ export default function AgentesPage() {
       {activeAgent && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl relative flex flex-col border border-border-light animate-in fade-in zoom-in-95 duration-200">
-            
+
             {/* Botón de Cierre */}
             <button
               onClick={() => setActiveAgent(null)}
@@ -559,7 +480,7 @@ export default function AgentesPage() {
                 <p className="text-sm font-semibold text-brand-primary mb-3">
                   {activeAgent.title}
                 </p>
-                
+
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4">
                   <div className="flex items-center text-amber-500 font-bold text-sm">
                     <span className="text-text-primary mr-1">{activeAgent.rating.toFixed(1)}</span>
@@ -708,13 +629,12 @@ export default function AgentesPage() {
         />
       )}
       {toast && (
-        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${
-          toast.type === 'success' 
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-            : toast.type === 'error' 
-            ? 'bg-red-50 border-red-200 text-red-800' 
-            : 'bg-blue-50 border-blue-200 text-blue-850'
-        }`}>
+        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${toast.type === 'success'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : toast.type === 'error'
+              ? 'bg-red-50 border-red-200 text-red-800'
+              : 'bg-blue-50 border-blue-200 text-blue-850'
+          }`}>
           <span className="text-base select-none">
             {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
           </span>

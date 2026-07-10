@@ -34,6 +34,7 @@ interface AgentApplication {
   signed_at?: string | null;
   created_at: string;
   is_local?: boolean;
+  user_id?: string | null;
   payout_settings?: {
     method?: 'paypal' | 'ach';
     paypal_email?: string;
@@ -77,19 +78,52 @@ function AgentPortalContent() {
   // Admin mock states
   const [approving, setApproving] = useState(false);
 
-  // Earnings Simulator state
-  const [touristCases, setTouristCases] = useState(6);
-  const [studentCases, setStudentCases] = useState(3);
-  const [simRating, setSimRating] = useState(4.8);
-  const [b2bAgentsCount, setB2bAgentsCount] = useState(3);
+  // Real Counts and Simulator Stats (computed/real)
+  const [invitedCount, setInvitedCount] = useState(0);
+  const [realTouristCases, setRealTouristCases] = useState(0);
+  const [realStudentCases, setRealStudentCases] = useState(0);
+  const [realMembers, setRealMembers] = useState<any[]>([]);
+  const [realInvitations, setRealInvitations] = useState<any[]>([]);
+  const [memberCases, setMemberCases] = useState<Record<string, number>>({});
+
+  const activeAdvisorsCount = agent?.is_local ? 3 : invitedCount;
+  const finalTouristCases = agent?.is_local ? 6 : realTouristCases;
+  const finalStudentCases = agent?.is_local ? 3 : realStudentCases;
+  const finalRating = 4.8;
+
+  const displayMembers = agent?.is_local
+    ? [
+        { id: "m1", name: "Lic. Sofía Rodríguez", role: "Especialista Senior", cases: 24, rating: 4.9, active: true },
+        { id: "m2", name: "Mtra. Ana María Silva", role: "Asesora Consular", cases: 18, rating: 5.0, active: true },
+        { id: "m3", name: "Lic. Carlos Mendoza", role: "Asesor General", cases: 12, rating: 4.8, active: true }
+      ]
+    : [
+        ...realMembers.map(m => ({
+          id: m.id,
+          name: m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : "Asesor TodoVisa",
+          role: m.member_role === 'supervisor' ? "Supervisor" : "Asesor",
+          cases: memberCases[m.member_id] || 0,
+          rating: (memberCases[m.member_id] || 0) > 0 ? 4.8 : null,
+          active: true
+        })),
+        ...realInvitations.map(inv => ({
+          id: inv.id,
+          name: inv.email,
+          role: "Invitado",
+          cases: 0,
+          rating: null,
+          active: inv.status === "accepted"
+        }))
+      ];
 
   // Onboarding Checklist
   const [onboardingSteps, setOnboardingSteps] = useState({
     training: true,
     payment: false,
-    app: false,
-    mockRun: false,
   });
+
+  const [hasNoAdvisors, setHasNoAdvisors] = useState(false);
+  const [loadingAdvisors, setLoadingAdvisors] = useState(false);
 
   // Payout configuration states
   const [payoutMethod, setPayoutMethod] = useState<'paypal' | 'ach'>('paypal');
@@ -302,6 +336,104 @@ function AgentPortalContent() {
     return () => clearTimeout(timer);
   }, [idParam, user]);
 
+  // If corporate agency, verify that they have at least one advisor registered and count them
+  useEffect(() => {
+    if (!agent) {
+      setHasNoAdvisors(false);
+      return;
+    }
+
+    const checkAdvisors = async () => {
+      const targetUserId = agent.user_id || agent.id;
+      if (!targetUserId) return;
+
+      setLoadingAdvisors(true);
+      try {
+        const { data: members, error } = await supabase
+          .from("agency_members")
+          .select("*, profile:member_id(first_name, last_name, email)")
+          .eq("agency_id", targetUserId);
+
+        const { data: invitations } = await supabase
+          .from("agency_invitations")
+          .select("*")
+          .eq("agency_id", targetUserId);
+
+        const membersLength = members ? members.length : 0;
+        const invitationsLength = invitations ? invitations.length : 0;
+
+        setInvitedCount(membersLength + invitationsLength);
+        setRealMembers(members || []);
+        setRealInvitations(invitations || []);
+
+        if (members && members.length > 0) {
+          const memberIds = members.map(m => m.member_id);
+          const { data: commissions } = await supabase
+            .from("agent_commissions")
+            .select("agent_id")
+            .in("agent_id", memberIds);
+
+          const counts: Record<string, number> = {};
+          commissions?.forEach(c => {
+            counts[c.agent_id] = (counts[c.agent_id] || 0) + 1;
+          });
+          setMemberCases(counts);
+        }
+
+        // Block if user is corporate and has no members
+        if (agent.application_id?.startsWith("B2B-") && !error && membersLength === 0) {
+          setHasNoAdvisors(true);
+        } else {
+          setHasNoAdvisors(false);
+        }
+      } catch (err) {
+        console.error("Error checking agency members in portal:", err);
+      } finally {
+        setLoadingAdvisors(false);
+      }
+    };
+
+    checkAdvisors();
+  }, [agent]);
+
+  // Load real commissions/cases counts
+  useEffect(() => {
+    if (!agent) return;
+    const loadRealCommissions = async () => {
+      const targetUserId = agent.user_id || agent.id;
+      if (!targetUserId) return;
+      try {
+        let agentIds = [targetUserId];
+        
+        // If it's B2B agency, fetch all agency members
+        if (agent.application_id?.startsWith("B2B-")) {
+          const { data: members } = await supabase
+            .from("agency_members")
+            .select("member_id")
+            .eq("agency_id", targetUserId);
+          if (members && members.length > 0) {
+            agentIds = members.map(m => m.member_id);
+          }
+        }
+
+        const { data: commissions } = await supabase
+          .from("agent_commissions")
+          .select("service_type")
+          .in("agent_id", agentIds);
+
+        if (commissions) {
+          const tourist = commissions.filter(c => c.service_type === "visa_us" || c.service_type === "visa_uk" || c.service_type === "full_service").length;
+          const student = commissions.filter(c => c.service_type === "vipro").length;
+          setRealTouristCases(tourist);
+          setRealStudentCases(student);
+        }
+      } catch (err) {
+        console.error("Error loading commissions stats:", err);
+      }
+    };
+    loadRealCommissions();
+  }, [agent]);
+
   const handleLookupSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!lookupId.trim()) return;
@@ -398,14 +530,14 @@ function AgentPortalContent() {
   // Simulator Math
   const getCommissionRate = () => {
     if (agent?.application_id?.startsWith("B2B-")) {
-      return simRating >= 4.8 ? 0.85 : 0.75;
+      return 0.85;
     }
-    return simRating >= 4.8 ? 0.80 : 0.70;
+    return 0.80;
   };
   const getGrossEarnings = () => {
-    const cases = touristCases * 150 + studentCases * 250;
+    const cases = finalTouristCases * 150 + finalStudentCases * 250;
     if (agent?.application_id?.startsWith("B2B-")) {
-      return cases * b2bAgentsCount;
+      return cases * activeAdvisorsCount;
     }
     return cases;
   };
@@ -471,7 +603,7 @@ function AgentPortalContent() {
       <Header headerRef={headerRef} />
 
       {/* Hero Banner */}
-      <div className="w-full bg-[#0a2336] text-white py-12 px-6 relative overflow-hidden flex-shrink-0">
+      <div className="w-full bg-brand-primary text-white py-12 px-6 relative overflow-hidden flex-shrink-0">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         <div className="w-[80%] mx-auto relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div>
@@ -571,7 +703,7 @@ function AgentPortalContent() {
                   onClick={() => router.push("/login?redirect=/agents/portal")}
                   className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer text-center block"
                 >
-                  Iniciar Sesión
+                  Iniciar sesión
                 </button>
               </div>
             )}
@@ -625,7 +757,29 @@ function AgentPortalContent() {
 
         {/* AGENT PORTAL WORKFLOW STATES */}
         {!loading && !error && agent && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start w-full">
+          <div className="w-full space-y-6">
+            {/* Warning banner if agency has no advisors */}
+            {hasNoAdvisors && (
+              <div className="bg-amber-50 border border-amber-200 rounded-sm p-5 text-left flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fadeIn shadow-xs w-full mb-2">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl flex-shrink-0 mt-0.5">⚠️</span>
+                  <div>
+                    <h3 className="font-bold text-amber-800 text-sm">Se requiere registrar asesores</h3>
+                    <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                      Estimado representante de la agencia, actualmente no tienes ningún asesor registrado bajo la acreditación de tu empresa. Es obligatorio agregar al menos un asesor para poder comenzar a ofrecer servicios de agentes, recibir clientes y ver comisiones.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => router.push("/profile?tab=portal_agente#seccion-equipo")}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-sm shadow-sm transition-all focus:outline-none cursor-pointer flex-shrink-0 text-center animate-pulse"
+                >
+                  Invitar Asesores Ahora
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start w-full">
             
             {/* LEFT COLUMN - MAIN STATUS INFO AND SECTIONS */}
             <div className="lg:col-span-2 space-y-6">
@@ -907,89 +1061,26 @@ function AgentPortalContent() {
                       {/* Controls Panel */}
                       <div className="space-y-5">
                         {agent.application_id.startsWith("B2B-") && (
-                          /* Active Agents Slider */
-                          <div>
-                            <div className="flex justify-between items-center mb-1 text-xs text-left">
+                          /* Active Advisors count display */
+                          <div className="p-3 bg-background-main border border-border-light rounded-sm">
+                            <div className="flex justify-between items-center text-xs text-left">
                               <span className="font-semibold text-text-primary">Asesores Activos de la Agencia</span>
-                              <span className="font-bold text-brand-primary font-mono">{b2bAgentsCount} agentes</span>
+                              <span className="font-bold text-brand-primary font-mono bg-brand-light px-2 py-0.5 rounded border border-brand-primary/20">{activeAdvisorsCount} agentes</span>
                             </div>
-                            <input
-                              type="range"
-                              min="1"
-                              max="10"
-                              value={b2bAgentsCount}
-                              onChange={(e) => setB2bAgentsCount(parseInt(e.target.value))}
-                              className="w-full accent-brand-primary cursor-pointer"
-                            />
-                            <span className="text-[9px] text-text-muted block text-left">Multiplica el volumen de casos consolidado de la agencia.</span>
+                            <span className="text-[9px] text-text-muted block text-left mt-1">Conteo de asesores vinculados e invitaciones generadas por la agencia.</span>
                           </div>
                         )}
 
-                        {/* Tourist Cases Input */}
-                        <div>
-                          <div className="flex justify-between items-center mb-1 text-xs text-left">
-                            <span className="font-semibold text-text-primary">
-                              {agent.application_id.startsWith("B2B-")
-                                ? "Casos de Visa de Turista (Promedio por Asesor)"
-                                : "Casos de Visa de Turista"}
-                            </span>
-                            <span className="font-bold text-brand-primary font-mono">{touristCases} casos</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="25"
-                            value={touristCases}
-                            onChange={(e) => setTouristCases(parseInt(e.target.value))}
-                            className="w-full accent-brand-primary cursor-pointer"
-                          />
-                          <span className="text-[9px] text-text-muted block text-left">Retribución base por caso cerrado: $150 USD</span>
-                        </div>
-
-                        {/* Student Cases Input */}
-                        <div>
-                          <div className="flex justify-between items-center mb-1 text-xs text-left">
-                            <span className="font-semibold text-text-primary">
-                              {agent.application_id.startsWith("B2B-")
-                                ? "Casos de Estudiante / Trabajo (Promedio por Asesor)"
-                                : "Casos de Estudiante / Trabajo"}
-                            </span>
-                            <span className="font-bold text-brand-primary font-mono">{studentCases} casos</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="15"
-                            value={studentCases}
-                            onChange={(e) => setStudentCases(parseInt(e.target.value))}
-                            className="w-full accent-brand-primary cursor-pointer"
-                          />
-                          <span className="text-[9px] text-text-muted block text-left">Retribución base por caso cerrado: $250 USD</span>
-                        </div>
-
                         {/* Customer Rating Rating */}
-                        <div>
-                          <div className="flex justify-between items-center mb-1 text-xs text-left">
+                        <div className="p-3 bg-background-main border border-border-light rounded-sm">
+                          <div className="flex justify-between items-center text-xs text-left">
                             <span className="font-semibold text-text-primary">Calificación de Satisfacción</span>
-                            <span className="font-bold font-mono flex items-center gap-1">
-                              ⭐ <span className={simRating >= 4.8 ? "text-emerald-600 font-bold" : "text-amber-600"}>{simRating.toFixed(1)}</span>
+                            <span className="font-bold font-mono flex items-center gap-1 bg-brand-light px-2 py-0.5 rounded border border-brand-primary/20">
+                              ⭐ <span className="text-emerald-600 font-bold">{finalRating.toFixed(1)}</span>
                             </span>
                           </div>
-                          <input
-                            type="range"
-                            min="3.0"
-                            max="5.0"
-                            step="0.1"
-                            value={simRating}
-                            onChange={(e) => setSimRating(parseFloat(e.target.value))}
-                            className="w-full accent-brand-primary cursor-pointer"
-                          />
                           <div className="flex justify-between text-[9px] text-text-muted mt-1">
-                            <span>Mínimo 3.0</span>
-                            <span className={simRating >= 4.8 ? "text-emerald-600 font-bold" : ""}>
-                              {agent.application_id.startsWith("B2B-") ? "Bono Volumen B2B (>= 4.8)" : "Bono Excelencia (>= 4.8)"}
-                            </span>
-                            <span>Máximo 5.0</span>
+                            <span>Calificación del asesor calculada por la opinión de los usuarios.</span>
                           </div>
                         </div>
                       </div>
@@ -1004,17 +1095,8 @@ function AgentPortalContent() {
 
                           <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
                             <span>Tasa de Comisión {agent.application_id.startsWith("B2B-") ? "B2B" : ""}</span>
-                            <span className="font-mono font-bold flex items-center gap-1">
+                            <span className="font-mono font-bold text-text-primary">
                               {getCommissionRate() * 100}%
-                              {simRating >= 4.8 ? (
-                                <span className="bg-emerald-100 text-emerald-800 text-[8px] font-bold px-1.5 py-0.5 rounded border border-emerald-200">
-                                  +10% Bono
-                                </span>
-                              ) : (
-                                <span className="text-[8px] text-text-muted">
-                                  {agent.application_id.startsWith("B2B-") ? "(Base 75%)" : "(Base 70%)"}
-                                </span>
-                              )}
                             </span>
                           </div>
 
@@ -1200,34 +1282,37 @@ function AgentPortalContent() {
                       </div>
 
                       <div className="divide-y divide-border-light text-xs">
-                        {[
-                          { name: "Lic. Sofía Rodríguez", role: "Especialista Senior", cases: 24, rating: 4.9, active: true },
-                          { name: "Mtra. Ana María Silva", role: "Asesora Consular", cases: 18, rating: 5.0, active: true },
-                          { name: "Lic. Carlos Mendoza", role: "Asesor General", cases: 12, rating: 4.8, active: true },
-                          { name: "Asesor Temporal 1", role: "En Capacitación", cases: 0, rating: 0.0, active: false }
-                        ].map((member) => (
-                          <div key={member.name} className="py-3 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xs border border-brand-primary/20">
-                                {member.name.charAt(0)}
-                              </div>
-                              <div className="text-left">
-                                <p className="font-bold text-text-primary">{member.name}</p>
-                                <p className="text-[10px] text-text-secondary">{member.role}</p>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-6">
-                              <div className="text-right">
-                                <p className="font-semibold text-text-primary">{member.cases} casos cerrados</p>
-                                <p className="text-[10px] text-text-secondary">⭐ {member.rating > 0 ? member.rating.toFixed(1) : "N/A"}</p>
-                              </div>
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${member.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-gray-100 text-gray-500"}`}>
-                                {member.active ? "ACTIVO" : "PENDIENTE"}
-                              </span>
-                            </div>
+                        {displayMembers.length === 0 ? (
+                          <div className="py-6 text-center text-text-secondary italic">
+                            No hay asesores asociados en tu agencia. Comienza a invitar agentes a unirse a tu equipo desde tu perfil.
                           </div>
-                        ))}
+                        ) : (
+                          displayMembers.map((member) => (
+                            <div key={member.id} className="py-3 flex items-center justify-between animate-fadeIn">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xs border border-brand-primary/20 select-none">
+                                  {member.name.charAt(0)}
+                                </div>
+                                <div className="text-left">
+                                  <p className="font-bold text-text-primary">{member.name}</p>
+                                  <p className="text-[10px] text-text-secondary">{member.role}</p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <p className="font-semibold text-text-primary">{member.cases} casos cerrados</p>
+                                  <p className="text-[10px] text-text-secondary">
+                                    {member.rating ? `⭐ ${member.rating.toFixed(1)}` : "⭐ N/A"}
+                                  </p>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${member.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-gray-100 text-gray-500"}`}>
+                                  {member.active ? "ACTIVO" : "PENDIENTE"}
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -1345,37 +1430,6 @@ function AgentPortalContent() {
                       </div>
                     </div>
 
-                    {/* Step 3 */}
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={onboardingSteps.app}
-                        onChange={(e) => setOnboardingSteps(prev => ({ ...prev, app: e.target.checked }))}
-                        className="mt-0.5 w-3.5 h-3.5 border-border-light text-brand-primary focus:ring-brand-primary"
-                      />
-                      <div>
-                        <span className={`text-xs font-semibold block leading-tight ${onboardingSteps.app ? "line-through text-text-muted" : "text-text-primary"}`}>
-                          Descargar App de Agente
-                        </span>
-                        <span className="text-[9px] text-text-muted">Descarga la app en iOS o Android para notificaciones de chat.</span>
-                      </div>
-                    </div>
-
-                    {/* Step 4 */}
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={onboardingSteps.mockRun}
-                        onChange={(e) => setOnboardingSteps(prev => ({ ...prev, mockRun: e.target.checked }))}
-                        className="mt-0.5 w-3.5 h-3.5 border-border-light text-brand-primary focus:ring-brand-primary"
-                      />
-                      <div>
-                        <span className={`text-xs font-semibold block leading-tight ${onboardingSteps.mockRun ? "line-through text-text-muted" : "text-text-primary"}`}>
-                          Simulación con Cliente Demo
-                        </span>
-                        <span className="text-[9px] text-text-muted">Realiza un trámite de simulación ficticio para validar tu aprendizaje.</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
@@ -1417,6 +1471,7 @@ function AgentPortalContent() {
 
             </div>
 
+          </div>
           </div>
         )}
       </main>
