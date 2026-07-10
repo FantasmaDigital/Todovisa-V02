@@ -4,9 +4,9 @@ import React, { useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { countries } from 'countries-list';
 import { useRouter, useSearchParams } from 'next/navigation';
-// Removed AuthService dependency as logic is moved to API routes
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
+import supabase from '../../lib/supabase';
 
 // Helper function to handle API call for Google OAuth redirect. 
 const handleGoogleSignUpApi = async (redirectTo: string) => {
@@ -27,9 +27,8 @@ const handleGoogleSignUpApi = async (redirectTo: string) => {
         }
 
         const result = await response.json();
-        const redirectUrl = result.url || result.data?.url;
-        if (redirectUrl) {
-            window.location.href = redirectUrl;
+        if (result.data?.url) {
+            window.location.href = result.data.url;
         }
     } catch (error: unknown) {
         const errMessage = error instanceof Error ? error.message : String(error);
@@ -65,9 +64,6 @@ export default function SignUpForm() {
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
     const setUser = useAuthStore((state) => state.setUser);
-    const searchParams = useSearchParams();
-    const redirectParam = searchParams.get('redirect');
-    const redirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : '/';
 
     const { register, handleSubmit, watch, formState: { errors } } = useForm<SignUpInputs>({
         defaultValues: { Pais: 'SV' }
@@ -115,10 +111,6 @@ export default function SignUpForm() {
 
             const result = await response.json();
 
-            // Set the session in client-side Supabase client to enable auth updates
-            if (result.data?.session) {
-                await supabase.auth.setSession(result.data.session);
-            }
 
             if (result.data?.user) {
                 const userObj = result.data.user;
@@ -134,21 +126,11 @@ export default function SignUpForm() {
                     viproCompleted: metadata.vipro_completed || false,
                     viproDestination: metadata.vipro_destination || null,
                     hasPaidAdvisor: metadata.has_paid_advisor || false,
-                    assignedAgentId: metadata.assigned_agent_id || null,
-                    photoUrl: metadata.photo_url || null,
-                    avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-                    lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
-                    ds160FullName: metadata.ds160_full_name || null,
-                    ds160PassportNum: metadata.ds160_passport_num || null,
-                    ds160BirthDate: metadata.ds160_birth_date || null,
-                    ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
-                    ds160HasAssets: metadata.ds160_has_assets ?? true,
-                    ds160Confirmed: metadata.ds160_confirmed || false,
-                    expedienteStatus: metadata.expediente_status || 'draft',
+                    assignedAgentId: metadata.assigned_agent_id || null
                 });
             }
 
-            router.push(redirect);
+            router.push('/');
         } catch (error: unknown) {
             const errMessage = error instanceof Error ? error.message : String(error);
             setAuthError(errMessage || 'Error de red al registrarse');
@@ -159,7 +141,7 @@ export default function SignUpForm() {
 
     const handleGoogleSignUp = async () => {
         try {
-            await handleGoogleSignUpApi(`${window.location.origin}${redirect}`); 
+            await handleGoogleSignUpApi(`${window.location.origin}/`); 
         } catch (error: unknown) {
             const errMessage = error instanceof Error ? error.message : String(error);
             setAuthError(errMessage || 'Error de red al registrarse con Google');

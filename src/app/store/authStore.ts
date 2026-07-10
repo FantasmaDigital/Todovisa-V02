@@ -1,7 +1,5 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { UserRole } from '../constants/roles';
-
 
 export interface UserData {
   id: string;
@@ -11,23 +9,10 @@ export interface UserData {
   phone: string;
   country: string;
   hasPaidAdvisor?: boolean;
-  hasPaidVipro?: boolean;
   assignedAgentId?: string | null;
-  hasCompletedVipro?: boolean;
   viproScore?: number | null;
   viproCompleted?: boolean;
   viproDestination?: string | null;
-  photoUrl?: string | null;
-  avatarChangesThisMonth?: number;
-  lastAvatarChangeMonth?: string;
-  ds160FullName?: string | null;
-  ds160PassportNum?: string | null;
-  ds160BirthDate?: string | null;
-  ds160PurposeOfTrip?: string | null;
-  ds160HasAssets?: boolean;
-  ds160Confirmed?: boolean;
-  expedienteStatus?: 'draft' | 'submitted' | 'approved';
-  role?: UserRole;
 }
 
 interface AuthState {
@@ -45,9 +30,6 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage', // Nombre para el localStorage
-      partialize: (state) => ({
-        user: state.user,
-      }),
     }
   )
 );
