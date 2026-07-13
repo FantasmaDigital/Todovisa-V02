@@ -6,12 +6,14 @@ import { useEffect, useRef, useState, Suspense, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
 import agentsData from "../dummies/agents.json";
+import supabase from "../lib/supabase";
 
 function ViproFormContent() {
     const headerRef = useRef(null);
     const [_, setHeaderHeight] = useState<number | null>(null);
     const [selectedCountryCode, setSelectedCountryCode] = useState<string>("");
     const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+    const [inProgressCountry, setInProgressCountry] = useState<string>("");
     const router = useRouter();
     const searchParams = useSearchParams();
     const user = useAuthStore((state) => state.user);
@@ -44,6 +46,47 @@ function ViproFormContent() {
         setSelectedCountry(countryMap[code] ? `${countryMap[code].emoji} ${countryMap[code].name}` : null);
     };
 
+    // Check if there is an in-progress evaluation
+    useEffect(() => {
+        const checkProgress = async () => {
+            let dest = "";
+            // Check local storage first
+            if (typeof window !== "undefined") {
+                const localDest = localStorage.getItem("vipro_progress_destination");
+                const localAnswers = localStorage.getItem("vipro_progress_answers");
+                if (localDest && localAnswers) {
+                    try {
+                        const parsed = JSON.parse(localAnswers);
+                        if (Object.keys(parsed).length > 0) {
+                            dest = localDest;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            // If not in local storage and logged in, check supabase user metadata
+            if (!dest && user) {
+                try {
+                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+                    const metadata = supabaseUser?.user_metadata || {};
+                    if (metadata.vipro_progress_destination && metadata.vipro_progress_answers) {
+                        if (Object.keys(metadata.vipro_progress_answers).length > 0) {
+                            dest = metadata.vipro_progress_destination;
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error checking progress in Supabase:", err);
+                }
+            }
+
+            if (dest) {
+                setInProgressCountry(dest);
+            }
+        };
+
+        checkProgress();
+    }, [user]);
+
     useEffect(() => {
         const countryParam = searchParams.get("country")?.toUpperCase();
         if (countryParam && countryMap[countryParam]) {
@@ -72,47 +115,73 @@ function ViproFormContent() {
                         </h1>
 
                         <p className="text-base text-text-secondary leading-relaxed">
-                            Selecciona una de las opciones disponibles para continuar con tu evaluación VIPRO. Te ofrecemos una asesoría experta y una amplia variedad de servicios adaptados a las exigencias de cada país. Tómate tu tiempo para revisar las opciones y da el siguiente paso hacia tus metas.
+                            Nuestra Evaluación VIPRO de viabilidad analiza tu perfil consular y te brinda recomendaciones personalizadas impulsadas por IA para aumentar tus probabilidades de éxito.
                         </p>
 
-                        <div className="w-full flex flex-col gap-2 mt-2">
-                            <label className="text-sm font-semibold text-text-primary">Destino de viaje:</label>
-                            <select 
-                                value={selectedCountryCode}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    handleSelectCountry(val);
-                                }}
-                                className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm"
-                            >
-                                <option value="">🌎 Selecciona un país...</option>
-                                {availableCountries.map(([code, details]) => (
-                                    <option key={code} value={code}>
-                                        {details.emoji} {details.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="mt-2 flex flex-col gap-4">
-                            <div className="flex items-end gap-3">
-                                <span className="text-5xl font-bold text-text-primary">$19.99</span>
-                                <span className="text-sm text-text-secondary mb-1">USD</span>
+                        {inProgressCountry ? (
+                            /* In-progress State */
+                            <div className="w-full bg-brand-light/45 border border-brand-primary/20 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-bold text-brand-primary uppercase tracking-widest">Cuestionario en Curso</span>
+                                    <p className="text-lg font-serif font-semibold text-text-primary">
+                                        Tienes una evaluación iniciada para {countryMap[inProgressCountry]?.emoji || "✈️"} {countryMap[inProgressCountry]?.name || inProgressCountry}
+                                    </p>
+                                </div>
+                                <p className="text-sm text-text-secondary">
+                                    Puedes continuar respondiendo donde lo dejaste para recibir tu reporte de viabilidad y puntaje consular.
+                                </p>
+                                <div className="flex mt-2">
+                                    <button
+                                        onClick={() => router.push(`/vipro-form/evaluation?country=${inProgressCountry}`)}
+                                        className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer"
+                                    >
+                                        Continuar Evaluación
+                                    </button>
+                                </div>
                             </div>
-                            <span className="text-sm font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
-                                🎉 Recibirás un 25% de descuento en tu asesoría
-                            </span>
-                        </div>
+                        ) : (
+                            /* Normal Country Selection State */
+                            <>
+                                <div className="w-full flex flex-col gap-2 mt-2">
+                                    <label className="text-sm font-semibold text-text-primary text-left">Destino de viaje:</label>
+                                    <select 
+                                        value={selectedCountryCode}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            handleSelectCountry(val);
+                                        }}
+                                        className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm"
+                                    >
+                                        <option value="">🌎 Selecciona un país...</option>
+                                        {availableCountries.map(([code, details]) => (
+                                            <option key={code} value={code}>
+                                                {details.emoji} {details.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
 
-                        <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
-                            <button 
-                                disabled={!selectedCountryCode} 
-                                onClick={() => router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`)} 
-                                className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg"
-                            >
-                                Empezar Evaluación <span className="pl-2">{selectedCountry}</span>
-                            </button>
-                        </div>
+                                <div className="mt-2 flex flex-col gap-4 items-start">
+                                    <div className="flex items-end gap-3">
+                                        <span className="text-5xl font-bold text-text-primary">$19.99</span>
+                                        <span className="text-sm text-text-secondary mb-1">USD</span>
+                                    </div>
+                                    <span className="text-sm font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
+                                        🎉 Recibirás un 25% de descuento en tu asesoría
+                                    </span>
+                                </div>
+
+                                <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
+                                    <button 
+                                        disabled={!selectedCountryCode} 
+                                        onClick={() => router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`)} 
+                                        className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg"
+                                    >
+                                        Empezar Evaluación <span className="pl-2">{selectedCountry}</span>
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     <div className="w-full md:w-1/2 h-[450px] md:h-[650px] relative rounded-[2rem] overflow-hidden shadow-2xl">

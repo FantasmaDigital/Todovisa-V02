@@ -8,10 +8,9 @@ import { useAuthStore } from "../../store/authStore";
 import supabase from "../../lib/supabase";
 import agentsData from "../../dummies/agents.json";
 
-import { VIPROQuestionsUSA, VIPROInfoUSA } from "../../constants/vipro/usa.vipro";
-import { VIPROQuestionsUK, VIPROInfoUK } from "../../constants/vipro/uk.vipro";
+import { questionsSpanish } from "../../constants/vipro/questionsSpanish";
 
-// Types derived from imports
+// Types
 type VIPROQuestionsProps = {
     question: string;
     type_question: string;
@@ -21,87 +20,21 @@ type VIPROQuestionsProps = {
     required?: boolean;
 }
 
-type VIPROInfoProps = {
-    info_text: string;
-    category: string;
-}
-
-interface ParseAnnexItem {
-    type: 'header' | 'item' | 'step' | 'text';
-    number?: string;
-    title?: string;
-    text: string;
-}
-
-// Clean and parse the requirements list & timelines
-function parseAnnexItem(text: string): ParseAnnexItem {
-    const cleanText = text.replace(/\[cite:\s*\d+\]/g, "").trim();
-
-    if (cleanText.includes("ANEXO A") || cleanText.includes("ANEXO B")) {
-        return { type: 'header', text: cleanText };
-    }
-
-    // Check if it is a STEP (e.g. PASO 1: Text)
-    const stepMatch = cleanText.match(/^(PASO\s+\d+):\s*(.*)$/i);
-    if (stepMatch) {
-        const [_, stepNum, stepContent] = stepMatch;
-        const dotIndex = stepContent.indexOf('.');
-        const colonIndex = stepContent.indexOf(':');
-        let title = '';
-        let rest = stepContent;
-        if (dotIndex !== -1 && (colonIndex === -1 || dotIndex < colonIndex)) {
-            title = stepContent.substring(0, dotIndex + 1);
-            rest = stepContent.substring(dotIndex + 1).trim();
-        } else if (colonIndex !== -1) {
-            title = stepContent.substring(0, colonIndex + 1);
-            rest = stepContent.substring(colonIndex + 1).trim();
-        }
-        return { type: 'step', number: stepNum, title: title, text: rest };
-    }
-
-    // Check if it is a numbered requirement (e.g. 1. TITLE: Text)
-    const numMatch = cleanText.match(/^(\d+)\.\s*(.*)$/);
-    if (numMatch) {
-        const [_, num, content] = numMatch;
-        const colonIndex = content.indexOf(':');
-        if (colonIndex !== -1) {
-            return {
-                type: 'item',
-                number: num,
-                title: content.substring(0, colonIndex).trim(),
-                text: content.substring(colonIndex + 1).trim()
-            };
-        }
-        return { type: 'item', number: num, text: content };
-    }
-
-    return { type: 'text', text: cleanText };
-}
-
 interface Agent {
     id: string;
     name: string;
     countries: string[];
 }
 
-// Country Configurations
-const countryConfigs: Record<string, {
-    name: string;
-    emoji: string;
-    questions: VIPROQuestionsProps[];
-    info: VIPROInfoProps[];
-}> = {
+// Country Configurations for VIPRO supported destinations
+const countryConfigs: Record<string, { name: string; emoji: string }> = {
     US: {
         name: "Estados Unidos",
-        emoji: "🇺🇸",
-        questions: VIPROQuestionsUSA,
-        info: VIPROInfoUSA
+        emoji: "🇺🇸"
     },
     UK: {
-        name: "Inglaterra",
-        emoji: "🇬🇧",
-        questions: VIPROQuestionsUK,
-        info: VIPROInfoUK
+        name: "Inglaterra (Reino Unido)",
+        emoji: "🇬🇧"
     }
 };
 
@@ -117,7 +50,9 @@ function ViproEvaluationContent() {
     const setUser = useAuthStore((state) => state.setUser);
 
     const isSupported = countryCode in countryConfigs;
-    const currentConfig = countryConfigs[countryCode];
+    const currentConfig = isSupported ? countryConfigs[countryCode] : null;
+    const countryName = currentConfig ? currentConfig.name : "Estados Unidos";
+    const countryEmoji = currentConfig ? currentConfig.emoji : "🇺🇸";
 
     const assignedAgent = useMemo(() => {
         return user?.assignedAgentId 
@@ -142,6 +77,39 @@ function ViproEvaluationContent() {
         recommendations: string[];
         destination_analysis: string;
     } | null>(null);
+
+    const questions = questionsSpanish;
+    const question = questions[currentStep];
+
+    // Load existing completed results if user already finished evaluation
+    useEffect(() => {
+        if (user?.viproCompleted && user?.viproDestination === countryCode) {
+            setCompleted(true);
+            setStarted(true);
+            
+            let recs: string[] = [];
+            if (typeof window !== "undefined") {
+                const storedRecs = localStorage.getItem("vipro_recommendations");
+                if (storedRecs) {
+                    try {
+                        recs = JSON.parse(storedRecs);
+                    } catch (e) {
+                        console.error("Error parsing stored recommendations", e);
+                    }
+                }
+            }
+            
+            setEvaluationResult({
+                score: user.viproScore || 85,
+                recommendations: recs.length > 0 ? recs : [
+                    "Presentar estados de cuenta bancarios detallados que demuestren solvencia económica.",
+                    "Obtener una constancia laboral firmada y sellada especificando puesto y salario.",
+                    "Preparar la documentación de arraigos familiares o de propiedad."
+                ],
+                destination_analysis: "Análisis de viabilidad consular previamente generado para tu perfil."
+            });
+        }
+    }, [user, countryCode]);
 
     // Save evaluation to Supabase and store on completion (calling Gemini API)
     useEffect(() => {
@@ -184,7 +152,6 @@ function ViproEvaluationContent() {
                             viproDestination: countryCode
                         };
                         
-                        // Defer store update to avoid react-hooks/set-state-in-effect warning
                         setTimeout(() => setUser(updatedUser), 0);
 
                         try {
@@ -206,7 +173,6 @@ function ViproEvaluationContent() {
                     }
                 } catch (err) {
                     console.error("Error evaluating VIPRO questionnaire:", err);
-                    // Fallback local calculation
                     const baseScore = 82;
                     const answersCount = Object.keys(answers).length;
                     const extra = answersCount % 14;
@@ -281,7 +247,6 @@ function ViproEvaluationContent() {
             let savedStep = 0;
             let hasSavedProgress = false;
 
-            // 1. Try to load from Supabase user metadata first if logged in
             if (user) {
                 try {
                     const { data: { user: supabaseUser } } = await supabase.auth.getUser();
@@ -297,7 +262,6 @@ function ViproEvaluationContent() {
                 }
             }
 
-            // 2. Fallback to localStorage if no Supabase data was found or offline
             if (!hasSavedProgress && typeof window !== "undefined") {
                 const localDest = localStorage.getItem("vipro_progress_destination");
                 if (localDest === countryCode) {
@@ -319,17 +283,12 @@ function ViproEvaluationContent() {
             if (hasSavedProgress && Object.keys(savedAnswers).length > 0) {
                 setAnswers(savedAnswers);
                 setCurrentStep(savedStep);
-                setStarted(true); // Jump straight to the form
+                setStarted(true);
             }
         };
 
         loadProgress();
     }, [user, countryCode]);
-
-    // Accordion sidebar states
-    const [openAnnexA, setOpenAnnexA] = useState(true);
-    const [openAnnexB, setOpenAnnexB] = useState(false);
-    const [showSidebarMobile, setShowSidebarMobile] = useState(false);
 
     useEffect(() => {
         if (headerRef.current) {
@@ -337,6 +296,54 @@ function ViproEvaluationContent() {
             setHeaderHeight(height);
         }
     }, []);
+
+    // Reset/Retake Evaluation handler
+    const handleReset = async () => {
+        if (!window.confirm("¿Estás seguro de que deseas reiniciar tu evaluación? Esto borrará tu puntaje y recomendaciones actuales para comenzar de nuevo.")) return;
+        
+        setCompleted(false);
+        setStarted(false);
+        setCurrentStep(0);
+        setAnswers({});
+        setEvaluationResult(null);
+        
+        if (typeof window !== "undefined") {
+            localStorage.removeItem("vipro_score");
+            localStorage.removeItem("vipro_completed");
+            localStorage.removeItem("vipro_destination");
+            localStorage.removeItem("vipro_recommendations");
+            localStorage.removeItem("vipro_progress_answers");
+            localStorage.removeItem("vipro_progress_step");
+            localStorage.removeItem("vipro_progress_destination");
+        }
+        
+        if (user) {
+            const updatedUser = {
+                ...user,
+                viproCompleted: false,
+                viproScore: null,
+                viproDestination: null
+            };
+            setUser(updatedUser);
+            
+            try {
+                await supabase.auth.updateUser({
+                    data: {
+                        vipro_score: null,
+                        vipro_completed: false,
+                        vipro_destination: null,
+                        vipro_recommendations: null,
+                        vipro_progress_answers: null,
+                        vipro_progress_step: null,
+                        vipro_progress_destination: null
+                    }
+                });
+                console.log("VIPRO progress successfully cleared in Supabase.");
+            } catch (err) {
+                console.error("Failed to reset VIPRO data in Supabase:", err);
+            }
+        }
+    };
 
     // Loader display while Gemini API parses results
     if (isEvaluating) {
@@ -350,7 +357,7 @@ function ViproEvaluationContent() {
                             Analizando tu Perfil con Inteligencia Artificial
                         </h1>
                         <p className="text-text-secondary leading-relaxed text-sm max-w-md">
-                            Estamos procesando tus respuestas a través de nuestro consultor consular virtual para calcular tu probabilidad de éxito y generar recomendaciones personalizadas con Gemini. Esto tomará solo unos segundos...
+                            Estamos procesando tus respuestas a través de nuestro consultor consular virtual para calcular tu probabilidad de éxito y generar recomendaciones personalizadas. Esto tomará solo unos segundos...
                         </p>
                     </div>
                 </main>
@@ -399,7 +406,6 @@ function ViproEvaluationContent() {
     }
 
     if (!isSupported) {
-        // Render Coming Soon Page
         const countryNames: Record<string, { name: string; emoji: string }> = {
             CA: { name: "Canadá", emoji: "🇨🇦" },
             MX: { name: "México", emoji: "🇲🇽" },
@@ -422,7 +428,7 @@ function ViproEvaluationContent() {
                             Muy Pronto Disponible
                         </span>
                         <p className="text-text-secondary leading-relaxed text-base">
-                            Estamos trabajando activamente para traerte el preformulario de captación y el análisis especializado para <strong>{countryInfo.name}</strong>, adaptado a las últimas regulaciones migratorias consulares.
+                            Estamos trabajando activamente para traerte la evaluación de viabilidad VIPRO y el análisis especializado para <strong>{countryInfo.name}</strong>, adaptado a las últimas regulaciones migratorias consulares.
                         </p>
                         <div className="w-full h-px bg-border-light"></div>
                         <div className="flex flex-col sm:flex-row gap-4 w-full justify-center">
@@ -448,16 +454,6 @@ function ViproEvaluationContent() {
         );
     }
 
-    const { name: countryName, emoji: countryEmoji, questions, info } = currentConfig;
-    const question = questions[currentStep];
-
-    // Info categories helper
-    const generalInstructions = info.filter(item => item.category.endsWith("INSTRUCCIONES GENERALES"));
-    const sectionNotes = started && question ? info.filter(item => item.category === question.category) : [];
-    const annexes = info.filter(item => item.category.endsWith("ANEXOS Y REQUISITOS"));
-    const contactInfo = info.filter(item => item.category.endsWith("CONTACTO Y NOTAS"));
-    const declarationInfo = info.filter(item => item.category.endsWith("DECLARACIÓN Y FIRMA"));
-
     const handleNext = () => {
         if (currentStep < questions.length - 1) {
             setCurrentStep(prev => prev + 1);
@@ -480,37 +476,38 @@ function ViproEvaluationContent() {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
+                <main className="w-full max-w-3xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
                     <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-8">
                         <div className="flex items-center gap-4 border-b border-border-light pb-6">
                             <span className="text-5xl">{countryEmoji}</span>
                             <div>
-                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Formulario de Evaluación VIPRO</span>
-                                <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">{countryName}</h1>
+                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Cuestionario de Viabilidad</span>
+                                <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">Evaluación VIPRO</h1>
                             </div>
                         </div>
 
                         <div className="flex flex-col gap-5">
-                            <h2 className="text-xl font-bold text-text-primary">Instrucciones Generales:</h2>
-                            <div className="flex flex-col gap-4 text-text-secondary leading-relaxed">
-                                {generalInstructions.map((item, idx) => (
-                                    <p key={idx} className="bg-brand-light/30 border-l-4 border-brand-primary p-4 rounded-r-xl text-base">
-                                        {item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                    </p>
-                                ))}
-                            </div>
+                           <h2 className="text-xl font-bold text-text-primary">Instrucciones de la Evaluación:</h2>
+                           <div className="flex flex-col gap-4 text-text-secondary leading-relaxed">
+                               <p className="bg-brand-light/30 border-l-4 border-brand-primary p-4 rounded-r-xl text-base text-left">
+                                   Bienvenido a la Evaluación de Viabilidad VIPRO. Este cuestionario automatizado de {questions.length} preguntas analizará tu perfil consular para determinar tu nivel de preparación y probabilidad de éxito para tu solicitud de visa hacia {countryName}.
+                               </p>
+                               <p className="text-sm text-left">
+                                   Por favor responde con honestidad todas las preguntas sobre tu situación laboral, familiar, financiera y tu historial de viajes. Al finalizar, nuestro sistema generará un reporte detallado con tu puntaje de viabilidad y recomendaciones de mejora personalizadas.
+                               </p>
+                           </div>
                         </div>
 
                         <div className="bg-background-main p-6 rounded-2xl border border-border-light flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
-                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura del Formulario</span>
+                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura de la Evaluación</span>
                                 <p className="text-text-primary font-bold text-lg">{questions.length} preguntas en total</p>
                             </div>
                             <button 
                                 onClick={() => setStarted(true)}
                                 className="w-full sm:w-auto bg-brand-primary text-white font-semibold px-8 py-4 rounded-xl hover:bg-brand-hover transition-colors shadow-md text-lg cursor-pointer"
                             >
-                                Empezar Cuestionario →
+                                Empezar Evaluación →
                             </button>
                         </div>
                     </div>
@@ -522,13 +519,10 @@ function ViproEvaluationContent() {
 
     // Success / Completed Screen
     if (completed) {
-        // Find signature answer (last question represents signature in both datasets)
-        const signatureText = answers[questions.length - 2] || answers[questions.length - 1] || "Firma Digital";
-
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
+                <main className="w-full max-w-3xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
                     <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-10">
                         <div className="flex flex-col items-center text-center gap-4 border-b border-border-light pb-8">
                             <div className="w-20 h-20 bg-status-success/15 text-status-success rounded-full flex items-center justify-center text-4xl shadow-inner animate-pulse">
@@ -536,7 +530,7 @@ function ViproEvaluationContent() {
                             </div>
                             <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold">¡Evaluación Finalizada!</h1>
                             <p className="text-text-secondary text-base max-w-lg">
-                                Tu preformulario de captación VIPRO para {countryEmoji} {countryName} ha sido completado con éxito.
+                                Tu evaluación de viabilidad VIPRO para {countryEmoji} {countryName} ha sido completada con éxito.
                             </p>
 
                             {/* Score display from Gemini */}
@@ -566,11 +560,11 @@ function ViproEvaluationContent() {
                         {evaluationResult && evaluationResult.recommendations && evaluationResult.recommendations.length > 0 && (
                             <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom duration-500 delay-150">
                                 <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
-                                    <span>🧠 Recomendaciones de Mejora AI (Gemini)</span>
+                                    <span>🧠 Recomendaciones de Mejora (TodoVisa AI)</span>
                                 </h2>
                                 <div className="grid grid-cols-1 gap-4">
                                     {evaluationResult.recommendations.map((rec, idx) => (
-                                        <div key={idx} className="flex gap-4 p-5 bg-white border border-border-light rounded-2xl shadow-sm hover:border-brand-primary/30 transition-all duration-300">
+                                        <div key={idx} className="flex gap-4 p-5 bg-white border border-border-light rounded-2xl shadow-sm hover:border-brand-primary/30 transition-all duration-300 text-left">
                                             <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-sm flex-shrink-0">
                                                 {idx + 1}
                                             </div>
@@ -583,49 +577,27 @@ function ViproEvaluationContent() {
                             </div>
                         )}
 
-                        {/* Legal Declaration */}
-                        <div className="bg-[#FAF9F6] border border-border-light p-6 md:p-8 rounded-2xl flex flex-col gap-4">
-                            <h3 className="text-xs font-bold tracking-widest text-text-primary uppercase border-b border-border-light pb-2">
-                                Declaración y Autorización
-                            </h3>
-                            <div className="text-text-secondary text-sm leading-relaxed flex flex-col gap-3 italic">
-                                {declarationInfo.map((item, idx) => (
-                                    <p key={idx}>{item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}</p>
-                                ))}
-                            </div>
-                            <div className="mt-6 flex flex-col items-center justify-center p-4 border border-dashed border-border-light bg-white rounded-xl">
-                                <span className="text-xs text-text-muted uppercase tracking-wider mb-2">Firma Digital del Solicitante</span>
-                                <span className="font-serif italic text-2xl text-brand-primary tracking-wide font-semibold">
-                                    {signatureText}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Contact details */}
+                        {/* Actions */}
                         <div className="bg-brand-light/40 border border-brand-primary/10 p-6 rounded-2xl flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
-                            <div className="flex-1 flex flex-col gap-2">
+                            <div className="flex-1 flex flex-col gap-2 text-left">
                                 <h3 className="font-bold text-text-primary text-lg">Próximos Pasos</h3>
-                                {contactInfo.map((item, idx) => (
-                                    <p key={idx} className="text-text-secondary text-sm leading-relaxed">
-                                        {item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                    </p>
-                                ))}
+                                <p className="text-text-secondary text-sm leading-relaxed">
+                                    Puedes revisar este diagnóstico en tu perfil en cualquier momento, o reiniciar la evaluación si tu situación ha cambiado.
+                                </p>
                             </div>
-                            <div className="flex gap-3 w-full md:w-auto">
+                            <div className="flex flex-wrap gap-3 w-full md:w-auto">
                                 <button 
                                     onClick={() => router.push('/profile?tab=proceso')}
-                                    className="flex-1 md:flex-none bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors shadow-md text-center cursor-pointer whitespace-nowrap"
+                                    className="flex-1 md:flex-none bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors shadow-md text-center cursor-pointer whitespace-nowrap text-sm"
                                 >
-                                    Ver mi Perfil
+                                    Ir a mi Panel
                                 </button>
-                                <a 
-                                    href="https://wa.me/50370200976" 
-                                    target="_blank" 
-                                    rel="noreferrer"
-                                    className="flex-1 md:flex-none border border-border-light bg-white text-text-primary font-semibold px-6 py-3 rounded-lg hover:bg-background-hover transition-colors shadow-sm text-center cursor-pointer whitespace-nowrap"
+                                <button 
+                                    onClick={handleReset}
+                                    className="flex-1 md:flex-none border border-red-200 bg-red-50 text-red-700 font-semibold px-6 py-3 rounded-lg hover:bg-red-100 transition-colors shadow-sm text-center cursor-pointer whitespace-nowrap text-sm"
                                 >
-                                    Hablar con Asesor
-                                </a>
+                                    Reiniciar Evaluación
+                                </button>
                             </div>
                         </div>
 
@@ -638,7 +610,7 @@ function ViproEvaluationContent() {
                             <div className="p-6 bg-white max-h-96 overflow-y-auto divide-y divide-border-light flex flex-col">
                                 {questions.map((q, idx) => (
                                     <div key={idx} className="py-3 flex flex-col md:flex-row md:justify-between gap-2">
-                                        <span className="text-sm font-semibold text-text-primary w-full md:w-1/2">{q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}</span>
+                                        <span className="text-sm font-semibold text-text-primary w-full md:w-1/2 text-left">{q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}</span>
                                         <span className="text-sm text-text-secondary w-full md:w-1/2 text-left md:text-right font-medium">
                                             {answers[idx] || <span className="italic text-text-muted">No respondido / En blanco</span>}
                                         </span>
@@ -653,251 +625,106 @@ function ViproEvaluationContent() {
         );
     }
 
-    // Grouping Annex A and Annex B content
-    const annexAItems = annexes.filter(item => {
-        const text = item.info_text;
-        return text.includes("ANEXO A") || /^\d+\./.test(text) || (text.includes("DOCUMENTOS") && !text.includes("ANEXO B") && !/^PASO/.test(text));
-    });
-
-    const annexBItems = annexes.filter(item => {
-        const text = item.info_text;
-        return text.includes("ANEXO B") || /^PASO\s+\d+/.test(text) || text.includes("Esta guía describe el proceso");
-    });
-
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
             <Header headerRef={headerRef} />
             
-            <main className="w-full max-w-[1400px] mx-auto px-4 md:px-8 py-10 flex flex-col gap-6 flex-1">
+            <main className="w-full max-w-3xl mx-auto px-4 md:px-8 py-10 flex flex-col gap-6 flex-1 animate-in fade-in duration-300">
                 
-                {/* Mobile action bar for sidebar display */}
-                <div className="lg:hidden w-full flex justify-between items-center bg-white p-4 rounded-2xl border border-border-light shadow-sm">
-                    <span className="text-xs font-bold text-text-secondary uppercase">
-                        Cuestionario {countryEmoji}
-                    </span>
-                    <button 
-                        onClick={() => setShowSidebarMobile(!showSidebarMobile)}
-                        className="bg-brand-light text-brand-primary text-xs font-bold px-4 py-2.5 rounded-lg border border-brand-primary/10 flex items-center gap-2"
-                    >
-                        📋 {showSidebarMobile ? "Ocultar Guía y Requisitos" : "Ver Guía y Requisitos"}
-                    </button>
+                {/* Progress Bar Header */}
+                <div className="w-full bg-white rounded-2xl p-6 border border-border-light shadow-sm">
+                    <div className="flex justify-between text-xs text-text-secondary font-bold mb-3 uppercase tracking-wider text-left">
+                        <span>Paso {currentStep + 1} de {questions.length}</span>
+                        <span>{Math.round(((currentStep + 1) / questions.length) * 100)}% Completado</span>
+                    </div>
+                    <div className="w-full h-2 bg-border-light rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-brand-primary transition-all duration-500 ease-out"
+                            style={{ width: `${((currentStep + 1) / questions.length) * 100}%` }}
+                        ></div>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start w-full">
+                {/* Question container */}
+                <div className="w-full bg-white rounded-[2rem] p-6 md:p-12 border border-border-light shadow-sm">
                     
-                    {/* LEFT/MAIN QUESTION COL */}
-                    <div className="lg:col-span-2 flex flex-col gap-6 w-full">
-                        
-                        {/* Progress Bar Header */}
-                        <div className="w-full bg-white rounded-2xl p-6 border border-border-light shadow-sm">
-                            <div className="flex justify-between text-xs text-text-secondary font-bold mb-3 uppercase tracking-wider">
-                                <span>Paso {currentStep + 1} de {questions.length}</span>
-                                <span>{Math.round(((currentStep + 1) / questions.length) * 100)}% Completado</span>
-                            </div>
-                            <div className="w-full h-2 bg-border-light rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-brand-primary transition-all duration-500 ease-out"
-                                    style={{ width: `${((currentStep + 1) / questions.length) * 100}%` }}
-                                ></div>
-                            </div>
-                        </div>
-
-                        {/* Question container */}
-                        <div className="w-full bg-white rounded-[2rem] p-6 md:p-12 border border-border-light shadow-sm">
-                            
-                            {/* Category Badge */}
-                            <div className="flex items-center mb-6">
-                                <span className="text-[10px] font-bold tracking-widest text-brand-primary uppercase border border-brand-primary/20 rounded-md px-3 py-1.5 bg-brand-light">
-                                    {question.category.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                </span>
-                            </div>
-
-                            {/* Active Question */}
-                            <h2 className="text-2xl md:text-3xl font-serif text-text-primary leading-tight mb-8 tracking-tight font-medium">
-                                {question.question.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                {question.required === false && (
-                                    <span className="text-sm font-sans font-normal text-text-secondary/60 ml-2">
-                                        (Opcional)
-                                    </span>
-                                )}
-                            </h2>
-
-                            {/* Answer input/choices */}
-                            <div className="flex flex-col gap-4">
-                                {question.type_question === "opcion multiple" ? (
-                                    question.response.map((opt, i) => (
-                                        <div
-                                            key={i}
-                                            onClick={() => setAnswers({ ...answers, [currentStep]: opt })}
-                                            className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
-                                                    ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
-                                                    : 'border-border-light bg-white hover:border-brand-primary/40 hover:bg-background-hover/40'
-                                                }`}
-                                        >
-                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${answers[currentStep] === opt ? 'border-brand-primary' : 'border-gray-300'}`}>
-                                                {answers[currentStep] === opt && <div className="w-2.5 h-2.5 bg-brand-primary rounded-full"></div>}
-                                            </div>
-                                            <span className="text-base md:text-lg text-text-primary font-medium">{opt}</span>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <input
-                                        type={
-                                            question.question.toLowerCase().includes('fecha') || 
-                                            question.question.toLowerCase().includes('date') || 
-                                            question.question.toLowerCase().includes('vencimiento') ||
-                                            question.question.toLowerCase().includes('expedición')
-                                                ? 'date' 
-                                                : 'text'
-                                        }
-                                        value={answers[currentStep] || ''}
-                                        onChange={(e) => setAnswers({ ...answers, [currentStep]: e.target.value })}
-                                        placeholder="Escribe tu respuesta aquí..."
-                                        className="w-full border border-border-light rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all shadow-sm"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                const isRequired = question.required !== false;
-                                                const hasAnswer = answers[currentStep] !== undefined && answers[currentStep] !== null && answers[currentStep].trim() !== '';
-                                                if (!isRequired || hasAnswer) {
-                                                    handleNext();
-                                                }
-                                            }
-                                        }}
-                                    />
-                                )}
-                            </div>
-
-                            {/* Section-specific notes from VIPROInfo */}
-                            {sectionNotes.length > 0 && (
-                                <div className="mt-8 bg-brand-light/40 border border-brand-primary/10 rounded-2xl p-5 flex flex-col gap-2">
-                                    <span className="text-xs font-bold text-brand-primary uppercase tracking-wider flex items-center gap-1.5">
-                                        ℹ️ Nota de la Sección
-                                    </span>
-                                    {sectionNotes.map((note, idx) => (
-                                        <p key={idx} className="text-text-secondary text-sm leading-relaxed">
-                                            {note.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                        </p>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Navigation controls */}
-                            <div className="mt-10 pt-6 border-t border-border-light flex items-center justify-between">
-                                <button
-                                    onClick={handleBack}
-                                    className="font-semibold px-6 py-3 rounded-lg border border-border-light text-text-primary hover:bg-background-hover transition-colors shadow-sm text-sm md:text-base cursor-pointer"
-                                >
-                                    Atrás
-                                </button>
-                                <button
-                                    disabled={question.required !== false && (answers[currentStep] === undefined || answers[currentStep] === null || answers[currentStep].trim() === '')}
-                                    onClick={handleNext}
-                                    className="bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md text-sm md:text-base cursor-pointer"
-                                >
-                                    {currentStep === questions.length - 1 ? 'Finalizar Evaluación' : 'Siguiente'}
-                                </button>
-                            </div>
-                        </div>
+                    {/* Category Badge */}
+                    <div className="flex items-center mb-6">
+                        <span className="text-[10px] font-bold tracking-widest text-brand-primary uppercase border border-brand-primary/20 rounded-md px-3 py-1.5 bg-brand-light">
+                            {question.category.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                        </span>
                     </div>
 
-                    {/* RIGHT COLUMN (ACCORDION SIDEBAR PANEL) */}
-                    <div className={`w-full lg:col-span-1 flex flex-col gap-6 ${showSidebarMobile ? 'block' : 'hidden lg:flex'}`}>
-                        
-                        <div className="bg-white rounded-2xl p-6 border border-border-light shadow-sm flex flex-col gap-4">
-                            <h2 className="text-xl font-serif text-text-primary font-bold border-b border-border-light pb-3">
-                                Guía & Requisitos {countryEmoji}
-                            </h2>
+                    {/* Active Question */}
+                    <h2 className="text-2xl md:text-3xl font-serif text-text-primary leading-tight mb-8 tracking-tight font-medium text-left">
+                        {question.question.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                        {question.required === false && (
+                            <span className="text-sm font-sans font-normal text-text-secondary/60 ml-2">
+                                (Opcional)
+                            </span>
+                        )}
+                    </h2>
 
-                            {/* Accordion 1: Requisitos (Anexo A) */}
-                            <div className="border border-border-light rounded-xl overflow-hidden shadow-sm">
-                                <button
-                                    onClick={() => setOpenAnnexA(!openAnnexA)}
-                                    className="w-full flex justify-between items-center px-4 py-3 bg-brand-light/20 hover:bg-brand-light/40 transition-colors text-left"
+                    {/* Answer input/choices */}
+                    <div className="flex flex-col gap-4 text-left">
+                        {question.type_question === "opcion multiple" ? (
+                            question.response.map((opt, i) => (
+                                <div
+                                    key={i}
+                                    onClick={() => setAnswers({ ...answers, [currentStep]: opt })}
+                                    className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
+                                            ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
+                                            : 'border-border-light bg-white hover:border-brand-primary/40 hover:bg-background-hover/40'
+                                        }`}
                                 >
-                                    <span className="font-bold text-sm text-text-primary flex items-center gap-2">
-                                        📋 Requisitos y Documentos
-                                    </span>
-                                    <svg
-                                        className={`w-4 h-4 text-text-secondary transition-transform duration-300 ${openAnnexA ? "rotate-180" : ""}`}
-                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-                                    >
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-
-                                {openAnnexA && (
-                                    <div className="p-4 bg-white text-xs text-text-secondary divide-y divide-border-light/60 flex flex-col max-h-96 overflow-y-auto">
-                                        {annexAItems.map((item, idx) => {
-                                            const parsed = parseAnnexItem(item.info_text);
-                                            if (parsed.type === 'header') return null; // skip headers
-                                            return (
-                                                <div key={idx} className="py-2.5 flex flex-col gap-1">
-                                                    {parsed.title && (
-                                                        <span className="font-bold text-text-primary uppercase tracking-wide text-[10px]">
-                                                            {parsed.number ? `${parsed.number}. ` : ""}{parsed.title}
-                                                        </span>
-                                                    )}
-                                                    <p className="leading-relaxed">{parsed.text}</p>
-                                                </div>
-                                            );
-                                        })}
+                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${answers[currentStep] === opt ? 'border-brand-primary' : 'border-gray-300'}`}>
+                                        {answers[currentStep] === opt && <div className="w-2.5 h-2.5 bg-brand-primary rounded-full"></div>}
                                     </div>
-                                )}
-                            </div>
-
-                            {/* Accordion 2: Guía de Proceso (Anexo B) */}
-                            <div className="border border-border-light rounded-xl overflow-hidden shadow-sm">
-                                <button
-                                    onClick={() => setOpenAnnexB(!openAnnexB)}
-                                    className="w-full flex justify-between items-center px-4 py-3 bg-brand-light/20 hover:bg-brand-light/40 transition-colors text-left"
-                                >
-                                    <span className="font-bold text-sm text-text-primary flex items-center gap-2">
-                                        🗺️ Guía del Proceso Paso a Paso
-                                    </span>
-                                    <svg
-                                        className={`w-4 h-4 text-text-secondary transition-transform duration-300 ${openAnnexB ? "rotate-180" : ""}`}
-                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-                                    >
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-
-                                {openAnnexB && (
-                                    <div className="p-4 bg-white text-xs text-text-secondary flex flex-col gap-4 max-h-96 overflow-y-auto">
-                                        {annexBItems.map((item, idx) => {
-                                            const parsed = parseAnnexItem(item.info_text);
-                                            if (parsed.type === 'header') return null;
-                                            if (parsed.type === 'step') {
-                                                return (
-                                                    <div key={idx} className="flex gap-3 relative">
-                                                        <div className="w-6 h-6 rounded-full bg-brand-primary text-white font-bold flex items-center justify-center flex-shrink-0 text-[10px]">
-                                                            {parsed.number?.replace(/[^0-9]/g, "")}
-                                                        </div>
-                                                        <div className="flex-1">
-                                                            {parsed.title && <span className="font-bold text-text-primary text-[10px] uppercase block mb-0.5">{parsed.title}</span>}
-                                                            <p className="leading-relaxed">{parsed.text}</p>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            }
-                                            return <p key={idx} className="leading-relaxed italic border-b border-border-light pb-2">{parsed.text}</p>;
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Contact Box */}
-                            <div className="bg-[#FAF9F6] border border-border-light p-4 rounded-xl flex flex-col gap-2">
-                                <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider block">Contacto y Soporte</span>
-                                <p className="font-bold text-xs text-text-primary">Volamos Viajes</p>
-                                <div className="text-[11px] text-text-secondary flex flex-col gap-1 leading-normal">
-                                    <span>💬 WhatsApp: 7020-0976</span>
-                                    <span>✉️ Email: reservas1@volamosviajes.com</span>
-                                    <span>🌐 Web: www.volamosviajes.com</span>
+                                    <span className="text-base md:text-lg text-text-primary font-medium">{opt}</span>
                                 </div>
-                            </div>
-                        </div>
+                            ))
+                        ) : (
+                            <input
+                                type={
+                                    question.question.toLowerCase().includes('fecha') || 
+                                    question.question.toLowerCase().includes('date') || 
+                                    question.question.toLowerCase().includes('vencimiento') ||
+                                    question.question.toLowerCase().includes('expedición')
+                                        ? 'date' 
+                                        : 'text'
+                                }
+                                value={answers[currentStep] || ''}
+                                onChange={(e) => setAnswers({ ...answers, [currentStep]: e.target.value })}
+                                placeholder="Escribe tu respuesta aquí..."
+                                className="w-full border border-border-light rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all shadow-sm"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const isRequired = question.required !== false;
+                                        const hasAnswer = answers[currentStep] !== undefined && answers[currentStep] !== null && answers[currentStep].trim() !== '';
+                                        if (!isRequired || hasAnswer) {
+                                            handleNext();
+                                        }
+                                    }
+                                }}
+                            />
+                        )}
+                    </div>
 
+                    {/* Navigation controls */}
+                    <div className="mt-10 pt-6 border-t border-border-light flex items-center justify-between">
+                        <button
+                            onClick={handleBack}
+                            className="font-semibold px-6 py-3 rounded-lg border border-border-light text-text-primary hover:bg-background-hover transition-colors shadow-sm text-sm md:text-base cursor-pointer"
+                        >
+                            Atrás
+                        </button>
+                        <button
+                            disabled={question.required !== false && (answers[currentStep] === undefined || answers[currentStep] === null || answers[currentStep].trim() === '')}
+                            onClick={handleNext}
+                            className="bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md text-sm md:text-base cursor-pointer"
+                        >
+                            {currentStep === questions.length - 1 ? 'Finalizar Evaluación' : 'Siguiente'}
+                        </button>
                     </div>
                 </div>
             </main>
