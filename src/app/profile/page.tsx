@@ -144,13 +144,16 @@ export default function PerfilUsuarioPage() {
   const [isSigning, setIsSigning] = useState(false);
 
   // Agent chat states (for chat_agente tab)
-  const [assignedClients, setAssignedClients] = useState<AgencyClientRequest[]>([]);
+  const [assignedClients, setAssignedClients] = useState<any[]>([]);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
-  const [selectedClient, setSelectedClient] = useState<AgencyClientRequest | null>(null);
+  const [selectedClient, setSelectedClient] = useState<any | null>(null);
   const [agentChatMessages, setAgentChatMessages] = useState<{ id: string; sender: string; text: string; timestamp: Date }[]>([]);
   const [agentChatInput, setAgentChatInput] = useState("");
   const [isSendingAgentMsg, setIsSendingAgentMsg] = useState(false);
   const agentChatRef = useRef<HTMLDivElement>(null);
+  const [selectedClientProfile, setSelectedClientProfile] = useState<any | null>(null);
+  const [assignedAgencyProfile, setAssignedAgencyProfile] = useState<any | null>(null);
+  const [assignedAgentProfile, setAssignedAgentProfile] = useState<any | null>(null);
 
   // Form states
   const [firstName, setFirstName] = useState("");
@@ -1098,7 +1101,30 @@ export default function PerfilUsuarioPage() {
         .eq("status", "assigned")
         .order("updated_at", { ascending: false });
       if (error) throw error;
-      setAssignedClients(data || []);
+
+      if (data && data.length > 0) {
+        const clientIds = data.map(c => c.client_id);
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("id, first_name, last_name, photo_url, bio, phone, location")
+          .in("id", clientIds);
+
+        const mappedClients = data.map(client => {
+          const profile = profilesData?.find(p => p.id === client.client_id);
+          return {
+            ...client,
+            photo_url: profile?.photo_url || null,
+            bio: profile?.bio || null,
+            phone: profile?.phone || null,
+            location: profile?.location || null,
+            first_name: profile?.first_name || null,
+            last_name: profile?.last_name || null,
+          };
+        });
+        setAssignedClients(mappedClients);
+      } else {
+        setAssignedClients([]);
+      }
     } catch (err) {
       console.error("Error loading assigned clients:", err);
     } finally {
@@ -1296,62 +1322,12 @@ export default function PerfilUsuarioPage() {
     fetchDbRecords();
   }, [user?.id, activeTab]);
 
-  // Load messages from Supabase (or use default mock if database is not configured)
+  // Load messages from Supabase
   const [isSupabaseDbAvailable, setIsSupabaseDbAvailable] = useState<boolean | null>(null);
 
   const prepopulateMockMessages = () => {
-    if (!user) return;
-    const agentName = assignedAgent?.name || "Sofía Rodríguez";
-    const localKey = `mock_messages_${user.id}`;
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(localKey);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          setMessages(parsed.map((m: { id: string; text: string; sender: string; timestamp: string }) => ({ ...m, timestamp: new Date(m.timestamp) })));
-          return;
-        } catch (e) {
-          console.error("Failed to parse stored mock messages:", e);
-        }
-      }
-    }
-
-    let initialMsgs = [];
-    if (user?.hasCompletedVipro) {
-      initialMsgs = [
-        {
-          id: "msg-1",
-          sender: "agent",
-          text: `¡Hola, ${firstName || user?.firstName || "cliente"}! Soy ${agentName}, tu asesora certificada asignada para tu trámite de visa a Estados Unidos. (Modo Simulado)`,
-          timestamp: new Date(Date.now() - 3600000),
-        },
-        {
-          id: "msg-2",
-          sender: "agent",
-          text: `He revisado el resultado de tu Evaluación Diagnóstica VIPRO y contamos con un perfil muy sólido. Nuestro chat de soporte estará activo a lo largo de todo tu trámite y hasta después de tu decisión consular.\n\n¿Qué día y hora te vendría bien para que programemos nuestra primera llamada por Zoom?`,
-          timestamp: new Date(Date.now() - 3500000),
-        }
-      ];
-    } else {
-      initialMsgs = [
-        {
-          id: "msg-1",
-          sender: "agent",
-          text: `¡Hola, ${firstName || user?.firstName || "cliente"}! Soy ${agentName}, tu asesora certificada asignada para tu trámite de visa a Estados Unidos. (Modo Simulado)`,
-          timestamp: new Date(Date.now() - 3600000),
-        },
-        {
-          id: "msg-2",
-          sender: "agent",
-          text: `Veo que ya has contratado la asesoría, pero aún no has completado la Evaluación Diagnóstica VIPRO. \n\nPor favor, completa la evaluación en la pestaña "Seguimiento de Trámite" para que pueda analizar tu caso con precisión y preparemos nuestra primera sesión por Zoom. ¡Nuestro chat de soporte estará disponible durante todo el proceso y hasta después de tu decisión consular!`,
-          timestamp: new Date(Date.now() - 3500000),
-        }
-      ];
-    }
-    setMessages(initialMsgs);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(localKey, JSON.stringify(initialMsgs));
-    }
+    // No-op: we only use real DB messages
+    setMessages([]);
   };
 
   useEffect(() => {
@@ -1371,36 +1347,13 @@ export default function PerfilUsuarioPage() {
             }))
           );
         } else {
-          // Prepopulate initial greeting message in DB
-          try {
-            const initialText = user.hasCompletedVipro
-              ? `¡Hola, ${firstName || user?.firstName || "cliente"}! Soy ${assignedAgent?.name || "Sofía Rodríguez"}, tu asesora asignada. He revisado tu Evaluación VIPRO. Nuestro chat y soporte estarán disponibles en todo momento, desde el armado del expediente hasta después de tu entrevista consular para acompañarte en la resolución final.`
-              : `¡Hola, ${firstName || user?.firstName || "cliente"}! Soy ${assignedAgent?.name || "Sofía Rodríguez"}, tu asesora asignada. Veo que ya contrataste la asesoría pero aún no has completado la Evaluación Diagnóstica VIPRO. Por favor, complétala en la pestaña "Seguimiento de Trámite" para poder analizar tu caso. ¡Nuestro chat y soporte estarán disponibles en todo momento, desde el armado del expediente hasta después de tu decisión consular!`;
-
-            const initialMsg = await MessageClientService.createMessage({
-              sender: "agent",
-              text: initialText,
-              user_id: user.id,
-              agent_id: assignedAgent?.id || "sofia",
-            });
-            setMessages([
-              {
-                id: initialMsg.id,
-                sender: initialMsg.sender,
-                text: initialMsg.text,
-                timestamp: initialMsg.timestamp ? new Date(initialMsg.timestamp) : new Date(),
-              }
-            ]);
-          } catch (insertError) {
-            console.error("Failed to insert initial message:", insertError);
-            prepopulateMockMessages();
-          }
+          setMessages([]);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn("API messages fetch error. Falling back to simulated chat:", msg);
+        console.warn("API messages fetch error:", msg);
         setIsSupabaseDbAvailable(false);
-        prepopulateMockMessages();
+        setMessages([]);
       }
     };
 
@@ -1441,6 +1394,73 @@ export default function PerfilUsuarioPage() {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [user?.id, user?.hasPaidAdvisor, user?.assignedAgentId]);
+
+  // Load assigned agency and agent profiles from DB for client view
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadAssignedProfiles = async () => {
+      try {
+        const { data: activeRequest, error: reqError } = await supabase
+          .from("agency_client_requests")
+          .select("*")
+          .eq("client_id", user.id)
+          .eq("status", "assigned")
+          .maybeSingle();
+
+        if (reqError) throw reqError;
+
+        let finalAgencyId = null;
+        let finalAgentId = user.assignedAgentId;
+
+        if (activeRequest) {
+          finalAgencyId = activeRequest.agency_id;
+          if (activeRequest.assigned_member_id) {
+            finalAgentId = activeRequest.assigned_member_id;
+          }
+        }
+
+        if (!finalAgencyId && finalAgentId) {
+          const { data: memberData } = await supabase
+            .from("agency_members")
+            .select("agency_id")
+            .eq("member_id", finalAgentId)
+            .maybeSingle();
+          if (memberData) {
+            finalAgencyId = memberData.agency_id;
+          }
+        }
+
+        if (finalAgencyId) {
+          const { data: agencyData } = await supabase
+            .from("profiles")
+            .select("id, first_name, last_name, photo_url, bio, location, staff_size, phone")
+            .eq("id", finalAgencyId)
+            .maybeSingle();
+          if (agencyData) {
+            setAssignedAgencyProfile(agencyData);
+          }
+        }
+
+        if (finalAgentId) {
+          const { data: agentData } = await supabase
+            .from("profiles")
+            .select("id, first_name, last_name, photo_url, bio, location, phone")
+            .eq("id", finalAgentId)
+            .maybeSingle();
+          if (agentData) {
+            setAssignedAgentProfile(agentData);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading assigned profiles:", err);
+      }
+    };
+
+    if (user.hasPaidAdvisor || user.assignedAgentId) {
+      loadAssignedProfiles();
+    }
   }, [user?.id, user?.hasPaidAdvisor, user?.assignedAgentId]);
 
   // Auto-scroll to bottom of chat container only (avoiding page viewport scrolling)
@@ -1818,11 +1838,10 @@ export default function PerfilUsuarioPage() {
           sender: "user",
           text: textToSend,
           user_id: user.id,
-          agent_id: assignedAgent?.id || "sofia",
+          agent_id: user.assignedAgentId || "sofia",
         });
       } catch (err: any) {
         console.error("Failed to send message via API:", err.message);
-        // Save to local backup in case of server failures
         if (typeof window !== "undefined") {
           const stored = localStorage.getItem(localKey);
           const current = stored ? JSON.parse(stored) : [];
@@ -1834,73 +1853,6 @@ export default function PerfilUsuarioPage() {
         localStorage.setItem(localKey, JSON.stringify([...messages, newUserMsg]));
       }
     }
-
-    setIsTyping(true);
-
-    // Dynamic, high-fidelity simulated typing from the advisor
-    setTimeout(async () => {
-      let responseText = "";
-      const userText = textToSend.toLowerCase();
-
-      if (userText.includes("hola") || userText.includes("buenas") || userText.includes("buen")) {
-        responseText = `¡Hola de nuevo, ${firstName}! Estoy atenta a tus mensajes. ¿Te gustaría que programemos nuestra primera llamada por Zoom para revisar tus documentos?`;
-      } else if (userText.includes("documento") || userText.includes("requisito") || userText.includes("papel") || userText.includes("solvencia")) {
-        responseText = "Para tu visa de turismo (B1/B2), necesitaremos preparar: Pasaporte vigente, confirmación del formulario DS-160, comprobante de pago de arancel consular ($185 USD) y pruebas de arraigo en El Salvador (como constancia de trabajo, estados de cuenta bancarios o títulos de propiedad). En nuestra primera sesión analizaremos cómo presentarlos de la mejor manera.";
-      } else if (userText.includes("fecha") || userText.includes("cuando") || userText.includes("cita") || userText.includes("tiempo")) {
-        responseText = "Las citas en la embajada se programan una vez que paguemos el arancel consular. Actualmente hay cierta lista de espera, pero monitoreo el sistema a diario para pescar citas adelantadas en el CAS. En nuestra reunión definiremos las mejores fechas posibles.";
-      } else if (userText.includes("ds160") || userText.includes("ds-160") || userText.includes("formulario")) {
-        responseText = "Yo me encargaré de auditar y rellenar tu formulario DS-160 con la información que recolectemos. Es de vital importancia que coincida exactamente con lo que diremos en la entrevista para evitar contradicciones.";
-      } else if (userText.includes("pregunta") || userText.includes("duda") || userText.includes("hacerle") || userText.includes("responder") || userText.includes("consult")) {
-        responseText = `¡Claro que sí, ${firstName}! Puedes hacerme todas las preguntas y consultas que necesites por este chat en cualquier momento. Estoy aquí para resolver cualquier duda sobre tu DS-160, tu documentación de soporte o el simulacro de entrevista.`;
-      } else if (userText.includes("hasta") || userText.includes("duracion") || userText.includes("embajada") || userText.includes("consular") || userText.includes("despues")) {
-        responseText = "Nuestro chat y soporte de asesoría estarán completamente disponibles a lo largo de todo tu trámite: el armado de tu expediente, la preparación de la carpeta, los simulacros de entrevista, e incluso después de tu cita consular para dar seguimiento a la resolución final y entrega de pasaporte.";
-      } else if (userText.includes("gracias") || userText.includes("excelente") || userText.includes("perfecto")) {
-        responseText = "¡Con gusto! Mi meta es que vayas al consulado con 100% de confianza. Avísame cuando estés listo para agendar la llamada.";
-      } else {
-        responseText = `Entendido, ${firstName}. Tomo nota de lo que me comentas. Voy a analizarlo para diseñar la estrategia ideal para tu perfil. ¿Prefieres que agendemos nuestra llamada de diagnóstico inicial para mañana en la tarde o prefieres el fin de semana?`;
-      }
-
-      if (isSupabaseDbAvailable) {
-        try {
-          await MessageClientService.createMessage({
-            sender: "agent",
-            text: responseText,
-            user_id: user.id,
-            agent_id: assignedAgent?.id || "sofia",
-          });
-        } catch (err: any) {
-          console.error("Failed to insert agent reply via API:", err.message);
-          const newAgentMsg = {
-            id: `msg-${Date.now() + 1}`,
-            sender: "agent",
-            text: responseText,
-            timestamp: new Date(),
-          };
-          setMessages((prev) => {
-            const updated = [...prev, newAgentMsg];
-            if (typeof window !== "undefined") {
-              localStorage.setItem(localKey, JSON.stringify(updated));
-            }
-            return updated;
-          });
-        }
-      } else {
-        const newAgentMsg = {
-          id: `msg-${Date.now() + 1}`,
-          sender: "agent",
-          text: responseText,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => {
-          const updated = [...prev, newAgentMsg];
-          if (typeof window !== "undefined") {
-            localStorage.setItem(localKey, JSON.stringify(updated));
-          }
-          return updated;
-        });
-      }
-      setIsTyping(false);
-    }, 1500);
   };
 
   return (
@@ -2978,41 +2930,46 @@ export default function PerfilUsuarioPage() {
                         }
                       `}} />
 
-                      {/* Advisor Info Bar */}
+                      {/* Advisor Info Bar (Company / Agency Details) */}
                       <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
                         <div className="relative">
                           <img
-                            src={assignedAgent.photo}
-                            alt={assignedAgent.name}
+                            src={assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
+                            alt={assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}` : "Empresa"}
                             className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
                           />
                           <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
                         </div>
                         <div className="text-center sm:text-left flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                            <h5 className="font-bold text-text-primary text-base tracking-tight">{assignedAgent.name}</h5>
-                            <span className="bg-[#FAF0E6] text-[#A0522D] text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-[#EEDC82]">ASESOR ASIGNADO</span>
-                            {assignedAgent.partnerType === "b2b_agency" ? (
-                              <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200" title={`Afiliado a ${assignedAgent.agencyName || user?.assignedAgencyName}`}>
-                                🏢 AGENCIA B2B: {assignedAgent.agencyName || user?.assignedAgencyName}
-                              </span>
-                            ) : (
-                              <span className="bg-emerald-50 text-emerald-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-emerald-200">
-                                💼 ASESOR INDEPENDIENTE
-                              </span>
+                            <h5 className="font-bold text-text-primary text-base tracking-tight">
+                              {assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Agencia TodoVisa")}
+                            </h5>
+                            <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200">
+                              🏢 EMPRESA ACREDITADA
+                            </span>
+                          </div>
+                          <p className="text-xs text-brand-primary font-bold">
+                            {assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa"}
+                          </p>
+                          <p className="text-xs text-text-secondary leading-relaxed">
+                            {assignedAgencyProfile?.bio || "Agencia de asesoría consular certificada. Tu expediente cuenta con auditoría y respaldo institucional."}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary mt-2 pt-1.5 border-t border-dashed border-border-light">
+                            {assignedAgentProfile && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] bg-brand-light text-brand-primary font-semibold px-2 py-0.5 rounded-sm">
+                                  Asesor Asignado: {assignedAgentProfile.first_name} {assignedAgentProfile.last_name}
+                                </span>
+                              </div>
+                            )}
+                            {assignedAgencyProfile?.staff_size && (
+                              <span>• {assignedAgencyProfile.staff_size} consultores</span>
+                            )}
+                            {assignedAgencyProfile?.phone && (
+                              <span>• Tel: {assignedAgencyProfile.phone}</span>
                             )}
                           </div>
-                          <p className="text-xs text-brand-primary font-bold">{assignedAgent.title}</p>
-                          <div className="flex items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary">
-                            <span className="flex items-center gap-1">⭐ <span className="font-semibold text-text-primary">{assignedAgent.rating.toFixed(1)}</span> ({assignedAgent.reviewsCount} reseñas)</span>
-                            <span className="text-gray-300">•</span>
-                            <span>Soporte 24/7 Activo</span>
-                          </div>
-                          {assignedAgent.partnerType === "b2b_agency" && (
-                             <p className="text-[10px] text-blue-800 bg-blue-50/50 border border-blue-100 rounded-lg px-3 py-1.5 mt-2 max-w-xl text-left leading-normal">
-                               🛡️ <strong>Garantía de Doble Auditoría B2B:</strong> Tu expediente está respaldado institucionalmente. Antes de tu cita, un supervisor senior de <strong>{assignedAgent.agencyName || user?.assignedAgencyName}</strong> co-auditará tu formulario DS-160 y tu perfil.
-                             </p>
-                           )}
                         </div>
                       </div>
 
@@ -3023,8 +2980,8 @@ export default function PerfilUsuarioPage() {
                           <div className="flex items-center gap-3">
                             <div className="relative">
                               <img
-                                src={assignedAgent.photo}
-                                alt={assignedAgent.name}
+                                src={assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
+                                alt="Empresa"
                                 className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
                               />
                               <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
@@ -3033,72 +2990,59 @@ export default function PerfilUsuarioPage() {
                               </span>
                             </div>
                             <div>
-                              <h4 className="font-bold text-text-primary text-sm leading-tight">{assignedAgent.name}</h4>
-                              <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
-                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
-                                En línea • Especialista Consular
-                              </p>
+                              <h4 className="font-bold text-text-primary text-sm leading-tight">
+                                {assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Agencia TodoVisa")}
+                              </h4>
+                              {assignedAgentProfile && (
+                                <p className="text-[9px] text-text-muted mt-0.5">
+                                  Asesor: {assignedAgentProfile.first_name} {assignedAgentProfile.last_name}
+                                </p>
+                              )}
                             </div>
                           </div>
                           <div className="text-right hidden sm:flex flex-col items-end gap-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[9px] text-[#2C4A75] bg-blue-50 border border-blue-100 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                Contrato Activo
-                              </span>
-                            </div>
-                            {assignedAgent.partnerType === "b2b_agency" && (
-                              <span className="text-[8px] text-blue-700 font-extrabold tracking-wide uppercase">
-                                🏢 {assignedAgent.agencyName || user?.assignedAgencyName}
-                              </span>
-                            )}
+                            <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                              Soporte Activo
+                            </span>
                           </div>
                         </div>
 
                         {/* Messages Box */}
                         <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
-                          {messages.map((msg) => {
-                            const isSelf = msg.sender === "user";
-                            return (
-                              <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
-                                <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
-                                  {!isSelf && (
-                                    <img
-                                      src={assignedAgent.photo}
-                                      alt={assignedAgent.name}
-                                      className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
-                                    />
-                                  )}
-                                  <div className="flex flex-col">
-                                    <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
-                                        ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
-                                        : "bg-white border border-border-light text-text-primary rounded-tl-none"
-                                      }`}>
-                                      <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
+                          {messages.length === 0 ? (
+                            <div className="h-full flex flex-col items-center justify-center text-center p-8 gap-2">
+                              <span className="text-3xl">💬</span>
+                              <p className="text-xs font-semibold text-text-primary">Chat seguro habilitado</p>
+                              <p className="text-[11px] text-text-muted max-w-xs">Escribe tu primer mensaje abajo para iniciar la conversación directa con tu asesoría.</p>
+                            </div>
+                          ) : (
+                            messages.map((msg) => {
+                              const isSelf = msg.sender === "user";
+                              return (
+                                <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
+                                  <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                                    {!isSelf && (
+                                      <img
+                                        src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
+                                        alt="Asesor"
+                                        className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
+                                      />
+                                    )}
+                                    <div className="flex flex-col">
+                                      <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
+                                          ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
+                                          : "bg-white border border-border-light text-text-primary rounded-tl-none"
+                                        }`}>
+                                        <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
+                                      </div>
+                                      <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
+                                        {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
                                     </div>
-                                    <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
-                                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
                                   </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-
-                          {isTyping && (
-                            <div className="flex justify-start animate-pulse">
-                              <div className="flex gap-3 max-w-[75%]">
-                                <img
-                                  src={assignedAgent.photo}
-                                  alt={assignedAgent.name}
-                                  className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
-                                />
-                                <div className="bg-white border border-border-light rounded-2xl rounded-tl-none px-4 py-3.5 shadow-sm flex items-center gap-1.5">
-                                  <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
-                                  <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
-                                  <span className="w-2 h-2 bg-text-muted rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
-                                </div>
-                              </div>
-                            </div>
+                              );
+                            })
                           )}
                         </div>
 
@@ -3109,14 +3053,13 @@ export default function PerfilUsuarioPage() {
                               type="text"
                               value={inputValue}
                               onChange={(e) => setInputValue(e.target.value)}
-                              placeholder={`Escribe un mensaje para ${assignedAgent.name.split(" ")[1]}...`}
-                              disabled={isTyping}
-                              className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted disabled:opacity-60 transition-all shadow-inner"
+                              placeholder="Escribe tu mensaje aquí..."
+                              className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted transition-all shadow-inner"
                             />
                           </div>
                           <button
                             type="submit"
-                            disabled={!inputValue.trim() || isTyping}
+                            disabled={!inputValue.trim()}
                             className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
                             title="Enviar mensaje"
                           >
@@ -3901,8 +3844,19 @@ export default function PerfilUsuarioPage() {
                             key={client.id}
                             onClick={() => {
                               setSelectedClient(client);
+                              setSelectedClientProfile(null);
                               setAgentChatMessages([]);
                               loadAgentChatMessages(client.client_id);
+                              
+                              // Load profile information of the client
+                              supabase
+                                .from("profiles")
+                                .select("first_name, last_name, photo_url, bio, phone, location")
+                                .eq("id", client.client_id)
+                                .maybeSingle()
+                                .then(({ data }) => {
+                                  if (data) setSelectedClientProfile(data);
+                                });
                             }}
                             className={`w-full text-left p-3 transition-colors focus:outline-none ${
                               selectedClient?.id === client.id
@@ -3911,11 +3865,21 @@ export default function PerfilUsuarioPage() {
                             }`}
                           >
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs flex-shrink-0">
-                                {(client.client_name || "?").charAt(0).toUpperCase()}
-                              </div>
+                              {client.photo_url ? (
+                                <img
+                                  src={client.photo_url}
+                                  alt={client.client_name || "Cliente"}
+                                  className="w-8 h-8 rounded-full object-cover border border-border-light flex-shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs flex-shrink-0">
+                                  {(client.client_name || "?").charAt(0).toUpperCase()}
+                                </div>
+                              )}
                               <div className="min-w-0">
-                                <p className="text-xs font-semibold text-text-primary truncate">{client.client_name || "Cliente"}</p>
+                                <p className="text-xs font-semibold text-text-primary truncate">
+                                  {client.first_name ? `${client.first_name} ${client.last_name || ""}`.trim() : (client.client_name || "Cliente")}
+                                </p>
                                 <p className="text-[10px] text-text-muted truncate">{client.client_email || ""}</p>
                               </div>
                             </div>
@@ -3932,7 +3896,7 @@ export default function PerfilUsuarioPage() {
                     </div>
 
                     {/* Chat window */}
-                    <div className="flex-1 border border-border-light rounded-sm flex flex-col overflow-hidden">
+                    <div className="flex-1 border border-border-light rounded-sm flex overflow-hidden">
                       {!selectedClient ? (
                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-3 bg-background-main">
                           <span className="text-4xl">👈</span>
@@ -3941,71 +3905,121 @@ export default function PerfilUsuarioPage() {
                         </div>
                       ) : (
                         <>
-                          {/* Chat header */}
-                          <div className="flex items-center gap-3 px-4 py-3 border-b border-border-light bg-white flex-shrink-0">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs">
-                              {(selectedClient.client_name || "?").charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="text-sm font-bold text-text-primary">{selectedClient.client_name || "Cliente"}</p>
-                              <p className="text-[10px] text-text-secondary">{selectedClient.client_email || ""}</p>
-                            </div>
-                            <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-600 font-bold">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                              Chat activo
-                            </span>
-                          </div>
-
-                          {/* Messages */}
-                          <div ref={agentChatRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-[#FAF9F6]/60 to-white/40 custom-scrollbar">
-                            {agentChatMessages.length === 0 ? (
-                              <div className="flex items-center justify-center h-full">
-                                <p className="text-xs text-text-muted italic">No hay mensajes aún. ¡Sé el primero en escribir!</p>
-                              </div>
-                            ) : (
-                              agentChatMessages.map((msg) => (
-                                <div
-                                  key={msg.id}
-                                  className={`flex ${ msg.sender === "agent" ? "justify-end" : "justify-start" }`}
-                                >
-                                  <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
-                                    msg.sender === "agent"
-                                      ? "bg-brand-primary text-white rounded-br-sm"
-                                      : "bg-white border border-border-light text-text-primary rounded-bl-sm"
-                                  }`}>
-                                    <p>{msg.text}</p>
-                                    <p className={`text-[9px] mt-1 ${ msg.sender === "agent" ? "text-white/60" : "text-text-muted" }`}>
-                                      {msg.timestamp.toLocaleTimeString("es-SV", { hour: "2-digit", minute: "2-digit" })}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))
-                            )}
-                          </div>
-
-                          {/* Input */}
-                          <form onSubmit={handleSendAgentMessage} className="flex items-end gap-2 p-3 border-t border-border-light bg-white flex-shrink-0">
-                            <textarea
-                              value={agentChatInput}
-                              onChange={(e) => setAgentChatInput(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendAgentMessage(e as any); } }}
-                              rows={2}
-                              placeholder="Escribe tu respuesta al cliente..."
-                              className="flex-1 resize-none px-3 py-2 bg-background-main border border-border-light rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand-primary transition-all"
-                            />
-                            <button
-                              type="submit"
-                              disabled={isSendingAgentMsg || !agentChatInput.trim()}
-                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-all cursor-pointer border-none flex-shrink-0 h-[56px] flex items-center gap-1.5"
-                            >
-                              {isSendingAgentMsg ? (
-                                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <div className="flex-1 flex flex-col min-w-0">
+                            {/* Chat header */}
+                            <div className="flex items-center gap-3 px-4 py-3 border-b border-border-light bg-white flex-shrink-0">
+                              {selectedClientProfile?.photo_url ? (
+                                <img
+                                  src={selectedClientProfile.photo_url}
+                                  alt="Cliente"
+                                  className="w-8 h-8 rounded-full object-cover border border-border-light"
+                                />
                               ) : (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs flex-shrink-0">
+                                  {(selectedClient.client_name || "?").charAt(0).toUpperCase()}
+                                </div>
                               )}
-                              Enviar
-                            </button>
-                          </form>
+                              <div>
+                                <p className="text-sm font-bold text-text-primary">
+                                  {selectedClientProfile ? `${selectedClientProfile.first_name} ${selectedClientProfile.last_name || ""}`.trim() : selectedClient.client_name}
+                                </p>
+                                <p className="text-[10px] text-text-secondary">{selectedClient.client_email || ""}</p>
+                              </div>
+                              <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-600 font-bold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                Chat activo
+                              </span>
+                            </div>
+
+                            {/* Messages */}
+                            <div ref={agentChatRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-[#FAF9F6]/60 to-white/40 custom-scrollbar animate-fade-in">
+                              {agentChatMessages.length === 0 ? (
+                                <div className="flex items-center justify-center h-full">
+                                  <p className="text-xs text-text-muted italic">No hay mensajes aún. Escribe tu primer mensaje abajo.</p>
+                                </div>
+                              ) : (
+                                agentChatMessages.map((msg) => (
+                                  <div
+                                    key={msg.id}
+                                    className={`flex ${ msg.sender === "agent" ? "justify-end" : "justify-start" }`}
+                                  >
+                                    <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                                      msg.sender === "agent"
+                                        ? "bg-brand-primary text-white rounded-br-sm"
+                                        : "bg-white border border-border-light text-text-primary rounded-bl-sm"
+                                    }`}>
+                                      <p>{msg.text}</p>
+                                      <p className={`text-[9px] mt-1 ${ msg.sender === "agent" ? "text-white/60" : "text-text-muted" }`}>
+                                        {msg.timestamp.toLocaleTimeString("es-SV", { hour: "2-digit", minute: "2-digit" })}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            {/* Input */}
+                            <form onSubmit={handleSendAgentMessage} className="flex items-end gap-2 p-3 border-t border-border-light bg-white flex-shrink-0">
+                              <textarea
+                                value={agentChatInput}
+                                onChange={(e) => setAgentChatInput(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendAgentMessage(e as any); } }}
+                                rows={2}
+                                placeholder="Escribe tu respuesta al cliente..."
+                                className="flex-1 resize-none px-3 py-2 bg-background-main border border-border-light rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand-primary transition-all"
+                              />
+                              <button
+                                type="submit"
+                                disabled={isSendingAgentMsg || !agentChatInput.trim()}
+                                className="px-4 py-2 bg-brand-primary hover:bg-brand-hover disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-all cursor-pointer border-none flex-shrink-0 h-[56px] flex items-center gap-1.5"
+                              >
+                                {isSendingAgentMsg ? (
+                                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                )}
+                                Enviar
+                              </button>
+                            </form>
+                          </div>
+
+                          {/* Client Detail Sidebar */}
+                          <div className="w-56 border-l border-border-light bg-white p-4 hidden md:flex flex-col gap-4 overflow-y-auto flex-shrink-0">
+                            <div className="text-center pb-3 border-b border-border-light">
+                              {selectedClientProfile?.photo_url ? (
+                                <img
+                                  src={selectedClientProfile.photo_url}
+                                  alt="Avatar Cliente"
+                                  className="w-14 h-14 rounded-full object-cover mx-auto border border-border-light shadow-sm mb-2"
+                                />
+                              ) : (
+                                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-lg mx-auto mb-2">
+                                  {(selectedClient.client_name || "?").charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <h5 className="font-bold text-xs text-text-primary truncate">
+                                {selectedClientProfile ? `${selectedClientProfile.first_name} ${selectedClientProfile.last_name || ""}`.trim() : selectedClient.client_name}
+                              </h5>
+                              <p className="text-[9px] text-text-muted truncate">{selectedClient.client_email || ""}</p>
+                            </div>
+
+                            <div className="space-y-3">
+                              <div>
+                                <span className="text-[9px] font-bold uppercase text-text-muted block">Teléfono</span>
+                                <span className="text-[11px] text-text-primary font-medium">{selectedClientProfile?.phone || "No especificado"}</span>
+                              </div>
+                              <div>
+                                <span className="text-[9px] font-bold uppercase text-text-muted block">Ubicación</span>
+                                <span className="text-[11px] text-text-primary font-medium">{selectedClientProfile?.location || "No especificado"}</span>
+                              </div>
+                              <div>
+                                <span className="text-[9px] font-bold uppercase text-text-muted block">Biografía / Notas</span>
+                                <p className="text-[11px] text-text-secondary leading-normal mt-0.5 whitespace-pre-wrap bg-background-main p-2 rounded border border-border-light max-h-36 overflow-y-auto">
+                                  {selectedClientProfile?.bio || "Sin biografía cargada por el cliente."}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
                         </>
                       )}
                     </div>
