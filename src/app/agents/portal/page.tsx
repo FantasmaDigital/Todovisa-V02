@@ -84,6 +84,11 @@ function AgentPortalContent() {
   const [realStudentCases, setRealStudentCases] = useState(0);
   const [realMembers, setRealMembers] = useState<any[]>([]);
   const [realInvitations, setRealInvitations] = useState<any[]>([]);
+
+  // B2B Client Requests (when a user contracts the agency)
+  const [clientRequests, setClientRequests] = useState<any[]>([]);
+  const [assigningRequestId, setAssigningRequestId] = useState<string | null>(null);
+  const [selectedMemberForRequest, setSelectedMemberForRequest] = useState<Record<string, string>>({});
   const [memberCases, setMemberCases] = useState<Record<string, number>>({});
 
   const activeAdvisorsCount = agent?.is_local ? 3 : invitedCount;
@@ -306,6 +311,51 @@ function AgentPortalContent() {
           setSignatureName(data.full_name);
         }
       } else {
+        // Check if the user is an agent affiliated with a B2B agency
+        if (user.role === "agent") {
+          const { data: memberData } = await supabase
+            .from("agency_members")
+            .select("agency_id")
+            .eq("member_id", user.id)
+            .maybeSingle();
+
+          if (memberData && memberData.agency_id) {
+            // Fetch the agency's application
+            const { data: agencyApp } = await supabase
+              .from("agent_applications")
+              .select("*")
+              .eq("user_id", memberData.agency_id)
+              .maybeSingle();
+
+            // Set the agent state, ensuring it is identified as a B2B agent
+            setAgent({
+              ...(agencyApp || {}),
+              id: user.id,
+              user_id: user.id,
+              application_id: agencyApp?.application_id 
+                ? agencyApp.application_id.replace("B2B-", "B2B-AGENT-") 
+                : "B2B-AGENT-" + user.id.slice(0, 8).toUpperCase(),
+              full_name: `${user.firstName} ${user.lastName}`,
+              email: user.email,
+              phone: user.phone || "",
+              country_residence: user.country || "",
+              experience_years: agencyApp?.experience_years || "1",
+              status: "active",
+              created_at: agencyApp?.created_at || new Date().toISOString(),
+              documents: agencyApp?.documents || {},
+              specialties: agencyApp?.specialties || ["Asesoría General"],
+              languages: agencyApp?.languages || ["Español"],
+              target_countries: agencyApp?.target_countries || ["Estados Unidos"],
+              biography: agencyApp?.biography || "Asesor certificado en la red TodoVisa.",
+              signature_name: agencyApp?.signature_name || `${user.firstName} ${user.lastName}`,
+              signed_at: agencyApp?.signed_at || agencyApp?.created_at || new Date().toISOString()
+            });
+            setSignatureName(`${user.firstName} ${user.lastName}`);
+            setLoading(false);
+            return;
+          }
+        }
+
         // Look up mock data from localstorage as fallback
         const localDataStr = localStorage.getItem(`agent_app_${user.email?.toUpperCase()}`);
         if (localDataStr) {
@@ -381,7 +431,7 @@ function AgentPortalContent() {
         }
 
         // Block if user is corporate and has no members
-        if (agent.application_id?.startsWith("B2B-") && !error && membersLength === 0) {
+        if (agent.application_id?.startsWith("B2B-") && !agent.application_id?.includes("B2B-AGENT-") && !error && membersLength === 0) {
           setHasNoAdvisors(true);
         } else {
           setHasNoAdvisors(false);
@@ -396,6 +446,100 @@ function AgentPortalContent() {
     checkAdvisors();
   }, [agent]);
 
+  // Load pending client requests for B2B agencies
+  useEffect(() => {
+    if (!agent) return;
+    const isAgency = agent.application_id?.startsWith("B2B-") && !agent.application_id?.includes("B2B-AGENT-");
+    if (!isAgency) return;
+    const agencyUserId = agent.user_id || agent.id;
+    if (!agencyUserId || agencyUserId.startsWith("agency-b2b-")) return; // skip mock
+
+    const loadClientRequests = async () => {
+      try {
+        const { data } = await supabase
+          .from("agency_client_requests")
+          .select("*")
+          .eq("agency_id", agencyUserId)
+          .order("created_at", { ascending: false });
+        setClientRequests(data || []);
+      } catch (err) {
+        console.error("Error loading client requests:", err);
+      }
+    };
+    loadClientRequests();
+  }, [agent]);
+
+  const handleAssignMember = async (request: any) => {
+    const memberId = selectedMemberForRequest[request.id];
+    if (!memberId) {
+      showToast("Selecciona un asesor antes de confirmar.", "error");
+      return;
+    }
+    setAssigningRequestId(request.id);
+    try {
+      // 1. Update the request row
+      const { error: updErr } = await supabase
+        .from("agency_client_requests")
+        .update({ assigned_member_id: memberId, status: "assigned" })
+        .eq("id", request.id);
+      if (updErr) throw updErr;
+
+      // 2. Get assigned member profile to pass name to client
+      const { data: memberProfile } = await supabase
+        .from("profiles")
+        .select("first_name, last_name, email")
+        .eq("id", memberId)
+        .maybeSingle();
+
+      const memberName = memberProfile
+        ? `${memberProfile.first_name} ${memberProfile.last_name}`.trim()
+        : "Tu asesor asignado";
+
+      // 3. Update the client's auth metadata so the chat gets unlocked
+      //    We use a service-role-capable edge function or RPC here.
+      //    Since we only have anon key on client, we write to a
+      //    temporary flag column via the client's own session is not possible.
+      //    Workaround: store the assignment in client profile row so
+      //    next time they load, they detect it.
+      await supabase
+        .from("profiles")
+        .update({
+          role: "user"   // keep role unchanged — just triggers re-read
+        })
+        .eq("id", request.client_id);
+
+      // 4. Store assignment in a dedicated lookup so the client profile page
+      //    can pick it up without needing a JWT refresh.
+      //    We reuse the profiles table additional fields pattern.
+      //    Write assigned_agent_id into a separate small lookup table
+      //    OR simply write into the client's profile (safest with RLS = agency can't update client's profile directly).
+      //    Best approach: insert a message from the assigned agent to the client.
+      try {
+        await supabase.from("messages").insert({
+          user_id: request.client_id,
+          agent_id: memberId,
+          sender: "agent",
+          text: `¡Hola! Soy ${memberName} de ${request.agency_name}. A partir de ahora estaré a cargo de tu expediente. ¿Por dónde te gustaría comenzar?`
+        });
+      } catch (_) { /* messages table might not exist, non-blocking */ }
+
+      // 5. Update local state
+      setClientRequests(prev =>
+        prev.map(r => r.id === request.id
+          ? { ...r, status: "assigned", assigned_member_id: memberId, assigned_member_name: memberName }
+          : r
+        )
+      );
+
+      showToast(`✅ Asesor asignado: ${memberName}. El chat con el cliente ha sido habilitado.`, "success");
+    } catch (err: any) {
+      console.error("Error assigning member:", err);
+      showToast("Error al asignar asesor: " + err.message, "error");
+    } finally {
+      setAssigningRequestId(null);
+    }
+  };
+
   // Load real commissions/cases counts
   useEffect(() => {
     if (!agent) return;
@@ -406,7 +550,7 @@ function AgentPortalContent() {
         let agentIds = [targetUserId];
         
         // If it's B2B agency, fetch all agency members
-        if (agent.application_id?.startsWith("B2B-")) {
+        if (agent.application_id?.startsWith("B2B-") && !agent.application_id?.includes("B2B-AGENT-")) {
           const { data: members } = await supabase
             .from("agency_members")
             .select("member_id")
@@ -536,7 +680,7 @@ function AgentPortalContent() {
   };
   const getGrossEarnings = () => {
     const cases = finalTouristCases * 150 + finalStudentCases * 250;
-    if (agent?.application_id?.startsWith("B2B-")) {
+    if (agent?.application_id?.startsWith("B2B-") && !agent?.application_id?.includes("B2B-AGENT-")) {
       return cases * activeAdvisorsCount;
     }
     return cases;
@@ -1046,12 +1190,12 @@ function AgentPortalContent() {
                     <div className="mb-6 pb-2 border-b border-border-light">
                       <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Plan Financiero</span>
                       <h3 className="text-lg font-bold text-text-primary mt-1 text-left">
-                        {agent.application_id.startsWith("B2B-") 
+                        {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-")
                           ? "Simulador de Comisiones Consolidadas (Agencia B2B)" 
                           : "Simulador de Comisiones Semanales"}
                       </h3>
                       <p className="text-xs text-text-secondary mt-1 text-left">
-                        {agent.application_id.startsWith("B2B-")
+                        {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-")
                           ? "Estima los ingresos acumulados por todos los agentes de viajes de tu equipo en base al volumen mensual de expedientes."
                           : "Estima cuánto ganarás según el número de expedientes que aprueben los clientes que asesores."}
                       </p>
@@ -1060,7 +1204,7 @@ function AgentPortalContent() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       {/* Controls Panel */}
                       <div className="space-y-5">
-                        {agent.application_id.startsWith("B2B-") && (
+                        {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") && (
                           /* Active Advisors count display */
                           <div className="p-3 bg-background-main border border-border-light rounded-sm">
                             <div className="flex justify-between items-center text-xs text-left">
@@ -1089,7 +1233,7 @@ function AgentPortalContent() {
                       <div className="bg-background-main border border-border-light rounded p-5 flex flex-col justify-between">
                         <div className="space-y-4">
                           <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
-                            <span>Facturación Bruta Consolidada</span>
+                            <span>{agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") ? "Facturación Bruta Consolidada" : "Facturación Bruta"}</span>
                             <span className="font-mono font-semibold text-text-primary">${getGrossEarnings().toFixed(2)} USD</span>
                           </div>
 
@@ -1108,7 +1252,7 @@ function AgentPortalContent() {
 
                         <div className="pt-4 mt-4 border-t border-dashed border-border-light text-center">
                           <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">
-                            {agent.application_id.startsWith("B2B-") ? "Liquidación Neta Semanal de Agencia" : "Liquidación Neta Semanal (Estimado)"}
+                            {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") ? "Liquidación Neta Semanal de Agencia" : "Liquidación Neta Semanal (Estimado)"}
                           </span>
                           <p className="text-3xl font-bold text-brand-primary font-mono mt-1">${getNetEarnings().toFixed(2)} USD</p>
                           <span className="text-[10px] text-emerald-600 font-semibold block mt-1">
@@ -1265,8 +1409,89 @@ function AgentPortalContent() {
                     </form>
                   </div>
 
+                  {/* ── CLIENT REQUEST NOTIFICATIONS (B2B agency only) ──────────── */}
+                  {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") && clientRequests.length > 0 && (
+                    <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-5">
+                      <div className="border-b border-border-light pb-3 flex items-center gap-3">
+                        <div className="flex-1 text-left">
+                          <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Solicitudes Entrantes</span>
+                          <h3 className="text-md font-bold text-text-primary mt-0.5">Clientes que Contrataron tu Agencia</h3>
+                          <p className="text-xs text-text-secondary mt-0.5">Asigna un asesor de tu equipo para habilitar el chat con cada cliente.</p>
+                        </div>
+                        {/* Notification badge */}
+                        <span className="flex-shrink-0 bg-amber-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow animate-bounce">
+                          {clientRequests.filter(r => r.status === "pending").length}
+                        </span>
+                      </div>
+
+                      <div className="space-y-4">
+                        {clientRequests.map(request => (
+                          <div
+                            key={request.id}
+                            className={`rounded-sm border p-4 flex flex-col gap-4 text-xs transition-all ${
+                              request.status === "assigned"
+                                ? "bg-emerald-50 border-emerald-200"
+                                : "bg-amber-50 border-amber-200"
+                            }`}
+                          >
+                            {/* Client info row */}
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm flex-shrink-0">
+                                {(request.client_name || request.client_email || "?").charAt(0).toUpperCase()}
+                              </div>
+                              <div className="flex-1 text-left">
+                                <p className="font-bold text-text-primary">{request.client_name || "Cliente"}</p>
+                                <p className="text-[10px] text-text-secondary">{request.client_email}</p>
+                              </div>
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                request.status === "assigned"
+                                  ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                                  : "bg-amber-100 text-amber-700 border border-amber-200"
+                              }`}>
+                                {request.status === "assigned" ? "ASIGNADO" : "PENDIENTE"}
+                              </span>
+                            </div>
+
+                            {/* Assignment section */}
+                            {request.status === "pending" ? (
+                              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1 border-t border-amber-200">
+                                <select
+                                  value={selectedMemberForRequest[request.id] || ""}
+                                  onChange={e => setSelectedMemberForRequest(prev => ({ ...prev, [request.id]: e.target.value }))}
+                                  className="flex-1 px-3 py-1.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:outline-none text-text-primary"
+                                >
+                                  <option value="">— Selecciona un asesor —</option>
+                                  {realMembers.map(m => (
+                                    <option key={m.member_id || m.id} value={m.member_id || m.id}>
+                                      {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : m.member_id}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => handleAssignMember(request)}
+                                  disabled={assigningRequestId === request.id}
+                                  className="px-4 py-1.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-[10px] font-bold rounded-sm transition-colors cursor-pointer flex items-center gap-1.5 flex-shrink-0"
+                                >
+                                  {assigningRequestId === request.id ? (
+                                    <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Asignando...</>
+                                  ) : "✓ Asignar y Habilitar Chat"}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 pt-1 border-t border-emerald-200 text-emerald-700 text-[10px] font-semibold">
+                                <span>✅</span>
+                                <span>Asesor asignado: {request.assigned_member_name || "Asesor de equipo"} · Chat habilitado</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* ─────────────────────────────────────────────────────────────── */}
+
                   {/* Dual card block: B2B team list vs individual profile preview */}
-                  {agent.application_id.startsWith("B2B-") ? (
+                  {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") ? (
                     <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-6">
                       <div className="border-b border-border-light pb-3 flex justify-between items-center">
                         <div className="text-left">

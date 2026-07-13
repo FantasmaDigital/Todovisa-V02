@@ -103,5 +103,41 @@
     "whatsapp": "https://wa.me/5215567890123?text=Hola%20Mariana,%20necesito%20ayuda%20con%20una%20visa%20de%20tripulante.",
     "featured": false,
     "partnerType": "outsourced_agent"
+  },
+  {
+    "id": "agent-7",
+    "name": "Lic. Roberto Castaneda",
+    "title": "Asesor Consular Especializado B2B",
+    "photo": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=400",
+    "rating": 4.9,
+    "reviewsCount": 87,
+    "languages": ["Español", "Inglés"],
+    "countries": ["Estados Unidos", "Inglaterra", "Canadá"],
+    "specialties": ["Turismo", "Trabajo", "Preparación Consular"],
+    "experience": "8 años",
+    "availability": "Inmediata",
+    "bio": "Consultor certificado adscrito a la prestigiosa corporación Agency with Agent. Especialista en la integración ágil de expedientes y optimización de perfiles para visas de turismo y negocios.",
+    "whatsapp": "https://wa.me/50370200976?text=Hola%20Roberto,%20necesito%20asesoria%20de%20Agency%20with%20Agent.",
+    "featured": true,
+    "partnerType": "b2b_agency",
+    "agencyName": "Agency with Agent"
+  },
+  {
+    "id": "agency-entity-1",
+    "name": "Agency with Agent",
+    "title": "Agencia de Viajes y Asesoría Corporativa",
+    "photo": "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=400",
+    "rating": 5.0,
+    "reviewsCount": 320,
+    "languages": ["Español", "Inglés"],
+    "countries": ["Estados Unidos", "Inglaterra", "Canadá", "Australia"],
+    "specialties": ["Turismo", "Estudio", "Trabajo", "Negocios", "Preparación Consular"],
+    "experience": "10 años",
+    "availability": "Inmediata",
+    "bio": "Entidad Corporativa B2B. Al contratar el servicio con Agency with Agent, nuestro equipo de directores asignará al mejor asesor especializado según tu perfil para gestionar tu trámite.",
+    "whatsapp": "https://wa.me/50370200976?text=Hola%20Agency%20with%20Agent,%20deseo%20contratar%20su%20servicio%20corporativo.",
+    "featured": true,
+    "partnerType": "b2b_agency_entity",
+    "agencyName": "Agency with Agent"
   }
 ]

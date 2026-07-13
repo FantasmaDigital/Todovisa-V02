@@ -186,6 +186,120 @@ export default function PerfilUsuarioPage() {
     ctx.strokeRect(1, 1, 298, 298);
   }, [cropImageObj, zoom, panX, panY]);
 
+  // Real Database B2B Invitation states
+  const [realInvitation, setRealInvitation] = useState<any>(null);
+  const [inviteEmailInput, setInviteEmailInput] = useState("");
+  const [inviteNameInput, setInviteNameInput] = useState("");
+  const [myAgency, setMyAgency] = useState<any>(null);
+  const [isLoadingAgencyInfo, setIsLoadingAgencyInfo] = useState(false);
+
+  useEffect(() => {
+    if (!user || user.role !== "agent") {
+      setMyAgency(null);
+      return;
+    }
+
+    const fetchMyAgency = async () => {
+      setIsLoadingAgencyInfo(true);
+      try {
+        const { data: memberData, error: memberErr } = await supabase
+          .from("agency_members")
+          .select("agency_id")
+          .eq("member_id", user.id)
+          .maybeSingle();
+
+        if (memberErr) {
+          console.error("Error loading agency membership:", memberErr.message);
+          return;
+        }
+
+        if (memberData && memberData.agency_id) {
+          const { data: agencyProfile, error: agencyErr } = await supabase
+            .from("profiles")
+            .select("id, first_name, last_name, email, photo_url, phone, bio, location, staff_size")
+            .eq("id", memberData.agency_id)
+            .maybeSingle();
+
+          if (agencyErr) {
+            if (agencyErr.message && (agencyErr.message.includes("column") || agencyErr.code === "P0002")) {
+              const { data: fallbackProfile, error: fallbackErr } = await supabase
+                .from("profiles")
+                .select("id, first_name, last_name, email")
+                .eq("id", memberData.agency_id)
+                .maybeSingle();
+
+              if (fallbackErr) {
+                console.error("Error loading agency details (fallback):", fallbackErr.message);
+              } else if (fallbackProfile) {
+                setMyAgency(fallbackProfile);
+              }
+            } else {
+              console.error("Error loading agency details:", agencyErr.message);
+            }
+          } else if (agencyProfile) {
+            setMyAgency(agencyProfile);
+          }
+        }
+      } catch (err) {
+        console.error("Unexpected error loading my agency info:", err);
+      } finally {
+        setIsLoadingAgencyInfo(false);
+      }
+    };
+
+    fetchMyAgency();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || user.role === "agent") {
+      setRealInvitation(null);
+      return;
+    }
+
+    const fetchRealInvitation = async () => {
+      try {
+        let invitationData = null;
+        const { data, error } = await supabase
+          .from("agency_invitations")
+          .select("*, agency:profiles!agency_id(id, first_name, last_name, email, photo_url, phone, bio, location, staff_size)")
+          .eq("email", user.email.trim().toLowerCase())
+          .eq("status", "pending")
+          .gt("expires_at", new Date().toISOString())
+          .maybeSingle();
+
+        if (error) {
+          if (error.message && (error.message.includes("column") || error.code === "P0002")) {
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from("agency_invitations")
+              .select("*, agency:profiles!agency_id(id, first_name, last_name, email)")
+              .eq("email", user.email.trim().toLowerCase())
+              .eq("status", "pending")
+              .gt("expires_at", new Date().toISOString())
+              .maybeSingle();
+
+            if (fallbackError) {
+              console.error("Error loading B2B invitation (fallback):", fallbackError.message);
+            } else if (fallbackData) {
+              invitationData = fallbackData;
+            }
+          } else {
+            console.error("Error loading B2B invitation:", error.message);
+          }
+        } else if (data) {
+          invitationData = data;
+        }
+
+        if (invitationData) {
+          setRealInvitation(invitationData);
+        }
+      } catch (err) {
+        console.error("Unexpected error loading invitation:", err);
+      }
+    };
+
+    fetchRealInvitation();
+  }, [user]);
+
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -506,6 +620,7 @@ export default function PerfilUsuarioPage() {
             viproDestination: metadata.vipro_destination || null,
             hasPaidAdvisor: metadata.has_paid_advisor || false,
             assignedAgentId: metadata.assigned_agent_id || null,
+            assignedAgencyName: metadata.assigned_agency_name || null,
             photoUrl: metadata.photo_url || metadata.avatar_url || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
@@ -527,6 +642,7 @@ export default function PerfilUsuarioPage() {
             user.viproDestination !== updatedUser.viproDestination ||
             user.hasPaidAdvisor !== updatedUser.hasPaidAdvisor ||
             user.assignedAgentId !== updatedUser.assignedAgentId ||
+            user.assignedAgencyName !== updatedUser.assignedAgencyName ||
             user.firstName !== updatedUser.firstName ||
             user.lastName !== updatedUser.lastName ||
             user.photoUrl !== updatedUser.photoUrl ||
@@ -570,19 +686,33 @@ export default function PerfilUsuarioPage() {
     const loadPartnerData = async () => {
       setIsLoadingPartnerApp(true);
       try {
-        // Query current user's partner application (by user_id first, then by email fallback)
+        let agencyId = null;
+        if (user.role === ROLES.AGENT) {
+          const { data: memberData } = await supabase
+            .from("agency_members")
+            .select("agency_id")
+            .eq("member_id", user.id)
+            .maybeSingle();
+          if (memberData) {
+            agencyId = memberData.agency_id;
+          }
+        }
+
+        const targetUserId = agencyId || user.id;
+
+        // Query partner application (by user_id first, then by email fallback if no agencyId)
         let data = null;
         const { data: idData, error: idError } = await supabase
           .from("agent_applications")
           .select("*")
-          .eq("user_id", user.id)
+          .eq("user_id", targetUserId)
           .maybeSingle();
 
         if (idData) {
           data = idData;
         }
 
-        if ((!data || idError) && user.email) {
+        if ((!data || idError) && !agencyId && user.email) {
           const { data: emailData } = await supabase
             .from("agent_applications")
             .select("*")
@@ -1111,6 +1241,214 @@ export default function PerfilUsuarioPage() {
     );
   }
 
+  const handleDeclineInvitation = async () => {
+    if (!realInvitation) return;
+    try {
+      const { error } = await supabase
+        .from("agency_invitations")
+        .update({ status: "expired" })
+        .eq("id", realInvitation.id);
+
+      if (error) throw error;
+
+      setRealInvitation(null);
+      showToast("Invitación rechazada.", "info");
+    } catch (err: any) {
+      console.error("Error declining invitation:", err);
+      showToast("Error al rechazar invitación: " + err.message, "error");
+    }
+  };
+
+  const handleAcceptInvitation = async () => {
+    if (user && realInvitation) {
+      try {
+        const agencyName = `${realInvitation.agency.first_name} ${realInvitation.agency.last_name}`.trim();
+        
+        // 1. Update status to accepted
+        const { data: updatedInv, error: invErr } = await supabase
+          .from("agency_invitations")
+          .update({ status: "accepted" })
+          .eq("id", realInvitation.id)
+          .select();
+
+        if (invErr) throw invErr;
+
+        if (!updatedInv || updatedInv.length === 0) {
+          throw new Error("No se pudo actualizar el estado de la invitación en la base de datos (0 filas afectadas). Esto suele suceder debido a las políticas de Row Level Security (RLS) en la tabla 'agency_invitations'. Por favor, asegúrate de aplicar las políticas correspondientes.");
+        }
+
+        // 2. Insert into agency_members
+        const { error: memberErr } = await supabase
+          .from("agency_members")
+          .insert({
+            agency_id: realInvitation.agency_id,
+            member_id: user.id,
+            member_role: "consultant"
+          });
+        
+        if (memberErr) {
+          if (memberErr.message && memberErr.message.includes("violates row-level security policy")) {
+            throw new Error("No tienes permisos para unirte a la agencia en la base de datos. Por favor, asegúrate de aplicar la política de RLS correspondiente en la tabla 'agency_members'.");
+          }
+          throw memberErr;
+        }
+
+        // 3. Update local auth state
+        const updated = {
+          ...user,
+          role: "agent",
+          assignedAgencyName: agencyName
+        };
+        setUser(updated);
+        setRealInvitation(null);
+
+        // 4. Update Supabase auth user metadata & profiles table
+        await supabase.auth.updateUser({
+          data: {
+            role: "agent",
+            assigned_agency_name: agencyName
+          }
+        });
+
+        const { error: dbProfileErr } = await supabase
+          .from("profiles")
+          .update({
+            role: "agent"
+          })
+          .eq("id", user.id);
+        if (dbProfileErr) throw dbProfileErr;
+        
+        showToast(`¡Invitación aceptada! Ahora eres un asesor consular certificado de ${agencyName}.`, "success");
+      } catch (err: any) {
+        console.error("Error accepting B2B invitation:", err);
+        showToast("Error al aceptar invitación: " + err.message, "error");
+      }
+    }
+  };
+
+  const handleSimulateAgentAssignment = async () => {
+    if (user) {
+      try {
+        const updated = {
+          ...user,
+          assignedAgentId: "agent-7",
+          assignedAgencyName: "Agency with Agent"
+        };
+        setUser(updated);
+        
+        await supabase.auth.updateUser({
+          data: {
+            assigned_agent_id: "agent-7",
+            assigned_agency_name: "Agency with Agent"
+          }
+        });
+
+        // Assignment is successfully persisted in auth user metadata & local state above
+
+        const text = `🏢 Sistema Agency with Agent: Se ha asignado oficialmente al asesor experto Lic. Roberto Castaneda para liderar tu proceso de visado. ¡Hola! Estaré a cargo de tu expediente desde este momento.`;
+        const welcomeMsg = {
+          id: `sys-${Date.now()}`,
+          sender: "agent" as const,
+          text,
+          timestamp: new Date()
+        };
+
+        // Persist message via Supabase message client service if enabled
+        const localKey = `mock_messages_${user.id}`;
+        if (isSupabaseDbAvailable) {
+          try {
+            await MessageClientService.createMessage({
+              sender: "agent",
+              text,
+              user_id: user.id,
+              agent_id: "agent-7"
+            });
+          } catch (msgErr) {
+            console.error("Failed to persist welcome message to Supabase chat:", msgErr);
+          }
+        }
+        
+        // Always write to local storage backup for offline consistency
+        if (typeof window !== "undefined") {
+          localStorage.setItem(localKey, JSON.stringify([welcomeMsg]));
+        }
+
+        setMessages([welcomeMsg]);
+        showToast("¡Agente asignado exitosamente por la empresa!", "success");
+      } catch (err) {
+        console.error("Error simulating agent assignment:", err);
+        showToast("Error al asignar agente.", "error");
+      }
+    }
+  };
+
+  const handleSendInvitation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmailInput.trim()) {
+      showToast("Por favor ingresa el correo del asesor.", "error");
+      return;
+    }
+    
+    try {
+      const email = inviteEmailInput.trim().toLowerCase();
+      const token = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+      
+      const { error } = await supabase
+        .from("agency_invitations")
+        .insert({
+          agency_id: user.id,
+          email: email,
+          token: token,
+          status: "pending"
+        });
+
+      if (error) throw error;
+
+      showToast(`¡Invitación enviada con éxito a ${email}!`, "success");
+      setInviteEmailInput("");
+      setInviteNameInput("");
+      
+      // If we invited ourselves (e.g. for testing purposes), reload invitations
+      if (user && user.email.trim().toLowerCase() === email) {
+        let invitationData = null;
+        const { data, error } = await supabase
+          .from("agency_invitations")
+          .select("*, agency:profiles!agency_id(id, first_name, last_name, email, photo_url, phone, bio, location, staff_size)")
+          .eq("email", user.email.trim().toLowerCase())
+          .eq("status", "pending")
+          .gt("expires_at", new Date().toISOString())
+          .maybeSingle();
+
+        if (error) {
+          if (error.message && (error.message.includes("column") || error.code === "P0002")) {
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from("agency_invitations")
+              .select("*, agency:profiles!agency_id(id, first_name, last_name, email)")
+              .eq("email", user.email.trim().toLowerCase())
+              .eq("status", "pending")
+              .gt("expires_at", new Date().toISOString())
+              .maybeSingle();
+
+            if (fallbackError) {
+              console.error("Error loading B2B invitation (fallback):", fallbackError.message);
+            } else if (fallbackData) {
+              invitationData = fallbackData;
+            }
+          }
+        } else if (data) {
+          invitationData = data;
+        }
+
+        if (invitationData) {
+          setRealInvitation(invitationData);
+        }
+      }
+    } catch (err: any) {
+      console.error("Error sending invitation:", err);
+      showToast(`Error al enviar invitación: ${err.message}`, "error");
+    }
+  };
+
   const handleSaveData = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName.trim() || !lastName.trim()) {
@@ -1130,15 +1468,30 @@ export default function PerfilUsuarioPage() {
 
     try {
       // Also update the database profiles table
-      const { error: dbProfileErr } = await supabase
+      const profileDataToSave: any = {
+        id: user!.id,
+        email: user!.email,
+        first_name: firstName,
+        last_name: lastName,
+        updated_at: new Date().toISOString()
+      };
+
+      // Attempt upsert with all details
+      let { error: dbProfileErr } = await supabase
         .from("profiles")
         .upsert({
-          id: user!.id,
-          email: user!.email,
-          first_name: firstName,
-          last_name: lastName,
-          updated_at: new Date().toISOString()
+          ...profileDataToSave,
+          photo_url: user?.photoUrl || null,
+          phone: phone || null
         });
+
+      if (dbProfileErr && (dbProfileErr.message.includes("column") || dbProfileErr.code === "P0002")) {
+        // Fallback upsert if columns do not exist yet in SQL schema
+        const { error: fallbackErr } = await supabase
+          .from("profiles")
+          .upsert(profileDataToSave);
+        dbProfileErr = fallbackErr;
+      }
 
       if (dbProfileErr) {
         console.warn("Could not save profile details to public.profiles table:", dbProfileErr.message);
@@ -1412,6 +1765,83 @@ export default function PerfilUsuarioPage() {
                   <p className="text-xs text-text-secondary mt-1">Mantén tu información de contacto actualizada para que podamos ponernos en contacto contigo.</p>
                 </div>
 
+                {/* B2B Agency Invitation Banner */}
+                {realInvitation && user?.role !== "agent" && (
+                  <div className="bg-gradient-to-br from-blue-50/70 via-indigo-50/50 to-white border border-blue-200/80 rounded-[1.5rem] p-6 md:p-8 mb-8 shadow-sm animate-in fade-in duration-300 text-left">
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-ping"></span>
+                      <span className="text-[10px] font-extrabold tracking-widest text-blue-700 bg-blue-100/60 border border-blue-200/50 px-2 py-0.5 rounded uppercase">Invitación Corporativa Recibida</span>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row gap-6 items-start justify-between">
+                      <div className="flex-1 space-y-4">
+                        <div className="flex items-start gap-4">
+                          {realInvitation.agency.photo_url || realInvitation.agency.avatar_url ? (
+                            <img
+                              src={realInvitation.agency.photo_url || realInvitation.agency.avatar_url}
+                              alt={`${realInvitation.agency.first_name} ${realInvitation.agency.last_name}`}
+                              className="w-14 h-14 rounded-xl object-cover shadow-md border border-blue-200"
+                            />
+                          ) : (
+                            <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-xl flex items-center justify-center text-xl font-bold shadow-md border border-blue-500 font-serif">
+                              {((realInvitation.agency.first_name?.[0] || "") + (realInvitation.agency.last_name?.[0] || "")).toUpperCase()}
+                            </div>
+                          )}
+                          <div>
+                            <h4 className="font-serif font-bold text-text-primary text-xl">
+                              {realInvitation.agency.first_name} {realInvitation.agency.last_name}
+                            </h4>
+                            <p className="text-[11px] font-semibold text-text-secondary">🏢 Agencia de Viajes y Asesoría Consular B2B</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-white/60 border border-blue-100 rounded-xl p-4 text-xs space-y-3">
+                          {realInvitation.agency.bio && (
+                            <p className="text-text-secondary leading-relaxed">
+                              <strong>Acerca de la empresa:</strong> {realInvitation.agency.bio}
+                            </p>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-text-secondary pt-2 border-t border-blue-100/60">
+                            <div><strong>✉️ Correo:</strong> {realInvitation.agency.email}</div>
+                            {realInvitation.agency.phone && (
+                              <div><strong>📞 Teléfono:</strong> {realInvitation.agency.phone}</div>
+                            )}
+                            {realInvitation.agency.location && (
+                              <div><strong>📍 Ubicación:</strong> {realInvitation.agency.location}</div>
+                            )}
+                            {realInvitation.agency.staff_size && (
+                              <div><strong>👥 Staff:</strong> {realInvitation.agency.staff_size} asesores certificados</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] font-bold text-blue-800 uppercase tracking-wide">Beneficios de unirte a su equipo:</p>
+                          <ul className="text-xs text-text-secondary space-y-1 pl-1">
+                            <li className="flex items-center gap-2">🔹 <span>Aparecerás en el buscador público de asesores respaldado por su firma.</span></li>
+                            <li className="flex items-center gap-2">🔹 <span>Acceso a los expedientes consulares asignados por la empresa.</span></li>
+                          </ul>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-row md:flex-col gap-2.5 w-full md:w-auto md:min-w-[140px] pt-4 md:pt-0">
+                        <button
+                          onClick={handleAcceptInvitation}
+                          className="flex-1 md:w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg cursor-pointer text-center"
+                        >
+                          Aceptar Invitación
+                        </button>
+                        <button
+                          onClick={handleDeclineInvitation}
+                          className="flex-1 md:w-full border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold py-3 px-4 rounded-xl transition-all cursor-pointer text-center"
+                        >
+                          Rechazar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <form onSubmit={handleSaveData} className="max-w-xl space-y-5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -1483,6 +1913,45 @@ export default function PerfilUsuarioPage() {
                     </button>
                   </div>
                 </form>
+
+                {/* Simulator Form for sending invitations */}
+                <div className="mt-12 pt-8 border-t border-border-light max-w-xl">
+                  <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-2">Simulador B2B: Invitar a un Asesor</h3>
+                  <p className="text-xs text-text-secondary mb-4">
+                    Envía una invitación formal de parte de <strong>Agency with Agent</strong> a cualquier usuario por su correo electrónico. Si ese usuario entra a su panel, verá la invitación para unirse como asesor certificado de la empresa.
+                  </p>
+                  
+                  <form onSubmit={handleSendInvitation} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Nombre del Asesor</label>
+                        <input
+                          type="text"
+                          value={inviteNameInput}
+                          onChange={(e) => setInviteNameInput(e.target.value)}
+                          placeholder="Ej. Daniel Hernández"
+                          className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Correo del Asesor</label>
+                        <input
+                          type="email"
+                          value={inviteEmailInput}
+                          onChange={(e) => setInviteEmailInput(e.target.value)}
+                          placeholder="Ej. danielhrndz38@gmail.com"
+                          className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="submit"
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2.5 rounded-lg text-xs transition-all shadow-sm cursor-pointer"
+                    >
+                      ✉️ Enviar Invitación Corporativa
+                    </button>
+                  </form>
+                </div>
               </div>
             )}
 
@@ -2164,29 +2633,44 @@ export default function PerfilUsuarioPage() {
                         </button>
                       </div>
                     </div>
+                  ) : assignedAgent.partnerType === "b2b_agency_entity" || !user.assignedAgentId ? (
+                    // PENDING AGENT ALLOCATION BY B2B AGENCY
+                    <div className="bg-white rounded-[2rem] border border-blue-200 p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-6 max-w-2xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                      <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-3xl font-bold border border-blue-200 shadow-inner">
+                        🏢
+                      </div>
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-bold tracking-widest text-blue-600 uppercase">Servicio Corporativo Habilitado</span>
+                        <h3 className="font-bold font-serif text-text-primary text-2xl">Agency with Agent</h3>
+                        <p className="text-sm text-text-secondary leading-relaxed max-w-md mx-auto">
+                          Has contratado los servicios globales de nuestra agencia. El equipo de directores de <strong>Agency with Agent</strong> está revisando tu expediente y tu Evaluación VIPRO para asignarte el asesor especialista idóneo según tu perfil.
+                        </p>
+                      </div>
+                      
+                      <div className="w-full bg-[#FAF9F6] border border-border-light rounded-2xl p-6 text-left space-y-4">
+                        <h4 className="font-bold text-text-primary text-sm">Estado de tu Asignación:</h4>
+                        <div className="flex items-center gap-3">
+                          <span className="w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping"></span>
+                          <p className="text-xs font-semibold text-text-primary">⏳ Buscando asesor especialista disponible en nuestro staff...</p>
+                        </div>
+                        <p className="text-xs text-text-secondary leading-normal">
+                          Normalmente las asignaciones corporativas toman de 1 a 3 horas hábiles. Recibirás una notificación y el chat de soporte se habilitará inmediatamente.
+                        </p>
+                      </div>
+
+                      {/* Interactive simulation button for the user/agency */}
+                      <div className="pt-2 w-full">
+                        <button
+                          onClick={handleSimulateAgentAssignment}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-6 rounded-xl transition-all shadow-md text-sm cursor-pointer"
+                        >
+                          ⚡ Simular Asignación de Agente por la Empresa
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     // CHAT APARTADO: Chat con el Asesor (ya tiene viproCompleted o no)
                     <div className="space-y-6 animate-fade-in">
-                      {/* Banner showing VIPRO is pending */}
-                      {!user.viproCompleted && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top duration-300">
-                          <div className="flex items-center gap-3">
-                            <span className="text-xl">📊</span>
-                            <div>
-                              <h4 className="text-xs font-bold text-amber-800">Evaluación VIPRO Pendiente</h4>
-                              <p className="text-[11px] text-amber-700 leading-normal">
-                                Para que <strong>{assignedAgent.name}</strong> pueda preparar tu expediente y agendar la llamada por Zoom, te sugerimos completar tu evaluación diagnóstica.
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => router.push("/vipro-form")}
-                            className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-md transition-colors shadow-sm whitespace-nowrap cursor-pointer"
-                          >
-                            Completar VIPRO Ahora
-                          </button>
-                        </div>
-                      )}
                       <style dangerouslySetInnerHTML={{
                         __html: `
                         .custom-scrollbar::-webkit-scrollbar {
@@ -2219,6 +2703,15 @@ export default function PerfilUsuarioPage() {
                           <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
                             <h5 className="font-bold text-text-primary text-base tracking-tight">{assignedAgent.name}</h5>
                             <span className="bg-[#FAF0E6] text-[#A0522D] text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-[#EEDC82]">ASESOR ASIGNADO</span>
+                            {assignedAgent.partnerType === "b2b_agency" ? (
+                              <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200" title={`Afiliado a ${assignedAgent.agencyName || user?.assignedAgencyName}`}>
+                                🏢 AGENCIA B2B: {assignedAgent.agencyName || user?.assignedAgencyName}
+                              </span>
+                            ) : (
+                              <span className="bg-emerald-50 text-emerald-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-emerald-200">
+                                💼 ASESOR INDEPENDIENTE
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-brand-primary font-bold">{assignedAgent.title}</p>
                           <div className="flex items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary">
@@ -2226,6 +2719,11 @@ export default function PerfilUsuarioPage() {
                             <span className="text-gray-300">•</span>
                             <span>Soporte 24/7 Activo</span>
                           </div>
+                          {assignedAgent.partnerType === "b2b_agency" && (
+                             <p className="text-[10px] text-blue-800 bg-blue-50/50 border border-blue-100 rounded-lg px-3 py-1.5 mt-2 max-w-xl text-left leading-normal">
+                               🛡️ <strong>Garantía de Doble Auditoría B2B:</strong> Tu expediente está respaldado institucionalmente. Antes de tu cita, un supervisor senior de <strong>{assignedAgent.agencyName || user?.assignedAgencyName}</strong> co-auditará tu formulario DS-160 y tu perfil.
+                             </p>
+                           )}
                         </div>
                       </div>
 
@@ -2253,12 +2751,17 @@ export default function PerfilUsuarioPage() {
                               </p>
                             </div>
                           </div>
-                          <div className="text-right hidden sm:flex flex-col items-end gap-1.5">
+                          <div className="text-right hidden sm:flex flex-col items-end gap-1">
                             <div className="flex items-center gap-2">
                               <span className="text-[9px] text-[#2C4A75] bg-blue-50 border border-blue-100 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                                 Contrato Activo
                               </span>
                             </div>
+                            {assignedAgent.partnerType === "b2b_agency" && (
+                              <span className="text-[8px] text-blue-700 font-extrabold tracking-wide uppercase">
+                                🏢 {assignedAgent.agencyName || user?.assignedAgencyName}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -2640,10 +3143,78 @@ export default function PerfilUsuarioPage() {
 
             {/* TAB: MI SOLICITUD DE SOCIO */}
             {activeTab === "solicitud" && (
-              isLoadingPartnerApp ? (
+              user?.role === "agent" && myAgency ? (
+                <div className="animate-fadeIn">
+                  <div className="mb-6 pb-4 border-b border-border-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+                    <div>
+                      <h2 className="text-lg font-bold text-text-primary">Mi Acreditación</h2>
+                      <p className="text-xs text-text-secondary mt-1">Detalles de tu respaldo institucional y acreditación como agente consular corporativo.</p>
+                    </div>
+                    <span className="self-start sm:self-center text-xs font-bold px-3 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100">
+                      ✓ Acreditado por Empresa
+                    </span>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* Status Banner */}
+                    <div className="p-4 rounded-md border text-left bg-emerald-50/50 border-emerald-200 text-emerald-800">
+                      <h4 className="font-bold text-sm mb-1">¡Perfil Acreditado Activo!</h4>
+                      <p className="text-xs leading-relaxed opacity-90">
+                        Eres un asesor respaldado por <strong>{myAgency.first_name} {myAgency.last_name}</strong>. Tu perfil aparece con insignia de verificación y estás habilitado para gestionar los trámites asignados por tu empresa en la red TodoVisa.
+                      </p>
+                    </div>
+
+                    {/* Agency Profile Details */}
+                    <div className="border border-border-light rounded-md p-6 bg-white text-left space-y-4 shadow-sm">
+                      <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Información de la Empresa Respaldo</h4>
+                      
+                      <div className="flex items-start gap-4">
+                        {myAgency.photo_url || myAgency.avatar_url ? (
+                          <img
+                            src={myAgency.photo_url || myAgency.avatar_url}
+                            alt={`${myAgency.first_name} ${myAgency.last_name}`}
+                            className="w-14 h-14 rounded-xl object-cover shadow-md border border-blue-200"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-xl flex items-center justify-center text-xl font-bold shadow-md border border-blue-500 font-serif">
+                            {((myAgency.first_name?.[0] || "") + (myAgency.last_name?.[0] || "")).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <h4 className="font-serif font-bold text-text-primary text-lg">
+                            {myAgency.first_name} {myAgency.last_name}
+                          </h4>
+                          <p className="text-[11px] font-semibold text-text-secondary">🏢 Agencia de Viajes y Asesoría Consular B2B</p>
+                          <p className="text-[10px] text-text-muted mt-0.5">ID Corporativo: {myAgency.id}</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-gray-50/65 border border-gray-100 rounded-xl p-4 text-xs space-y-3">
+                        {myAgency.bio && (
+                          <p className="text-text-secondary leading-relaxed">
+                            <strong>Acerca de la empresa:</strong> {myAgency.bio}
+                          </p>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-text-secondary pt-2 border-t border-gray-200/60">
+                          <div><strong>✉️ Correo:</strong> {myAgency.email}</div>
+                          {myAgency.phone && (
+                            <div><strong>📞 Teléfono:</strong> {myAgency.phone}</div>
+                          )}
+                          {myAgency.location && (
+                            <div><strong>📍 Ubicación:</strong> {myAgency.location}</div>
+                          )}
+                          {myAgency.staff_size && (
+                            <div><strong>👥 Staff:</strong> {myAgency.staff_size} asesores certificados</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : isLoadingAgencyInfo || isLoadingPartnerApp ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
                   <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-                  <span className="text-xs text-text-secondary font-medium">Cargando detalles de solicitud...</span>
+                  <span className="text-xs text-text-secondary font-medium">Cargando detalles de tu acreditación...</span>
                 </div>
               ) : partnerApp ? (
                 <div className="animate-fadeIn">

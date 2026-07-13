@@ -11,6 +11,8 @@ interface Agent {
   photo: string;
   rating: number;
   reviewsCount: number;
+  partnerType?: string;
+  agencyName?: string;
 }
 
 interface CheckoutModalProps {
@@ -96,18 +98,50 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           updateData.has_paid_advisor = true;
           if (agent) {
             updateData.assigned_agent_id = agent.id;
+            updateData.assigned_agency_name = agent.agencyName || null;
           }
         }
 
         // Persist to Supabase Auth metadata
         try {
-          await supabase.auth.updateUser({
-            data: updateData
-          });
+          await supabase.auth.updateUser({ data: updateData });
           console.log("Status successfully saved to Supabase user metadata.");
         } catch (err) {
           console.error("Failed to save status to Supabase:", err);
         }
+
+        // ── B2B AGENCY FLOW ──────────────────────────────────────────────────────
+        // If the hired entity is a B2B agency, create a client request so the
+        // agency dashboard shows a notification and can assign a team member.
+        if (product === "advisor" && agent && agent.partnerType === "b2b_agency_entity") {
+          try {
+            // Resolve the real agency user_id from profiles by matching agency name
+            const { data: agencyProfile } = await supabase
+              .from("profiles")
+              .select("id")
+              .or(`first_name.ilike.%${(agent.agencyName || "").split(" ")[0]}%`)
+              .eq("role", "agency")
+              .maybeSingle();
+
+            const agencyUserId = agencyProfile?.id ?? null;
+
+            if (agencyUserId) {
+              await supabase.from("agency_client_requests").insert({
+                agency_id: agencyUserId,
+                client_id: user.id,
+                client_name: `${user.firstName} ${user.lastName}`.trim(),
+                client_email: user.email,
+                agent_hired_id: agent.id,
+                agency_name: agent.agencyName || agent.name,
+                status: "pending"
+              });
+              console.log("Agency client request created successfully.");
+            }
+          } catch (reqErr) {
+            console.error("Failed to create agency_client_request:", reqErr);
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────────
 
         // Update user state in store
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,6 +152,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           updatedStoreUser.hasPaidAdvisor = true;
           if (agent) {
             updatedStoreUser.assignedAgentId = agent.id;
+            updatedStoreUser.assignedAgencyName = agent.agencyName || null;
           }
         }
         setUser(updatedStoreUser);
@@ -157,17 +192,38 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
 
             {/* Agent Summary */}
             {product !== "vipro" && agent && (
-              <div className="p-5 bg-brand-light/35 border-b border-border-light flex items-center gap-4">
-                <img
-                  src={agent.photo}
-                  alt={agent.name}
-                  className="w-12 h-12 rounded-full object-cover border border-border-light flex-shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-muted uppercase tracking-wider font-bold">Asesor Asignado</p>
-                  <h4 className="font-bold text-text-primary text-sm truncate">{agent.name}</h4>
-                  <p className="text-xs text-text-secondary truncate">{agent.title}</p>
+              <div className="p-5 bg-brand-light/35 border-b border-border-light flex flex-col gap-3">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={agent.photo}
+                    alt={agent.name}
+                    className="w-12 h-12 rounded-full object-cover border border-border-light flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-xs text-text-muted uppercase tracking-wider font-bold">Asesor Asignado</p>
+                    <h4 className="font-bold text-text-primary text-sm truncate">{agent.name}</h4>
+                    <p className="text-xs text-text-secondary truncate">{agent.title}</p>
+                  </div>
                 </div>
+                {agent.partnerType === "b2b_agency" ? (
+                  <div className="bg-blue-50 border border-blue-200/50 rounded-xl p-3 text-left">
+                    <p className="text-[10px] font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1">
+                      🏢 Canal Corporativo: {agent.agencyName}
+                    </p>
+                    <p className="text-[10px] text-text-secondary leading-normal mt-1">
+                      Este asesor está adscrito a una agencia de viajes B2B asociada. Tu trámite contará con garantía institucional dual y doble auditoría de tu DS-160 por parte del supervisor de la agencia.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50 border border-emerald-200/50 rounded-xl p-3 text-left">
+                    <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                      💼 Asesor Independiente Certificado
+                    </p>
+                    <p className="text-[10px] text-text-secondary leading-normal mt-1">
+                      Comunicación directa 1-a-1 sin intermediarios con tu experto seleccionado. Máxima flexibilidad y respuesta ágil en tu expediente.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

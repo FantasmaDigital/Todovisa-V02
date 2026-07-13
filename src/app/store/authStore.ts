@@ -10,6 +10,7 @@ export interface UserData {
   country: string;
   hasPaidAdvisor?: boolean;
   assignedAgentId?: string | null;
+  assignedAgencyName?: string | null;
   viproScore?: number | null;
   viproCompleted?: boolean;
   viproDestination?: string | null;

@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
-import agentsData from "../dummies/agents.json";
 import { useAuthStore } from "../store/authStore";
+import supabase from "../lib/supabase";
 import { useRouter } from "next/navigation";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 
@@ -23,8 +23,10 @@ interface Agent {
   bio: string;
   whatsapp: string;
   featured: boolean;
-  partnerType: string;
+  partnerType: "outsourced_agent" | "b2b_agency_entity";
   agencyName?: string;
+  /** real user_id from profiles/agent_applications, used for checkout */
+  userId?: string;
 }
 
 export default function AgentesPage() {
@@ -50,53 +52,155 @@ export default function AgentesPage() {
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // ── REAL DATA FROM SUPABASE ───────────────────────────────────────────────
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setToast({ message, type });
-    setTimeout(() => {
-      setToast(null);
-    }, 4000);
+    setTimeout(() => setToast(null), 4000);
   };
+
+  useEffect(() => {
+    const fetchFromDB = async () => {
+      setLoadingAgents(true);
+      const list: Agent[] = [];
+
+      try {
+        // ── 1. AGENCIES (role = 'agency') ─────────────────────────────────
+        // Fetch all agency profiles joined with their agent_application (for bio, specialties, etc.)
+        const { data: agencyProfiles } = await supabase
+          .from("profiles")
+          .select("id, first_name, last_name, email, photo_url, phone, bio, location")
+          .eq("role", "agency");
+
+        if (agencyProfiles && agencyProfiles.length > 0) {
+          // Fetch their agent_applications in one query
+          const agencyIds = agencyProfiles.map(p => p.id);
+          const { data: agencyApps } = await supabase
+            .from("agent_applications")
+            .select("user_id, specialties, target_countries, languages, experience_years, biography, status, signature_name")
+            .in("user_id", agencyIds)
+            .eq("status", "active");
+
+          const appByUserId: Record<string, any> = {};
+          agencyApps?.forEach(a => { appByUserId[a.user_id] = a; });
+
+          agencyProfiles.forEach(profile => {
+            const app = appByUserId[profile.id];
+            const name = `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || profile.email;
+            const phone = profile.phone?.replace(/\D/g, "") || "50370200976";
+
+            list.push({
+              id: `agency-${profile.id}`,
+              userId: profile.id,
+              name,
+              title: "Agencia de Viajes B2B y Asesoría Consular",
+              photo: profile.photo_url ||
+                `https://unavatar.io/${encodeURIComponent(profile.email?.trim().toLowerCase() || "")}` +
+                `?fallback=https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1a56db&color=fff`,
+              rating: 5.0,
+              reviewsCount: 0,
+              languages: app?.languages || ["Español"],
+              countries: app?.target_countries || ["Estados Unidos"],
+              specialties: app?.specialties || ["Asesoría General"],
+              experience: app?.experience_years ? `${app.experience_years} años` : "—",
+              availability: "Inmediata",
+              bio: profile.bio || app?.biography ||
+                `Entidad Corporativa B2B. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
+              whatsapp: `https://wa.me/${phone}?text=Hola%20${encodeURIComponent(name)},%20me%20gustar%C3%ADa%20contratar%20sus%20servicios.`,
+              featured: true,
+              partnerType: "b2b_agency_entity",
+              agencyName: name,
+            });
+          });
+        }
+
+        // ── 2. INDEPENDENT ACTIVE AGENTS (role = 'agent', not in agency_members) ──
+        const { data: activeApps } = await supabase
+          .from("agent_applications")
+          .select("user_id, full_name, email, phone, specialties, target_countries, languages, experience_years, biography, status, application_id")
+          .eq("status", "active");
+
+        if (activeApps && activeApps.length > 0) {
+          // Get IDs of agents who belong to an agency (exclude them)
+          const appUserIds = activeApps.map(a => a.user_id).filter(Boolean);
+          let agencyMemberIds = new Set<string>();
+
+          if (appUserIds.length > 0) {
+            const { data: members } = await supabase
+              .from("agency_members")
+              .select("member_id")
+              .in("member_id", appUserIds);
+            members?.forEach(m => agencyMemberIds.add(m.member_id));
+          }
+
+          // Also exclude agency user_ids from step 1
+          const agencyUserIds = new Set((agencyProfiles || []).map(p => p.id));
+
+          activeApps.forEach(app => {
+            // Skip if they belong to an agency OR are themselves an agency
+            if (agencyMemberIds.has(app.user_id) || agencyUserIds.has(app.user_id)) return;
+            // Skip B2B agency applications
+            if (app.application_id?.startsWith("B2B-")) return;
+
+            const phone = app.phone?.replace(/\D/g, "") || "50370200976";
+            list.push({
+              id: `agent-${app.user_id || app.application_id}`,
+              userId: app.user_id,
+              name: app.full_name || app.email || "Asesor TodoVisa",
+              title: `Asesor Independiente · ${(app.specialties || ["General"])[0]}`,
+              photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(app.full_name || "Asesor")}&background=0d9488&color=fff&size=200`,
+              rating: 4.8,
+              reviewsCount: 0,
+              languages: app.languages || ["Español"],
+              countries: app.target_countries || ["Estados Unidos"],
+              specialties: app.specialties || ["Asesoría General"],
+              experience: app.experience_years ? `${app.experience_years} años` : "—",
+              availability: "Inmediata",
+              bio: app.biography || "Asesor consular certificado en la red TodoVisa.",
+              whatsapp: `https://wa.me/${phone}?text=Hola,%20me%20gustar%C3%ADa%20recibir%20asesor%C3%ADa.`,
+              featured: false,
+              partnerType: "outsourced_agent",
+            });
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching agents from DB:", err);
+      }
+
+      setAgents(list);
+      setLoadingAgents(false);
+    };
+
+    fetchFromDB();
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleHireAgent = (agent: Agent) => {
     if (!user) {
       showToast("Por favor, inicia sesión para poder contratar a este asesor.", "info");
-      setTimeout(() => {
-        router.push("/auth/signin");
-      }, 1500);
+      setTimeout(() => router.push("/auth/signin"), 1500);
       return;
     }
-
     if (user.hasPaidAdvisor) {
       showToast("Ya tienes contratada una asesoría activa. Redirigiendo a tu chat...", "info");
-      setTimeout(() => {
-        router.push("/profile?tab=asesor");
-      }, 1500);
+      setTimeout(() => router.push("/profile?tab=asesor"), 1500);
       return;
     }
-
     setCheckoutAgent(agent);
     setIsCheckoutOpen(true);
   };
 
-  // Lists of unique values for filters
-  const countries = ["Todos", "Estados Unidos", "Canadá", "México", "Inglaterra", "Australia"];
-  const specialties = [
-    "Todos",
-    "Turismo",
-    "Estudio",
-    "Trabajo",
-    "Negocios",
-    "Inversión",
-    "Renovación",
-    "Preparación Consular",
-    "Tránsito/Tripulante"
-  ];
-  const languages = ["Todos", "Español", "Inglés", "Francés", "Portugués"];
+  // Build dynamic filter options from real data
+  const allCountries = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.countries))).sort()];
+  const allSpecialties = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.specialties))).sort()];
+  const allLanguages = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.languages))).sort()];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
   const partnerTypes = ["Todos", "Asesores Independientes", "Agencias de Viajes B2B"];
 
   // Filter logic
-  const filteredAgents = (agentsData as Agent[]).filter((agent) => {
+  const filteredAgents = agents.filter((agent) => {
     const matchesSearch =
       agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       agent.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -121,7 +225,7 @@ export default function AgentesPage() {
     const matchesPartnerType =
       selectedPartnerType === "Todos" ||
       (selectedPartnerType === "Asesores Independientes" && agent.partnerType === "outsourced_agent") ||
-      (selectedPartnerType === "Agencias de Viajes B2B" && agent.partnerType === "b2b_agency");
+      (selectedPartnerType === "Agencias de Viajes B2B" && agent.partnerType === "b2b_agency_entity");
 
     return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability && matchesPartnerType;
   });
@@ -206,10 +310,8 @@ export default function AgentesPage() {
                 onChange={(e) => setSelectedCountry(e.target.value)}
                 className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
               >
-                {countries.map((country) => (
-                  <option key={country} value={country}>
-                    {country}
-                  </option>
+                {allCountries.map((country) => (
+                  <option key={country} value={country}>{country}</option>
                 ))}
               </select>
             </div>
@@ -225,7 +327,7 @@ export default function AgentesPage() {
                 onChange={(e) => setSelectedSpecialty(e.target.value)}
                 className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
               >
-                {specialties.map((specialty) => (
+                {allSpecialties.map((specialty) => (
                   <option key={specialty} value={specialty}>
                     {specialty === "Todos" ? "Todas las especialidades" : specialty}
                   </option>
@@ -244,7 +346,7 @@ export default function AgentesPage() {
                 onChange={(e) => setSelectedLanguage(e.target.value)}
                 className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
               >
-                {languages.map((lang) => (
+                {allLanguages.map((lang) => (
                   <option key={lang} value={lang}>
                     {lang === "Todos" ? "Todos los idiomas" : lang}
                   </option>
@@ -298,12 +400,34 @@ export default function AgentesPage() {
           {/* Contador y metadatos */}
           <div className="flex items-center justify-between mb-6">
             <p className="text-sm font-medium text-text-secondary">
-              Mostrando <span className="font-semibold text-text-primary">{filteredAgents.length}</span> agentes disponibles
+              {loadingAgents
+                ? "Cargando asesores..."
+                : <>Mostrando <span className="font-semibold text-text-primary">{filteredAgents.length}</span> {filteredAgents.length === 1 ? "resultado" : "resultados"}</> 
+              }
             </p>
           </div>
 
-          {/* Estado vacío si no hay resultados */}
-          {filteredAgents.length === 0 ? (
+          {/* Loading skeleton */}
+          {loadingAgents ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[1,2,3,4].map(i => (
+                <div key={i} className="bg-white rounded-lg border border-border-light p-6 animate-pulse">
+                  <div className="flex gap-4 mb-4">
+                    <div className="w-16 h-16 rounded-full bg-gray-200 flex-shrink-0"></div>
+                    <div className="flex-1 space-y-2 pt-1">
+                      <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                      <div className="h-3 bg-gray-100 rounded w-1/2"></div>
+                      <div className="h-3 bg-gray-100 rounded w-1/3"></div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-3 bg-gray-100 rounded"></div>
+                    <div className="h-3 bg-gray-100 rounded w-5/6"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredAgents.length === 0 ? (
             <div className="w-full py-16 px-6 bg-white border border-border-light rounded-lg flex flex-col items-center justify-center text-center">
               <svg className="w-16 h-16 text-text-muted mb-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
@@ -352,9 +476,9 @@ export default function AgentesPage() {
                             ★ DESTACADO
                           </span>
                         )}
-                        {agent.partnerType === "b2b_agency" ? (
-                          <span className="inline-flex items-center bg-blue-50 text-blue-700 text-[9px] font-bold px-2 py-0.5 rounded border border-blue-200" title={`Afiliado a la agencia ${agent.agencyName}`}>
-                            🏢 AGENCIA B2B: {agent.agencyName}
+                        {agent.partnerType === "b2b_agency_entity" ? (
+                          <span className="inline-flex items-center bg-indigo-50 text-indigo-700 text-[9px] font-bold px-2 py-0.5 rounded border border-indigo-200">
+                            🏢 EMPRESA / AGENCIA B2B
                           </span>
                         ) : (
                           <span className="inline-flex items-center bg-emerald-50 text-emerald-700 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-200">
