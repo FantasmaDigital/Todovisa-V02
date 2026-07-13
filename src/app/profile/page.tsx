@@ -83,6 +83,22 @@ export interface AgentApplicationData {
   approved_by?: string | null;
   created_at: string;
   updated_at: string;
+  signature_name?: string | null;
+  signed_at?: string | null;
+  payout_settings?: Record<string, any> | null;
+}
+
+export interface AgencyClientRequest {
+  id: string;
+  agency_id: string;
+  client_id: string;
+  assigned_member_id: string | null;
+  status: 'pending' | 'assigned' | 'closed';
+  client_name: string | null;
+  client_email: string | null;
+  agency_name: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export default function PerfilUsuarioPage() {
@@ -109,6 +125,32 @@ export default function PerfilUsuarioPage() {
   const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
+
+  // Inline Payout states (for métodos de cobro tab)
+  const [payoutMethod, setPayoutMethod] = useState<'paypal' | 'ach'>('paypal');
+  const [paypalEmail, setPaypalEmail] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [accountType, setAccountType] = useState("Ahorros");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [routingCode, setRoutingCode] = useState("");
+  const [taxId, setTaxId] = useState("");
+  const [savingPayout, setSavingPayout] = useState(false);
+  const [isLoadingPayout, setIsLoadingPayout] = useState(false);
+
+  // Inline Accreditation states (for mi_acreditacion tab)
+  const [agentApp, setAgentApp] = useState<AgentApplicationData | null>(null);
+  const [isLoadingAgentApp, setIsLoadingAgentApp] = useState(false);
+  const [signatureName, setSignatureName] = useState("");
+  const [isSigning, setIsSigning] = useState(false);
+
+  // Agent chat states (for chat_agente tab)
+  const [assignedClients, setAssignedClients] = useState<AgencyClientRequest[]>([]);
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<AgencyClientRequest | null>(null);
+  const [agentChatMessages, setAgentChatMessages] = useState<{ id: string; sender: string; text: string; timestamp: Date }[]>([]);
+  const [agentChatInput, setAgentChatInput] = useState("");
+  const [isSendingAgentMsg, setIsSendingAgentMsg] = useState(false);
+  const agentChatRef = useRef<HTMLDivElement>(null);
 
   // Form states
   const [firstName, setFirstName] = useState("");
@@ -831,10 +873,10 @@ export default function PerfilUsuarioPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Auto-switch to agent portal tab when user role is agent/agency
+  // Auto-switch to datos tab when user role is agent/agency
   useEffect(() => {
     if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY)) {
-      const t = setTimeout(() => setActiveTab("portal_agente"), 0);
+      const t = setTimeout(() => setActiveTab("datos"), 0);
       return () => clearTimeout(t);
     }
   }, [user?.role]);
@@ -928,19 +970,246 @@ export default function PerfilUsuarioPage() {
     }
   };
 
+  // Load payout settings for inline métodos de cobro tab
+  const loadPayoutSettings = async () => {
+    if (!user) return;
+    setIsLoadingPayout(true);
+    try {
+      const { data, error } = await supabase
+        .from("agent_applications")
+        .select("payout_settings")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (data?.payout_settings) {
+        const s = data.payout_settings as Record<string, string>;
+        if (s.method) setPayoutMethod(s.method as 'paypal' | 'ach');
+        if (s.paypal_email) setPaypalEmail(s.paypal_email);
+        if (s.bank_name) setBankName(s.bank_name);
+        if (s.account_type) setAccountType(s.account_type);
+        if (s.account_number) setAccountNumber(s.account_number);
+        if (s.routing_code) setRoutingCode(s.routing_code);
+        if (s.tax_id) setTaxId(s.tax_id);
+      }
+    } catch (err) {
+      console.error("Error loading payout settings:", err);
+    } finally {
+      setIsLoadingPayout(false);
+    }
+  };
+
+  const handleSavePayoutSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setSavingPayout(true);
+    const updatedSettings = {
+      method: payoutMethod,
+      paypal_email: payoutMethod === 'paypal' ? paypalEmail : "",
+      bank_name: payoutMethod === 'ach' ? bankName : "",
+      account_type: payoutMethod === 'ach' ? accountType : "",
+      account_number: payoutMethod === 'ach' ? accountNumber : "",
+      routing_code: payoutMethod === 'ach' ? routingCode : "",
+      tax_id: payoutMethod === 'ach' ? taxId : "",
+    };
+    try {
+      const { data: appData, error: findError } = await supabase
+        .from("agent_applications")
+        .select("id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (findError) throw findError;
+      if (!appData) throw new Error("No se encontró solicitud de agente activa vinculada a tu cuenta.");
+      const { error: updateError } = await supabase
+        .from("agent_applications")
+        .update({ payout_settings: updatedSettings })
+        .eq("id", appData.id);
+      if (updateError) throw updateError;
+      showToast("Configuración de pago guardada exitosamente.", "success");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg || "Error al guardar configuración.", "error");
+    } finally {
+      setSavingPayout(false);
+    }
+  };
+
+  const loadAgentAppForTab = async () => {
+    if (!user) return;
+    setIsLoadingAgentApp(true);
+    try {
+      let targetUserId = user.id;
+      if (user.role === ROLES.AGENT) {
+        const { data: memberData } = await supabase
+          .from("agency_members")
+          .select("agency_id")
+          .eq("member_id", user.id)
+          .maybeSingle();
+        if (memberData?.agency_id) targetUserId = memberData.agency_id;
+      }
+      const { data, error } = await supabase
+        .from("agent_applications")
+        .select("*")
+        .eq("user_id", targetUserId)
+        .maybeSingle();
+      if (error) throw error;
+      setAgentApp(data || null);
+      if (data?.signature_name) setSignatureName(data.signature_name);
+    } catch (err) {
+      console.error("Error loading agent application for accreditation tab:", err);
+    } finally {
+      setIsLoadingAgentApp(false);
+    }
+  };
+
+  const handleSignAgreementInline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agentApp) return;
+    if (!signatureName.trim()) {
+      showToast("Por favor escribe tu nombre completo para firmar.", "error");
+      return;
+    }
+    setIsSigning(true);
+    const nowString = new Date().toISOString();
+    try {
+      const { error } = await supabase
+        .from("agent_applications")
+        .update({ status: "active", signature_name: signatureName.trim(), signed_at: nowString })
+        .eq("id", agentApp.id);
+      if (error) throw error;
+      setAgentApp((prev) => prev ? { ...prev, status: "active", signature_name: signatureName.trim(), signed_at: nowString } : null);
+      showToast("¡Contrato firmado con éxito! Tu acreditación se encuentra activa.", "success");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg || "Error al firmar acuerdo comercial.", "error");
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
+  // Load assigned clients for the agent chat tab
+  const loadAssignedClients = async () => {
+    if (!user || user.role !== ROLES.AGENT) return;
+    setIsLoadingClients(true);
+    try {
+      const { data, error } = await supabase
+        .from("agency_client_requests")
+        .select("*")
+        .eq("assigned_member_id", user.id)
+        .eq("status", "assigned")
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      setAssignedClients(data || []);
+    } catch (err) {
+      console.error("Error loading assigned clients:", err);
+    } finally {
+      setIsLoadingClients(false);
+    }
+  };
+
+  // Load messages for a specific client (agent perspective)
+  const loadAgentChatMessages = async (clientId: string) => {
+    try {
+      const data = await MessageClientService.getMessages(clientId);
+      setAgentChatMessages(
+        data.map((msg: ClientMessageData) => ({
+          id: msg.id || "",
+          sender: msg.sender,
+          text: msg.text,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+        }))
+      );
+    } catch (err) {
+      console.error("Error loading agent chat messages:", err);
+    }
+  };
+
+  // Send a message as the agent to a specific client
+  const handleSendAgentMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !selectedClient || !agentChatInput.trim()) return;
+    const textToSend = agentChatInput.trim();
+    setAgentChatInput("");
+    setIsSendingAgentMsg(true);
+    try {
+      const newMsg = await MessageClientService.createMessage({
+        sender: "agent",
+        text: textToSend,
+        user_id: selectedClient.client_id,
+        agent_id: user.id,
+      });
+      setAgentChatMessages((prev) => {
+        if (prev.some((m) => m.id === (newMsg.id || ""))) return prev;
+        return [...prev, {
+          id: newMsg.id || "",
+          sender: newMsg.sender,
+          text: newMsg.text,
+          timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
+        }];
+      });
+    } catch (err) {
+      console.error("Error sending agent message:", err);
+      showToast("Error al enviar el mensaje.", "error");
+    } finally {
+      setIsSendingAgentMsg(false);
+    }
+  };
+
   // Trigger loads when activeTab changes
   useEffect(() => {
-    if (activeTab === "portal_agente" && user) {
-      const timer = setTimeout(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      if (activeTab === "comisiones") {
         loadCommissions();
-        if (user.role === ROLES.AGENCY) {
-          loadAgencyMembers();
-          loadAgencyInvitations();
-        }
-      }, 0);
-      return () => clearTimeout(timer);
-    }
+      }
+      if (activeTab === "invitar_agentes" && user.role === ROLES.AGENCY) {
+        loadAgencyMembers();
+        loadAgencyInvitations();
+      }
+      if (activeTab === "metodos_cobro") {
+        loadPayoutSettings();
+      }
+      if (activeTab === "mi_acreditacion") {
+        loadAgentAppForTab();
+      }
+      if (activeTab === "chat_agente" && user.role === ROLES.AGENT) {
+        loadAssignedClients();
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [activeTab, user?.id, user?.role]);
+
+  // Real-time subscription for agent chat: listen for new messages on selected client
+  useEffect(() => {
+    if (!user || !selectedClient) return;
+    const channel = supabase
+      .channel(`agent_room:${selectedClient.client_id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => {
+          const newMsg = payload.new as any;
+          if (newMsg.user_id !== selectedClient.client_id) return;
+          setAgentChatMessages((prev) => {
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
+            return [...prev, {
+              id: newMsg.id,
+              sender: newMsg.sender,
+              text: newMsg.text,
+              timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
+            }];
+          });
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedClient?.client_id, user?.id]);
+
+  // Auto-scroll agent chat to bottom when messages change
+  useEffect(() => {
+    if (agentChatRef.current && agentChatMessages.length > 0) {
+      agentChatRef.current.scrollTo({ top: agentChatRef.current.scrollHeight, behavior: "smooth" });
+    }
+  }, [agentChatMessages]);
 
   // Sync state when user store loads
   useEffect(() => {
@@ -1712,11 +1981,24 @@ export default function PerfilUsuarioPage() {
 
                 // --- Tabs for approved agents / agencies ---
                 if (isAgent) {
-                  return [
-                    { id: "datos", label: "Mis Datos", icon: "👤" },
-                    { id: "portal_agente", label: user.role === ROLES.AGENCY ? "Portal Empresa" : "Portal Agente", icon: "🏢" },
-                    { id: "solicitud", label: "Mi Acreditación", icon: "🏅" },
-                  ];
+                  if (user.role === ROLES.AGENCY) {
+                    return [
+                      { id: "datos", label: "Personalizar Perfil", icon: "👤" },
+                      { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
+                      { id: "invitar_agentes", label: "Invitar Agentes", icon: "👥" },
+                      { id: "mi_acreditacion", label: "Mi Acreditación", icon: "🏅" },
+                      { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
+                      { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                    ];
+                  } else {
+                    return [
+                      { id: "datos", label: "Mis Datos Personales", icon: "👤" },
+                      { id: "chat_agente", label: "Chat con Clientes", icon: "💬" },
+                      { id: "mi_acreditacion", label: "Mi Acreditación", icon: "🏅" },
+                      { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
+                      { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                    ];
+                  }
                 }
 
                 // --- Tabs for admin / moderator ---
@@ -1736,14 +2018,21 @@ export default function PerfilUsuarioPage() {
                   { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" },
                   ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio", icon: "💼" }] : []),
                 ];
-              })().map((tab) => (
+              })().map((tab: { id: string; label: string; icon: string; isLink?: boolean; url?: string }) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
+                  onClick={() => {
+                    if (tab.isLink && tab.url) {
+                      router.push(tab.url);
+                    } else {
+                      setActiveTab(tab.id);
+                    }
+                  }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${
+                    activeTab === tab.id
                       ? "bg-brand-light text-brand-primary font-semibold"
                       : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
-                    }`}
+                  }`}
                 >
                   <span className="text-base">{tab.icon}</span>
                   <span>{tab.label}</span>
@@ -3579,230 +3868,541 @@ export default function PerfilUsuarioPage() {
                 )}
               </div>
             )}
-            {/* TAB: PORTAL AGENTE / EMPRESA */}
-            {activeTab === "portal_agente" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
-              <div className="animate-fadeIn">
-                {/* Header */}
-                <div className="mb-6 pb-4 border-b border-border-light flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <h2 className="text-lg font-bold text-text-primary">
-                      {user.role === ROLES.AGENCY ? "Portal Empresa" : "Portal Agente"}
-                    </h2>
-                    <p className="text-xs text-text-secondary mt-1">
-                      {user.role === ROLES.AGENCY
-                        ? "Agencia acreditada en la red TodoVisa."
-                        : "Consultor independiente acreditado en la red TodoVisa."}
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-brand-light border border-border-light text-brand-primary text-[10px] font-bold uppercase tracking-wider flex-shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block animate-pulse" />
-                    Cuenta Activa
-                  </span>
+            {/* TAB: CHAT CON CLIENTES (solo para AGENT) */}
+            {activeTab === "chat_agente" && user && user.role === ROLES.AGENT && (
+              <div className="animate-fadeIn h-full">
+                <div className="mb-4 pb-4 border-b border-border-light">
+                  <h2 className="text-lg font-bold text-text-primary">Chat con Clientes</h2>
+                  <p className="text-xs text-text-secondary mt-1">Clientes asignados por tu empresa. El chat se habilita automáticamente cuando la agencia te asigna un caso.</p>
                 </div>
 
-                {/* Welcome note */}
-                <p className="text-sm text-text-secondary leading-relaxed mb-6">
-                  Bienvenido, <span className="font-semibold text-text-primary">{user.firstName}</span>. Tu cuenta ha sido activada como{" "}
-                  <span className="font-semibold text-text-primary">
-                    {user.role === ROLES.AGENCY ? "empresa socia" : "agente consultor"}
-                  </span>
-                  {" "}de la red TodoVisa. Desde aquí puedes gestionar tus clientes, revisar comisiones y acceder a herramientas exclusivas.
-                </p>
-
-                {/* Quick Access Cards */}
-                {user.role === ROLES.AGENCY ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                    <button
-                      onClick={() => router.push("/agents/portal")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F5A5;&#xFE0F;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Panel de Empresa
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Gestiona tus casos, clientes asignados y comisiones.
-                          </p>
-                        </div>
+                {isLoadingClients ? (
+                  <div className="flex justify-center py-12">
+                    <div className="w-8 h-8 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                  </div>
+                ) : assignedClients.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
+                    <span className="text-5xl">💬</span>
+                    <div>
+                      <p className="text-sm font-semibold text-text-primary">Sin clientes asignados aún</p>
+                      <p className="text-xs text-text-secondary mt-1 max-w-xs mx-auto">Cuando tu empresa te asigne un cliente, aparecerá aquí y podrás chatear directamente con él.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-4 h-[520px]">
+                    {/* Client list */}
+                    <div className="w-1/3 flex-shrink-0 border border-border-light rounded-sm overflow-y-auto bg-background-main">
+                      <div className="p-3 border-b border-border-light">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Clientes Asignados ({assignedClients.length})</p>
                       </div>
-                    </button>
-
-                    <button
-                      onClick={() => setActiveTab("datos")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F3A8;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Personalizar Perfil
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Actualiza el nombre, logo, y datos de tu empresa.
-                          </p>
-                        </div>
+                      <div className="divide-y divide-border-light">
+                        {assignedClients.map((client) => (
+                          <button
+                            key={client.id}
+                            onClick={() => {
+                              setSelectedClient(client);
+                              setAgentChatMessages([]);
+                              loadAgentChatMessages(client.client_id);
+                            }}
+                            className={`w-full text-left p-3 transition-colors focus:outline-none ${
+                              selectedClient?.id === client.id
+                                ? "bg-brand-light border-l-2 border-brand-primary"
+                                : "hover:bg-white"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs flex-shrink-0">
+                                {(client.client_name || "?").charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-text-primary truncate">{client.client_name || "Cliente"}</p>
+                                <p className="text-[10px] text-text-muted truncate">{client.client_email || ""}</p>
+                              </div>
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                              <span className="text-[9px] text-emerald-600 font-semibold uppercase">Asignado</span>
+                              {client.agency_name && (
+                                <span className="text-[9px] text-text-muted ml-1 truncate">· {client.agency_name}</span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
                       </div>
-                    </button>
+                    </div>
 
-                    <button
-                      onClick={() => router.push("/profile/team")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F465;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Invitar Agentes
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Env&#237;a invitaciones para que asesores se unan a tu equipo.
-                          </p>
+                    {/* Chat window */}
+                    <div className="flex-1 border border-border-light rounded-sm flex flex-col overflow-hidden">
+                      {!selectedClient ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-3 bg-background-main">
+                          <span className="text-4xl">👈</span>
+                          <p className="text-sm font-semibold text-text-primary">Selecciona un cliente</p>
+                          <p className="text-xs text-text-secondary">Elige un cliente de la lista para abrir su chat.</p>
                         </div>
-                      </div>
-                    </button>
+                      ) : (
+                        <>
+                          {/* Chat header */}
+                          <div className="flex items-center gap-3 px-4 py-3 border-b border-border-light bg-white flex-shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs">
+                              {(selectedClient.client_name || "?").charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-text-primary">{selectedClient.client_name || "Cliente"}</p>
+                              <p className="text-[10px] text-text-secondary">{selectedClient.client_email || ""}</p>
+                            </div>
+                            <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-600 font-bold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              Chat activo
+                            </span>
+                          </div>
 
-                    <button
-                      onClick={() => router.push("/profile/accreditation")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F3C5;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Mi Acreditaci&#243;n
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Revisa tu postulaci&#243;n y documentaci&#243;n de socio aprobada.
-                          </p>
-                        </div>
-                      </div>
-                    </button>
+                          {/* Messages */}
+                          <div ref={agentChatRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-[#FAF9F6]/60 to-white/40 custom-scrollbar">
+                            {agentChatMessages.length === 0 ? (
+                              <div className="flex items-center justify-center h-full">
+                                <p className="text-xs text-text-muted italic">No hay mensajes aún. ¡Sé el primero en escribir!</p>
+                              </div>
+                            ) : (
+                              agentChatMessages.map((msg) => (
+                                <div
+                                  key={msg.id}
+                                  className={`flex ${ msg.sender === "agent" ? "justify-end" : "justify-start" }`}
+                                >
+                                  <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                                    msg.sender === "agent"
+                                      ? "bg-brand-primary text-white rounded-br-sm"
+                                      : "bg-white border border-border-light text-text-primary rounded-bl-sm"
+                                  }`}>
+                                    <p>{msg.text}</p>
+                                    <p className={`text-[9px] mt-1 ${ msg.sender === "agent" ? "text-white/60" : "text-text-muted" }`}>
+                                      {msg.timestamp.toLocaleTimeString("es-SV", { hour: "2-digit", minute: "2-digit" })}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
 
-                    <button
-                      onClick={() => router.push("/profile/commissions")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F4B0;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Comisiones Realizadas
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Historial y balance de comisiones completadas por tus asesores.
-                          </p>
-                        </div>
-                      </div>
-                    </button>
+                          {/* Input */}
+                          <form onSubmit={handleSendAgentMessage} className="flex items-end gap-2 p-3 border-t border-border-light bg-white flex-shrink-0">
+                            <textarea
+                              value={agentChatInput}
+                              onChange={(e) => setAgentChatInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendAgentMessage(e as any); } }}
+                              rows={2}
+                              placeholder="Escribe tu respuesta al cliente..."
+                              className="flex-1 resize-none px-3 py-2 bg-background-main border border-border-light rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand-primary transition-all"
+                            />
+                            <button
+                              type="submit"
+                              disabled={isSendingAgentMsg || !agentChatInput.trim()}
+                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-all cursor-pointer border-none flex-shrink-0 h-[56px] flex items-center gap-1.5"
+                            >
+                              {isSendingAgentMsg ? (
+                                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                              )}
+                              Enviar
+                            </button>
+                          </form>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
+            {/* TAB: MI ACREDITACIÓN */}
+            {activeTab === "mi_acreditacion" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
+              <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light">
+                  <h2 className="text-lg font-bold text-text-primary">Mi Acreditación Red TodoVisa</h2>
+                  <p className="text-xs text-text-secondary mt-1">Revisa el estado de tu postulación, documentos presentados y firma del acuerdo de adhesión comercial.</p>
+                </div>
+
+                {isLoadingAgentApp ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="w-8 h-8 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                  </div>
+                ) : !agentApp ? (
+                  <div className="border border-border-light rounded-sm p-8 bg-background-main text-center">
+                    <p className="text-sm text-text-secondary italic">No se ha encontrado ninguna solicitud de acreditación vinculada a esta cuenta.</p>
                     <button
-                      onClick={() => router.push("/profile/payouts")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none shadow-xs"
+                      onClick={loadAgentAppForTab}
+                      className="mt-4 px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer border-none"
                     >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x2699;&#xFE0F;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            M&#233;todos de Cobro
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Registra tu cuenta de PayPal o transferencia para recibir comisiones.
-                          </p>
-                        </div>
-                      </div>
+                      🔄 Recargar
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                    <button
-                      onClick={() => router.push("/agents/portal")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F5A5;&#xFE0F;</span>
+                  <div className="space-y-6">
+                    {/* Status card */}
+                    <div className="border border-border-light rounded-sm p-6 bg-white space-y-4">
+                      <div className="flex justify-between items-center border-b border-border-light pb-3">
                         <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Panel de Agente
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Gestiona tus casos, clientes asignados y comisiones semanales.
-                          </p>
+                          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Folio de Postulación</span>
+                          <h3 className="text-base font-mono font-bold text-text-primary mt-0.5">{agentApp.application_id}</h3>
+                        </div>
+                        <span className={`px-3 py-1 rounded-sm text-xs font-bold uppercase ${
+                          agentApp.status === "active"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : agentApp.status === "approved"
+                            ? "bg-blue-50 text-blue-700 border border-blue-200"
+                            : agentApp.status === "rejected"
+                            ? "bg-red-50 text-red-700 border border-red-200"
+                            : "bg-amber-50 text-amber-700 border border-amber-200"
+                        }`}>
+                          {agentApp.status === "active" ? "ACTIVA" : agentApp.status === "approved" ? "APROBADA" : agentApp.status === "rejected" ? "RECHAZADA" : "PENDIENTE DE REVISIÓN"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-xs">
+                        <div>
+                          <span className="text-text-secondary">Nombre del Solicitante:</span>
+                          <p className="font-bold text-text-primary mt-0.5">{agentApp.full_name}</p>
+                        </div>
+                        <div>
+                          <span className="text-text-secondary">Fecha de Postulación:</span>
+                          <p className="font-bold text-text-primary mt-0.5">{new Date(agentApp.created_at).toLocaleDateString("es-SV")}</p>
+                        </div>
+                        <div>
+                          <span className="text-text-secondary">Correo Registrado:</span>
+                          <p className="font-bold text-text-primary mt-0.5">{agentApp.email}</p>
+                        </div>
+                        <div>
+                          <span className="text-text-secondary">País de Residencia:</span>
+                          <p className="font-bold text-text-primary mt-0.5">{agentApp.country_residence}</p>
                         </div>
                       </div>
-                    </button>
+                    </div>
 
-                    <button
-                      onClick={() => router.push("/profile/accreditation")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F3C5;</span>
+                    {/* Firma / Commercial agreement */}
+                    {agentApp.status === "approved" && !agentApp.signed_at && (
+                      <div className="border border-amber-200 rounded-sm p-6 bg-amber-50 space-y-4">
                         <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Mi Acreditaci&#243;n
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Revisa tu expediente de postulaci&#243;n y documentos aprobados.
-                          </p>
+                          <h3 className="text-sm font-bold text-amber-900">⚠️ Firma de Acuerdo Comercial Pendiente</h3>
+                          <p className="text-xs text-amber-700 mt-1">Tu postulación ha sido aprobada. Para activar tu cuenta y comenzar a gestionar casos, debes firmar el acuerdo de adhesión comercial.</p>
+                        </div>
+                        <form onSubmit={handleSignAgreementInline} className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-800 mb-1">
+                              Firma con tu nombre completo (tal como aparece en el folio)
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={signatureName}
+                              onChange={(e) => setSignatureName(e.target.value)}
+                              placeholder="Escribe tu nombre completo para firmar"
+                              className="w-full px-3 py-2 bg-white border border-amber-300 rounded-sm text-sm focus:border-amber-500 focus:outline-none transition-all text-text-primary"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={isSigning}
+                            className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center gap-2"
+                          >
+                            {isSigning ? "Firmando..." : "✍️ Firmar Acuerdo Comercial"}
+                          </button>
+                        </form>
+                      </div>
+                    )}
+                    {agentApp.signed_at && (
+                      <div className="border border-emerald-200 rounded-sm p-4 bg-emerald-50 flex items-center gap-3">
+                        <span className="text-xl">✅</span>
+                        <div className="text-xs">
+                          <p className="font-bold text-emerald-800">Acuerdo firmado por: {agentApp.signature_name}</p>
+                          <p className="text-emerald-700 mt-0.5">Fecha de firma: {new Date(agentApp.signed_at).toLocaleDateString("es-SV")}</p>
                         </div>
                       </div>
-                    </button>
-
-                    <button
-                      onClick={() => router.push("/profile/commissions")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x1F4B0;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            Comisiones Realizadas
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Historial y desglose de comisiones devengadas de tus asesor&#237;as.
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-
-                    <button
-                      onClick={() => router.push("/profile/payouts")}
-                      className="group text-left p-4 rounded-sm border border-border-light bg-background-main hover:border-brand-primary hover:bg-brand-light transition-all duration-150 focus:outline-none"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0 mt-0.5">&#x2699;&#xFE0F;</span>
-                        <div>
-                          <h3 className="text-sm font-bold text-text-primary group-hover:text-brand-primary transition-colors">
-                            M&#233;todos de Cobro
-                          </h3>
-                          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
-                            Configura tu cuenta de PayPal o transferencia para recibir comisiones.
-                          </p>
-                        </div>
-                      </div>
-                    </button>
+                    )}
                   </div>
                 )}
+              </div>
+            )}
 
-                {/* Info note */}
-                <div className="flex items-start gap-3 bg-brand-light border border-border-light rounded-sm p-4 text-left mb-6">
-                  <span className="text-sm flex-shrink-0 mt-0.5">ℹ️</span>
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    Como {user.role === ROLES.AGENCY ? "empresa socia" : "agente consultor"} acreditado(a),
-                    ya no necesitas contratar servicios de visa individuales. En su lugar, gestionas casos de
-                    clientes directamente desde el{" "}
-                    <button
-                      onClick={() => router.push("/agents/portal")}
-                      className="text-brand-primary font-semibold hover:underline focus:outline-none"
-                    >
-                      Panel de {user.role === ROLES.AGENCY ? "Empresa" : "Agente"}
-                    </button>
-                    {" "}y recibes comisiones por cada caso completado exitosamente.
-                  </p>
+            {/* TAB: COMISIONES REALIZADAS */}
+            {activeTab === "comisiones" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
+              <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light">
+                  <h2 className="text-lg font-bold text-text-primary">Historial y Control de Comisiones</h2>
+                  <p className="text-xs text-text-secondary mt-1">Revisa el detalle, tasa de comisiones y balances netos acumulados de tus expedientes cerrados.</p>
                 </div>
 
+                {/* Financial metrics */}
+                {(() => {
+                  const rate = user.role === ROLES.AGENCY ? 0.85 : 0.80;
+                  const gross = agentCommissions.filter(c => c.status === "paid").reduce((sum, c) => sum + (c.commission_amount || 0), 0);
+                  const share = gross * rate;
+                  const fee = share * 0.05;
+                  const net = share - fee;
+                  return (
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                      <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Facturación Bruta</span>
+                        <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)}</p>
+                      </div>
+                      <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Tasa de Comisión</span>
+                        <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{(rate * 100).toFixed(0)}%</p>
+                      </div>
+                      <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Deducción TodoVisa (5%)</span>
+                        <p className="text-lg font-bold text-red-600 font-mono mt-1">-${fee.toFixed(2)}</p>
+                      </div>
+                      <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
+                        <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Liquidación Neta</span>
+                        <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Table */}
+                <div className="border border-border-light rounded-sm p-5 bg-white">
+                  <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes</h3>
+                  {isLoadingCommissions ? (
+                    <div className="flex justify-center py-8">
+                      <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                    </div>
+                  ) : agentCommissions.length === 0 ? (
+                    <div className="py-8 text-center text-text-muted italic text-xs border-t border-border-light">
+                      No se han encontrado registros de comisiones aprobadas para tu cuenta.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
+                            <th className="py-2.5">Fecha</th>
+                            <th className="py-2.5">Cliente</th>
+                            <th className="py-2.5">Trámite</th>
+                            <th className="py-2.5">Importe</th>
+                            <th className="py-2.5">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border-light">
+                          {agentCommissions.map((c) => (
+                            <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
+                              <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
+                              <td className="py-3 font-semibold">{c.client_name}</td>
+                              <td className="py-3 text-text-secondary">{c.service_type}</td>
+                              <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
+                              <td className="py-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                                  c.status === "paid"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : c.status === "processing"
+                                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                    : "bg-gray-100 text-gray-500"
+                                }`}>
+                                  {c.status === "paid" ? "Pagado" : c.status === "processing" ? "En Proceso" : "Pendiente"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB: MÉTODOS DE COBRO */}
+            {activeTab === "metodos_cobro" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
+              <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light">
+                  <h2 className="text-lg font-bold text-text-primary">Métodos de Cobro</h2>
+                  <p className="text-xs text-text-secondary mt-1">Registra y edita el procesador donde deseas transferir tus comisiones todos los viernes.</p>
+                </div>
+
+                {isLoadingPayout ? (
+                  <div className="flex justify-center py-8">
+                    <div className="w-8 h-8 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <form onSubmit={handleSavePayoutSettings} className="space-y-6 max-w-2xl">
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary">Método de Cobro</label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <button
+                          type="button"
+                          onClick={() => setPayoutMethod('paypal')}
+                          className={`py-3 px-4 rounded-sm border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
+                            payoutMethod === 'paypal'
+                              ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
+                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
+                          }`}
+                        >
+                          <span>💙</span><span>PayPal</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPayoutMethod('ach')}
+                          className={`py-3 px-4 rounded-sm border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
+                            payoutMethod === 'ach'
+                              ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
+                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
+                          }`}
+                        >
+                          <span>🏦</span><span>Transferencia ACH</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {payoutMethod === 'paypal' ? (
+                      <div className="p-4 bg-background-main rounded-sm border border-border-light space-y-3">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Correo Electrónico de PayPal</label>
+                        <input
+                          type="email"
+                          required
+                          value={paypalEmail}
+                          onChange={(e) => setPaypalEmail(e.target.value)}
+                          placeholder="correo@paypal.com"
+                          className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary"
+                        />
+                        <span className="text-[9px] text-text-muted block">Tus fondos se transferirán de inmediato a esta cuenta.</span>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-background-main rounded-sm border border-border-light space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Nombre del Banco</label>
+                            <input type="text" required value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Banco Agrícola, BAC, etc." className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Tipo de Cuenta</label>
+                            <select value={accountType} onChange={(e) => setAccountType(e.target.value)} className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary cursor-pointer h-[38px]">
+                              <option value="Ahorros">Ahorros</option>
+                              <option value="Corriente">Corriente</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Número de Cuenta</label>
+                            <input type="text" required value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Nº de cuenta bancaria" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Código de Ruta / IBAN</label>
+                            <input type="text" required value={routingCode} onChange={(e) => setRoutingCode(e.target.value)} placeholder="Código bancario" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Identificación Tributaria / NIT / DUI</label>
+                          <input type="text" required value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Identificación del titular de la cuenta" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={savingPayout}
+                        className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center gap-2 shadow-sm border-none"
+                      >
+                        {savingPayout ? (
+                          <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</>
+                        ) : "💾 Guardar Configuración de Pago"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {/* TAB: INVITAR AGENTES */}
+            {activeTab === "invitar_agentes" && user && user.role === ROLES.AGENCY && (
+              <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light">
+                  <h2 className="text-lg font-bold text-text-primary">Gestión de Equipo</h2>
+                  <p className="text-xs text-text-secondary mt-1">Invita asesores a tu empresa y gestiona los miembros activos de tu equipo.</p>
+                </div>
+
+                {/* Invite form */}
+                <div className="bg-white border border-border-light rounded-sm p-5 mb-6">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">Enviar Nueva Invitación</h3>
+                  <form onSubmit={handleInviteConsultant} className="flex gap-3 items-end">
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Correo Electrónico del Asesor</label>
+                      <input
+                        type="email"
+                        required
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="asesor@correo.com"
+                        className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isSendingInvite}
+                      className="px-4 py-2 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center gap-2 h-[36px]"
+                    >
+                      {isSendingInvite ? "Enviando..." : "📧 Enviar Invitación"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Members list */}
+                <div className="bg-white border border-border-light rounded-sm p-5 mb-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">Miembros Activos del Equipo</h3>
+                  {isLoadingMembers ? (
+                    <div className="flex justify-center py-6">
+                      <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                    </div>
+                  ) : agencyMembers.length === 0 ? (
+                    <p className="text-xs text-text-muted italic py-4 text-center">No hay miembros activos en tu equipo todavía.</p>
+                  ) : (
+                    <div className="divide-y divide-border-light">
+                      {agencyMembers.map((m: AgencyMember) => (
+                        <div key={m.id} className="py-3 flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-text-primary">
+                              {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : "Asesor TodoVisa"}
+                            </p>
+                            <p className="text-[11px] text-text-secondary">{m.profile?.email || "—"}</p>
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                            {m.member_role === "supervisor" ? "Supervisor" : "Asesor"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Invitations list */}
+                <div className="bg-white border border-border-light rounded-sm p-5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">Invitaciones Enviadas</h3>
+                  {isLoadingInvitations ? (
+                    <div className="flex justify-center py-6">
+                      <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                    </div>
+                  ) : agencyInvitations.length === 0 ? (
+                    <p className="text-xs text-text-muted italic py-4 text-center">No hay invitaciones enviadas aún.</p>
+                  ) : (
+                    <div className="divide-y divide-border-light">
+                      {agencyInvitations.map((inv: AgencyInvitation) => (
+                        <div key={inv.id} className="py-3 flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-text-primary">{inv.email}</p>
+                            <p className="text-[11px] text-text-muted">{new Date(inv.created_at).toLocaleDateString("es-SV")}</p>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase ${
+                            inv.status === "accepted"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : inv.status === "pending"
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-gray-100 text-gray-500 border-gray-200"
+                          }`}>
+                            {inv.status === "accepted" ? "Aceptada" : inv.status === "pending" ? "Pendiente" : "Vencida"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

@@ -384,13 +384,9 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
                   Has adquirido la evaluación de viabilidad diagnóstica VIPRO con éxito.
                 </p>
-              ) : user?.viproCompleted ? (
-                <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                  Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name}</span>. Hemos habilitado el chat de soporte interno de TodoVisa para que te comuniques de inmediato.
-                </p>
               ) : (
                 <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                  Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name}</span> con éxito. Para comenzar a chatear, debes completar primero la Evaluación Diagnóstica VIPRO.
+                  Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name}</span> con éxito. Hemos habilitado el chat de soporte interno de TodoVisa para que te comuniques de inmediato.
                 </p>
               )}
             </div>
@@ -405,23 +401,13 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                   </p>
                 </div>
               </div>
-            ) : user?.viproCompleted ? (
+            ) : (
               <div className="w-full bg-brand-light/35 border border-brand-primary/10 rounded p-4 text-left flex items-center gap-3">
                 <span className="text-xl">💬</span>
                 <div>
                   <p className="text-xs font-bold text-brand-primary">Chat Habilitado</p>
                   <p className="text-[10px] text-text-secondary leading-normal">
                     Puedes acceder a la conversación desde la pestaña &quot;Mi Asesor Asignado&quot; en tu perfil.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="w-full bg-amber-50 border border-amber-200 rounded p-4 text-left flex items-center gap-3">
-                <span className="text-xl">📊</span>
-                <div>
-                  <p className="text-xs font-bold text-amber-800">Evaluación VIPRO Requerida</p>
-                  <p className="text-[10px] text-amber-700 leading-normal">
-                    Tu asesor asignado necesita conocer tu perfil y puntaje VIPRO para poder iniciar el chat.
                   </p>
                 </div>
               </div>
@@ -435,9 +421,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
             >
               {product === "vipro"
                 ? "Ir al Formulario VIPRO"
-                : user?.viproCompleted && agent
-                  ? `Comenzar Chat con ${agent.name.split(" ")[1] || agent.name}`
-                  : "Ver mi Perfil y Completar VIPRO"}
+                : `Comenzar Chat con ${(agent?.name || "").split(" ")[1] || agent?.name || "Asesor"}`}
             </button>
           </div>
         )}
