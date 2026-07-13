@@ -42,27 +42,19 @@ function PreformularioContent() {
     const headerRef = useRef(null);
     const [headerHeight, setHeaderHeight] = useState<number | null>(null);
     const [started, setStarted] = useState(false);
-    const [showIntake, setShowIntake] = useState(true);
-    const [intakeType, setIntakeType] = useState<"first" | "renewal" | "">("");
+    const [selectedCountryCode, setSelectedCountryCode] = useState<string>("US");
     const [intakeVisaClass, setIntakeVisaClass] = useState<"turismo" | "estudios" | "trabajo" | "transito" | "">("");
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState<Record<number, string>>({});
     const [completed, setCompleted] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     
-    // New state variables for screener
-    const [showScreener, setShowScreener] = useState(false);
-    const [screenerAnswers, setScreenerAnswers] = useState<Record<string, boolean>>({});
-    const [isWaiverEligible, setIsWaiverEligible] = useState<boolean | null>(null);
-    const [showScreenerResult, setShowScreenerResult] = useState(false);
-    
-    const { user, setUser } = useAuthStore();
+    const { user } = useAuthStore();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [isMounted, setIsMounted] = useState(false);
 
-    const countryCode = (searchParams.get("country") || "US").toUpperCase();
-    const config = countryConfigs[countryCode] || countryConfigs.US;
+    const config = countryConfigs[selectedCountryCode] || countryConfigs.US;
     const questions = config.questions;
     const countryName = config.name;
     const countryEmoji = config.emoji;
@@ -73,6 +65,14 @@ function PreformularioContent() {
             setHeaderHeight((headerRef.current as HTMLElement).offsetHeight);
         }
     }, []);
+
+    // Set initial country from search parameters if valid
+    useEffect(() => {
+        const countryParam = searchParams.get("country")?.toUpperCase();
+        if (countryParam && countryConfigs[countryParam]) {
+            setSelectedCountryCode(countryParam);
+        }
+    }, [searchParams]);
 
     // Load active progress from localStorage or Supabase
     useEffect(() => {
@@ -85,7 +85,7 @@ function PreformularioContent() {
                     .from("preformularios")
                     .select("id")
                     .eq("user_id", user.id)
-                    .eq("destination_country", countryCode)
+                    .eq("destination_country", selectedCountryCode)
                     .eq("is_completed", true)
                     .maybeSingle();
 
@@ -107,7 +107,7 @@ function PreformularioContent() {
                     .from("preformularios")
                     .select("*")
                     .eq("user_id", user.id)
-                    .eq("destination_country", countryCode)
+                    .eq("destination_country", selectedCountryCode)
                     .eq("is_completed", false)
                     .maybeSingle();
 
@@ -115,11 +115,7 @@ function PreformularioContent() {
                     savedAnswers = dbProgress.answers;
                     savedStep = dbProgress.current_step || 0;
                     hasSavedProgress = true;
-                    if (dbProgress.intake_type) setIntakeType(dbProgress.intake_type as "first" | "renewal");
                     if (dbProgress.intake_visa_class) setIntakeVisaClass(dbProgress.intake_visa_class as "turismo" | "estudios" | "trabajo" | "transito");
-                    if (dbProgress.interview_waiver_eligible !== undefined && dbProgress.interview_waiver_eligible !== null) {
-                        setIsWaiverEligible(dbProgress.interview_waiver_eligible);
-                    }
                     console.log("Restored preformulario progress from database.");
                 }
             } catch (dbErr) {
@@ -128,19 +124,15 @@ function PreformularioContent() {
 
             // 2. Fallback to localStorage if no DB entry found
             if (!hasSavedProgress) {
-                const localAnswers = localStorage.getItem(`preform_progress_answers_${countryCode}_${user.id}`);
-                const localStep = localStorage.getItem(`preform_progress_step_${countryCode}_${user.id}`);
-                const localIntakeType = localStorage.getItem(`preform_progress_intake_type_${countryCode}_${user.id}`);
-                const localIntakeVisa = localStorage.getItem(`preform_progress_intake_visa_${countryCode}_${user.id}`);
-                const localWaiverEligible = localStorage.getItem(`preform_progress_waiver_eligible_${countryCode}_${user.id}`);
+                const localAnswers = localStorage.getItem(`preform_progress_answers_${selectedCountryCode}_${user.id}`);
+                const localStep = localStorage.getItem(`preform_progress_step_${selectedCountryCode}_${user.id}`);
+                const localIntakeVisa = localStorage.getItem(`preform_progress_intake_visa_${selectedCountryCode}_${user.id}`);
 
                 if (localAnswers) {
                     try {
                         savedAnswers = JSON.parse(localAnswers);
                         savedStep = localStep ? Number(localStep) : 0;
-                        if (localIntakeType) setIntakeType(localIntakeType as "first" | "renewal");
                         if (localIntakeVisa) setIntakeVisaClass(localIntakeVisa as "turismo" | "estudios" | "trabajo" | "transito");
-                        if (localWaiverEligible) setIsWaiverEligible(localWaiverEligible === "true");
                         hasSavedProgress = true;
                         console.log("Restored preformulario progress from localStorage.");
                     } catch (e) {
@@ -153,12 +145,16 @@ function PreformularioContent() {
                 setAnswers(savedAnswers);
                 setCurrentStep(savedStep);
                 setStarted(true);
-                setShowIntake(false);
+            } else {
+                // Clear answers if starting fresh
+                setAnswers({});
+                setCurrentStep(0);
+                setStarted(false);
             }
         };
 
         loadProgress();
-    }, [user, countryCode]);
+    }, [user, selectedCountryCode]);
 
     if (!isMounted) {
         return (
@@ -224,15 +220,12 @@ function PreformularioContent() {
 
     const question = questions[currentStep];
 
-
-
-    const saveEvaluationProgress = async (newAnswers: Record<number, string>, step: number, waiverEligible: boolean | null = isWaiverEligible) => {
+    const saveEvaluationProgress = async (newAnswers: Record<number, string>, step: number) => {
         if (!user) return;
-        localStorage.setItem(`preform_progress_answers_${countryCode}_${user.id}`, JSON.stringify(newAnswers));
-        localStorage.setItem(`preform_progress_step_${countryCode}_${user.id}`, String(step));
-        if (intakeType) localStorage.setItem(`preform_progress_intake_type_${countryCode}_${user.id}`, intakeType);
-        if (intakeVisaClass) localStorage.setItem(`preform_progress_intake_visa_${countryCode}_${user.id}`, intakeVisaClass);
-        if (waiverEligible !== null) localStorage.setItem(`preform_progress_waiver_eligible_${countryCode}_${user.id}`, String(waiverEligible));
+        localStorage.setItem(`preform_progress_answers_${selectedCountryCode}_${user.id}`, JSON.stringify(newAnswers));
+        localStorage.setItem(`preform_progress_step_${selectedCountryCode}_${user.id}`, String(step));
+        localStorage.setItem(`preform_progress_intake_type_${selectedCountryCode}_${user.id}`, "first");
+        if (intakeVisaClass) localStorage.setItem(`preform_progress_intake_visa_${selectedCountryCode}_${user.id}`, intakeVisaClass);
 
         try {
             // Save draft progress to Supabase
@@ -240,7 +233,7 @@ function PreformularioContent() {
                 .from("preformularios")
                 .select("id")
                 .eq("user_id", user.id)
-                .eq("destination_country", countryCode)
+                .eq("destination_country", selectedCountryCode)
                 .eq("is_completed", false)
                 .maybeSingle();
 
@@ -251,9 +244,9 @@ function PreformularioContent() {
                         answers: newAnswers,
                         current_step: step,
                         is_completed: false,
-                        intake_type: intakeType || 'first',
+                        intake_type: "first",
                         intake_visa_class: intakeVisaClass || 'turismo',
-                        interview_waiver_eligible: waiverEligible
+                        interview_waiver_eligible: false
                     })
                     .eq("id", existing.id);
             } else {
@@ -262,13 +255,13 @@ function PreformularioContent() {
                     .insert([
                         {
                             user_id: user.id,
-                            destination_country: countryCode,
+                            destination_country: selectedCountryCode,
                             answers: newAnswers,
                             current_step: step,
                             is_completed: false,
-                            intake_type: intakeType || 'first',
+                            intake_type: "first",
                             intake_visa_class: intakeVisaClass || 'turismo',
-                            interview_waiver_eligible: waiverEligible
+                            interview_waiver_eligible: false
                         }
                     ]);
             }
@@ -289,15 +282,15 @@ function PreformularioContent() {
                 localStorage.setItem(`preformulario_completed_user_id_${user.id}`, "true");
                 
                 // Clear active localStorage draft
-                localStorage.removeItem(`preform_progress_answers_${countryCode}_${user.id}`);
-                localStorage.removeItem(`preform_progress_step_${countryCode}_${user.id}`);
+                localStorage.removeItem(`preform_progress_answers_${selectedCountryCode}_${user.id}`);
+                localStorage.removeItem(`preform_progress_step_${selectedCountryCode}_${user.id}`);
                 
                 // Save completed form status to Supabase
                 const { data: existing } = await supabase
                     .from("preformularios")
                     .select("id")
                     .eq("user_id", user.id)
-                    .eq("destination_country", countryCode)
+                    .eq("destination_country", selectedCountryCode)
                     .eq("is_completed", false)
                     .maybeSingle();
 
@@ -307,9 +300,9 @@ function PreformularioContent() {
                         .update({
                             answers: answers,
                             is_completed: true,
-                            intake_type: intakeType || 'first',
+                            intake_type: "first",
                             intake_visa_class: intakeVisaClass || 'turismo',
-                            interview_waiver_eligible: isWaiverEligible
+                            interview_waiver_eligible: false
                         })
                         .eq("id", existing.id);
                 } else {
@@ -318,12 +311,12 @@ function PreformularioContent() {
                         .insert([
                             {
                                 user_id: user.id,
-                                destination_country: countryCode,
+                                destination_country: selectedCountryCode,
                                 answers: answers,
                                 is_completed: true,
-                                intake_type: intakeType || 'first',
+                                intake_type: "first",
                                 intake_visa_class: intakeVisaClass || 'turismo',
-                                interview_waiver_eligible: isWaiverEligible
+                                interview_waiver_eligible: false
                             }
                         ]);
                 }
@@ -347,94 +340,44 @@ function PreformularioContent() {
         }
     };
 
-    // Welcome Screen
+    // Welcome Screen (Intake and Country Configuration combined)
     if (!started) {
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-8">
-                        <div className="flex items-center gap-4 border-b border-border-light pb-6">
-                            <span className="text-5xl">{countryEmoji}</span>
-                            <div>
-                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Fase 2: Expediente y Captación</span>
-                                <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">Preformulario</h1>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-col gap-5">
-                            <h2 className="text-xl font-bold text-text-primary">Instrucciones Generales:</h2>
-                            <div className="flex flex-col gap-4 text-text-secondary leading-relaxed">
-                                <p className="bg-brand-light/30 border-l-4 border-brand-primary/40 p-4 rounded-r-xl text-base text-left">
-                                    Por favor complete todos los campos de información personal, pasaporte, laboral y de seguridad con datos reales. Esta información se utilizará para que tu asesor complete el formulario oficial consular DS-160.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="bg-background-main p-6 rounded-2xl border border-border-light flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
-                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura del Preformulario</span>
-                                <p className="text-text-primary font-bold text-lg">{questions.length} preguntas en total</p>
-                            </div>
-                            <button 
-                                onClick={() => setStarted(true)}
-                                className="w-full sm:w-auto bg-brand-primary text-white font-semibold px-8 py-4 rounded-xl hover:bg-brand-hover transition-colors shadow-md text-lg cursor-pointer"
-                            >
-                                Empezar Preformulario →
-                            </button>
-                        </div>
-                    </div>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
-
-    // Paso 0: Intake Form
-    if (started && showIntake) {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main font-sans">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-2xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-3xl p-8 md:p-12 shadow-xl border border-border-light flex flex-col gap-8 animate-in fade-in duration-300">
-                        <div className="text-center">
-                            <span className="text-4xl">🎯</span>
-                            <span className="block text-xs font-bold tracking-widest text-brand-primary uppercase mt-3">PASO 0: Configuración del Trámite</span>
-                            <h2 className="text-2xl md:text-3xl font-serif text-text-primary font-semibold italic mt-2">Configura tu Preformulario</h2>
-                            <p className="text-xs text-text-secondary leading-relaxed mt-2 max-w-md mx-auto">
-                                Antes de iniciar, configura el tipo de trámite y la categoría de visado a la que deseas aplicar.
-                            </p>
-                        </div>
-
-                        {/* Tipo de Trámite Selector */}
-                        <div className="space-y-3">
-                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">1. Tipo de Solicitud</label>
-                            <div className="grid grid-cols-2 gap-4">
-                                {[
-                                    { id: "first", title: "Primera Vez", desc: "Nunca he tenido visa para este país" },
-                                    { id: "renewal", title: "Renovación", desc: "Tengo o tuve visa y quiero renovarla" }
-                                ].map((item) => (
-                                    <button
-                                        key={item.id}
-                                        type="button"
-                                        onClick={() => setIntakeType(item.id as "first" | "renewal")}
-                                        className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
-                                            intakeType === item.id 
-                                                ? "border-brand-primary bg-brand-light/30 ring-1 ring-brand-primary font-bold" 
-                                                : "border-border-light bg-white hover:bg-background-hover/30"
-                                        }`}
-                                    >
-                                        <p className="text-sm font-bold text-text-primary">{item.title}</p>
-                                        <p className="text-[10px] text-text-secondary leading-relaxed mt-1">{item.desc}</p>
-                                    </button>
-                                ))}
+                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-8">
+                        
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-border-light pb-8">
+                            <div className="flex items-center gap-4">
+                                <span className="text-5xl">{countryEmoji}</span>
+                                <div className="text-left">
+                                    <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Fase 2: Expediente y Captación</span>
+                                    <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">Preformulario</h1>
+                                </div>
+                            </div>
+                            
+                            {/* Country Selector Dropdown */}
+                            <div className="flex flex-col gap-1.5 items-start">
+                                <label className="text-xs font-bold text-text-secondary uppercase tracking-wider">País del Preformulario</label>
+                                <select 
+                                    value={selectedCountryCode}
+                                    onChange={(e) => setSelectedCountryCode(e.target.value)}
+                                    className="border border-border-light rounded-md px-4 py-2.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm text-sm font-medium min-w-[200px]"
+                                >
+                                    {Object.entries(countryConfigs).map(([code, details]) => (
+                                        <option key={code} value={code}>
+                                            {details.emoji} {details.name}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
 
-                        {/* Visa Class Selector */}
+                        {/* Visa Class Selector directly on Welcome Screen */}
                         <div className="space-y-3">
-                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">2. Tipo de Visado Objetivo</label>
-                            <div className="grid grid-cols-2 gap-4">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">Tipo de Visado Objetivo</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {[
                                     { id: "turismo", label: "✈️ Turismo / Negocios", desc: "Visa B1/B2 o visitante regular" },
                                     { id: "estudios", label: "🎓 Estudios / Intercambio", desc: "Visa académica o intercambio estudiantil" },
@@ -458,223 +401,33 @@ function PreformularioContent() {
                             </div>
                         </div>
 
-                        {/* Buttons */}
-                        <div className="pt-4 border-t border-border-light flex gap-3">
-                            <button
-                                type="button"
-                                onClick={() => setStarted(false)}
-                                className="px-5 py-3 rounded-xl border border-border-light text-text-secondary font-semibold hover:bg-background-hover transition-all text-sm cursor-pointer"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="button"
-                                disabled={!intakeType || !intakeVisaClass}
-                                onClick={() => {
-                                    localStorage.setItem(`preform_progress_intake_type_${countryCode}_${user.id}`, intakeType);
-                                    localStorage.setItem(`preform_progress_intake_visa_${countryCode}_${user.id}`, intakeVisaClass);
-                                    
-                                    if (intakeType === "renewal") {
-                                        setShowIntake(false);
-                                        setShowScreener(true);
-                                    } else {
-                                        setIsWaiverEligible(false);
-                                        setShowIntake(false);
-                                        saveEvaluationProgress({}, 0, false);
-                                    }
-                                }}
-                                className="flex-1 py-3 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md text-sm cursor-pointer"
-                            >
-                                Continuar →
-                            </button>
-                        </div>
-                    </div>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
-
-    // Paso 0.5: Screener de Elegibilidad para Renovación
-    if (started && showScreener) {
-        const SCREENER_QUESTIONS = [
-            {
-                id: "same_category",
-                text: "¿Tu visa a renovar es de la misma categoría que estás solicitando actualmente? (por ejemplo, ambas son B1/B2 o ambas son F1)",
-                expected: true,
-            },
-            {
-                id: "issued_same_country",
-                text: "¿Tu visa anterior fue emitida en el mismo país desde el que estás aplicando actualmente?",
-                expected: true,
-            },
-            {
-                id: "valid_or_expired_48m",
-                text: "¿Tu visa anterior aún se encuentra vigente o venció hace menos de 48 meses?",
-                expected: true,
-            },
-            {
-                id: "fingerprints_given",
-                text: "¿Tenías al menos 14 años de edad cuando se emitió tu visa anterior y se te tomaron las huellas dactilares (los 10 dedos) en la Embajada?",
-                expected: true,
-            },
-            {
-                id: "passport_in_possession",
-                text: "¿Tienes en tu posesión física el pasaporte anterior que contiene la visa que deseas renovar?",
-                expected: true,
-            },
-            {
-                id: "no_refusal_since",
-                text: "¿Te han negado alguna solicitud de visa para este país desde que se emitió tu última visa?",
-                expected: false,
-            },
-            {
-                id: "not_lost_stolen_revoked",
-                text: "¿Tu visa anterior ha sido extraviada, robada, cancelada o revocada alguna vez?",
-                expected: false,
-            }
-        ];
-
-        const allQuestionsAnswered = SCREENER_QUESTIONS.every(q => screenerAnswers[q.id] !== undefined);
-
-        const handleEvaluateWaiver = () => {
-            const isEligible = SCREENER_QUESTIONS.every(q => {
-                const answer = screenerAnswers[q.id];
-                return answer === q.expected;
-            });
-            setIsWaiverEligible(isEligible);
-            setShowScreenerResult(true);
-        };
-
-        if (showScreenerResult) {
-            return (
-                <div className="min-h-screen w-full flex flex-col relative bg-background-main font-sans">
-                    <Header headerRef={headerRef} />
-                    <main className="w-full max-w-2xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                        <div className="bg-white rounded-3xl p-8 md:p-12 shadow-xl border border-border-light flex flex-col gap-8 animate-in fade-in duration-300">
-                            <div className="text-center">
-                                <span className="text-4xl">{isWaiverEligible ? "🎉" : "ℹ️"}</span>
-                                <span className="block text-xs font-bold tracking-widest text-brand-primary uppercase mt-3">Resultado del Diagnóstico</span>
-                                <h2 className="text-2xl md:text-3xl font-serif text-text-primary font-semibold italic mt-2">
-                                    {isWaiverEligible ? "¡Apto para Exención de Entrevista!" : "Renovación con Entrevista"}
-                                </h2>
-                            </div>
-
-                            {isWaiverEligible ? (
-                                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-left space-y-3">
-                                    <p className="text-sm text-emerald-950 font-bold">
-                                        Calificas para el programa de exención de entrevista consular (Dropbox / Buzón).
-                                    </p>
-                                    <p className="text-xs text-emerald-900/90 leading-relaxed">
-                                        Esto significa que no necesitarás asistir a una entrevista con un oficial consular en la Embajada. Tu trámite consistirá en el llenado de formularios y el depósito físico de tus documentos en una oficina autorizada. Tu panel de control se actualizará automáticamente con estos pasos simplificados.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 text-left space-y-3">
-                                    <p className="text-sm text-blue-950 font-bold">
-                                        Deberás programar y asistir a una entrevista presencial.
-                                    </p>
-                                    <p className="text-xs text-blue-900/90 leading-relaxed">
-                                        Debido a tus respuestas (por ejemplo, vencimiento mayor a 48 meses o no poseer el pasaporte físico anterior), la sección consular requiere tu presencia física. No te preocupes, el proceso de renovación sigue siendo más ágil y te guiaremos detalladamente para programar tus citas y preparar tu entrevista.
-                                    </p>
-                                </div>
-                            )}
-
-                            <div className="pt-4 border-t border-border-light flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowScreenerResult(false);
-                                        setIsWaiverEligible(null);
-                                    }}
-                                    className="px-5 py-3 rounded-xl border border-border-light text-text-secondary font-semibold hover:bg-background-hover transition-all text-sm cursor-pointer"
-                                >
-                                    Corregir Respuestas
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowScreener(false);
-                                        saveEvaluationProgress({}, 0, isWaiverEligible);
-                                    }}
-                                    className="flex-1 py-3 bg-brand-primary hover:bg-brand-hover text-white font-bold rounded-xl transition-all shadow-md text-sm cursor-pointer text-center"
-                                >
-                                    Continuar al Preformulario →
-                                </button>
+                        {/* Informative Box for Renewal */}
+                        <div className="bg-blue-50/40 border border-blue-200/50 rounded-2xl p-6 text-left flex items-start gap-4 shadow-sm">
+                            <span className="text-2xl mt-0.5">💡</span>
+                            <div className="flex flex-col gap-1">
+                                <span className="text-base font-serif font-semibold text-blue-900 italic">¿Trámite de Renovación?</span>
+                                <p className="text-xs text-text-secondary leading-relaxed">
+                                    Si ya posees o has tenido una visa anteriormente para este país y deseas realizar una renovación, <strong>no necesitas contratar planes ni completar este preformulario</strong>. Las renovaciones de visa son directas. Por favor, comunícate con nuestro equipo de asistencia para guiarte en tu renovación.
+                                </p>
                             </div>
                         </div>
-                    </main>
-                    <Footer />
-                </div>
-            );
-        }
 
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main font-sans">
-                <Header headerRef={headerRef} />
-                <main className="w-full max-w-2xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-3xl p-8 md:p-12 shadow-xl border border-border-light flex flex-col gap-8 animate-in fade-in duration-300">
-                        <div className="text-center">
-                            <span className="text-4xl">📝</span>
-                            <span className="block text-xs font-bold tracking-widest text-brand-primary uppercase mt-3">PASO 0.5: Diagnóstico de Exención</span>
-                            <h2 className="text-2xl md:text-3xl font-serif text-text-primary font-semibold italic mt-2">¿Calificas para renovación sin entrevista?</h2>
-                            <p className="text-xs text-text-secondary leading-relaxed mt-2">
-                                Responde estas preguntas para verificar si la Embajada te permite realizar el trámite mediante buzón (Drop-box) sin entrevista presencial.
-                            </p>
-                        </div>
-
-                        <div className="space-y-6 text-left max-h-[400px] overflow-y-auto pr-2">
-                            {SCREENER_QUESTIONS.map((q, idx) => (
-                                <div key={q.id} className="pb-4 border-b border-border-light last:border-b-0 space-y-3">
-                                    <p className="text-sm font-medium text-text-primary">
-                                        {idx + 1}. {q.text}
-                                    </p>
-                                    <div className="flex gap-4">
-                                        <button
-                                            type="button"
-                                            onClick={() => setScreenerAnswers({ ...screenerAnswers, [q.id]: true })}
-                                            className={`px-6 py-2 rounded-xl border text-sm font-semibold transition-all cursor-pointer ${
-                                                screenerAnswers[q.id] === true
-                                                    ? "bg-brand-primary text-white border-brand-primary shadow-sm"
-                                                    : "bg-white text-text-primary border-border-light hover:bg-background-hover/30"
-                                            }`}
-                                        >
-                                            Sí
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setScreenerAnswers({ ...screenerAnswers, [q.id]: false })}
-                                            className={`px-6 py-2 rounded-xl border text-sm font-semibold transition-all cursor-pointer ${
-                                                screenerAnswers[q.id] === false
-                                                    ? "bg-brand-primary text-white border-brand-primary shadow-sm"
-                                                    : "bg-white text-text-primary border-border-light hover:bg-background-hover/30"
-                                            }`}
-                                        >
-                                            No
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="pt-4 border-t border-border-light flex gap-3">
-                            <button
-                                type="button"
+                        <div className="bg-background-main p-6 rounded-2xl border border-border-light flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div className="text-left">
+                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura del Preformulario</span>
+                                <p className="text-text-primary font-bold text-lg">{questions.length} preguntas en total</p>
+                            </div>
+                            <button 
+                                disabled={!intakeVisaClass}
                                 onClick={() => {
-                                    setShowScreener(false);
-                                    setShowIntake(true);
+                                    localStorage.setItem(`preform_progress_intake_type_${selectedCountryCode}_${user.id}`, "first");
+                                    localStorage.setItem(`preform_progress_intake_visa_${selectedCountryCode}_${user.id}`, intakeVisaClass);
+                                    saveEvaluationProgress(answers, currentStep);
+                                    setStarted(true);
                                 }}
-                                className="px-5 py-3 rounded-xl border border-border-light text-text-secondary font-semibold hover:bg-background-hover transition-all text-sm cursor-pointer"
+                                className="w-full sm:w-auto bg-brand-primary disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-8 py-4 rounded-xl hover:bg-brand-hover transition-colors shadow-md text-lg cursor-pointer"
                             >
-                                Atrás
-                            </button>
-                            <button
-                                type="button"
-                                disabled={!allQuestionsAnswered}
-                                onClick={handleEvaluateWaiver}
-                                className="flex-1 py-3 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md text-sm cursor-pointer"
-                            >
-                                Evaluar Calificación →
+                                Empezar Preformulario →
                             </button>
                         </div>
                     </div>

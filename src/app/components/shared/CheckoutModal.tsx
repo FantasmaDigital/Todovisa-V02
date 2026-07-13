@@ -292,7 +292,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 type="submit"
                 className="flex-1 py-2.5 bg-brand-primary text-white hover:bg-brand-hover text-xs font-semibold rounded-sm transition-all focus:outline-none shadow-sm flex items-center justify-center gap-1.5"
               >
-                <span>🔒 Pagar $112.50 USD</span>
+                <span>🔒 Pagar {product === "vipro" ? "$19.99 USD" : "$112.50 USD"}</span>
               </button>
             </div>
           </form>

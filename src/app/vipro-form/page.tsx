@@ -2,76 +2,45 @@
 
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
-import { useEffect, useRef, useState, Suspense, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, Suspense } from "react";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
-import agentsData from "../dummies/agents.json";
+import { CheckoutModal } from "../components/shared/CheckoutModal";
 import supabase from "../lib/supabase";
 
 function ViproFormContent() {
     const headerRef = useRef(null);
     const [_, setHeaderHeight] = useState<number | null>(null);
-    const [selectedCountryCode, setSelectedCountryCode] = useState<string>("");
-    const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-    const [inProgressCountry, setInProgressCountry] = useState<string>("");
+    const [inProgress, setInProgress] = useState<boolean>(false);
+    const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const router = useRouter();
-    const searchParams = useSearchParams();
     const user = useAuthStore((state) => state.user);
-
-    const countryMap: Record<string, { emoji: string; name: string }> = {
-        US: { emoji: "🇺🇸", name: "Estados Unidos" },
-        CA: { emoji: "🇨🇦", name: "Canadá" },
-        MX: { emoji: "🇲🇽", name: "México" },
-        UK: { emoji: "🇬🇧", name: "Inglaterra" },
-        CN: { emoji: "🇨🇳", name: "China" },
-        AU: { emoji: "🇦🇺", name: "Australia" },
-        IN: { emoji: "🇮🇳", name: "India" }
-    };
-
-    const assignedAgent = useMemo(() => {
-        return user?.assignedAgentId 
-            ? (agentsData as any[]).find(a => a.id === user.assignedAgentId) 
-            : null;
-    }, [user?.assignedAgentId]);
-
-    const availableCountries = useMemo(() => {
-        return Object.entries(countryMap).filter(([_, details]) => {
-            if (!assignedAgent) return true;
-            return assignedAgent.countries.includes(details.name);
-        });
-    }, [assignedAgent]);
-
-    const handleSelectCountry = (code: string) => {
-        setSelectedCountryCode(code);
-        setSelectedCountry(countryMap[code] ? `${countryMap[code].emoji} ${countryMap[code].name}` : null);
-    };
 
     // Check if there is an in-progress evaluation
     useEffect(() => {
         const checkProgress = async () => {
-            let dest = "";
+            let hasProgress = false;
             // Check local storage first
             if (typeof window !== "undefined") {
-                const localDest = localStorage.getItem("vipro_progress_destination");
                 const localAnswers = localStorage.getItem("vipro_progress_answers");
-                if (localDest && localAnswers) {
+                if (localAnswers) {
                     try {
                         const parsed = JSON.parse(localAnswers);
                         if (Object.keys(parsed).length > 0) {
-                            dest = localDest;
+                            hasProgress = true;
                         }
                     } catch (e) {}
                 }
             }
 
             // If not in local storage and logged in, check supabase user metadata
-            if (!dest && user) {
+            if (!hasProgress && user) {
                 try {
                     const { data: { user: supabaseUser } } = await supabase.auth.getUser();
                     const metadata = supabaseUser?.user_metadata || {};
-                    if (metadata.vipro_progress_destination && metadata.vipro_progress_answers) {
+                    if (metadata.vipro_progress_answers) {
                         if (Object.keys(metadata.vipro_progress_answers).length > 0) {
-                            dest = metadata.vipro_progress_destination;
+                            hasProgress = true;
                         }
                     }
                 } catch (err) {
@@ -79,23 +48,11 @@ function ViproFormContent() {
                 }
             }
 
-            if (dest) {
-                setInProgressCountry(dest);
-            }
+            setInProgress(hasProgress);
         };
 
         checkProgress();
     }, [user]);
-
-    useEffect(() => {
-        const countryParam = searchParams.get("country")?.toUpperCase();
-        if (countryParam && countryMap[countryParam]) {
-            const isAvailable = availableCountries.some(([code]) => code === countryParam);
-            if (isAvailable) {
-                handleSelectCountry(countryParam);
-            }
-        }
-    }, [searchParams, availableCountries]);
 
     useEffect(() => {
         if (headerRef.current) {
@@ -104,35 +61,111 @@ function ViproFormContent() {
         }
     }, []);
 
+    if (!user) {
+        return (
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+                <Header headerRef={headerRef} />
+                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-md mx-auto my-12">
+                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center mb-6 text-2xl font-bold">
+                        🔒
+                    </div>
+                    <h2 className="text-2xl font-bold text-text-primary mb-3">Acceso Restringido</h2>
+                    <p className="text-sm text-text-secondary mb-8 leading-relaxed">
+                        Debes iniciar sesión con tu cuenta para acceder a la Evaluación VIPRO.
+                    </p>
+                    <button
+                        onClick={() => router.push("/auth/signin")}
+                        className="w-full bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm shadow-sm"
+                    >
+                        Iniciar Sesión
+                    </button>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
+
+    const hasPaid = user.hasPaidVipro || user.hasPaidAdvisor;
+    const completed = user.viproCompleted;
+
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
             <Header headerRef={headerRef} />
             <main className="w-[80%] mx-auto py-12 md:py-20 flex flex-col gap-24 flex-1">
                 <div className="flex flex-col md:flex-row items-center gap-20">
                     <div className="w-full md:w-1/2 flex flex-col items-start gap-6">
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-text-primary leading-tight tracking-tight">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-text-primary leading-tight tracking-tight text-left">
                             Evaluación <span className="text-brand-primary font-bold">VIPRO</span>
                         </h1>
 
-                        <p className="text-base text-text-secondary leading-relaxed">
+                        <p className="text-base text-text-secondary leading-relaxed text-left">
                             Nuestra Evaluación VIPRO de viabilidad analiza tu perfil consular y te brinda recomendaciones personalizadas impulsadas por IA para aumentar tus probabilidades de éxito.
                         </p>
 
-                        {inProgressCountry ? (
-                            /* In-progress State */
+                        {completed ? (
+                            /* Already completed state (can only complete it once) */
+                            <div className="w-full bg-emerald-50 border border-emerald-200 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest">Evaluación Finalizada</span>
+                                    <p className="text-lg font-serif font-semibold text-emerald-900">
+                                        ¡Ya has completado tu Evaluación VIPRO!
+                                    </p>
+                                </div>
+                                <p className="text-sm text-emerald-800/80">
+                                    De acuerdo con nuestras políticas, la evaluación diagnóstica VIPRO se realiza una sola vez. Puedes consultar tu reporte de viabilidad y tus recomendaciones detalladas directamente en tu panel.
+                                </p>
+                                <div className="flex mt-2">
+                                    <button
+                                        onClick={() => router.push("/profile?tab=proceso")}
+                                        className="w-full sm:w-auto bg-emerald-600 text-white font-semibold py-3 px-8 rounded-md hover:bg-emerald-700 transition-colors shadow-md text-sm cursor-pointer"
+                                    >
+                                        Ver Resultados en Mi Panel
+                                    </button>
+                                </div>
+                            </div>
+                        ) : !hasPaid ? (
+                            /* Not paid: Display payment simulation gate */
+                            <div className="w-full bg-amber-50/45 border border-amber-200/50 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-bold text-amber-700 uppercase tracking-widest">Acceso de Pago</span>
+                                    <p className="text-lg font-serif font-semibold text-amber-900">
+                                        Adquiere tu Evaluación VIPRO
+                                    </p>
+                                </div>
+                                <p className="text-xs text-text-secondary leading-relaxed">
+                                    Para comenzar el cuestionario diagnóstico y recibir tu reporte automatizado con inteligencia artificial, debes completar el pago seguro de la evaluación.
+                                </p>
+                                <div className="flex flex-col gap-4 mt-2">
+                                    <div className="flex items-end gap-3">
+                                        <span className="text-4xl font-bold text-text-primary">$19.99</span>
+                                        <span className="text-sm text-text-secondary mb-1">USD</span>
+                                    </div>
+                                    <span className="text-xs font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
+                                        🎉 Recibirás un 25% de descuento en tu asesoría posterior
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={() => setIsCheckoutOpen(true)}
+                                    className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer mt-2 text-center"
+                                >
+                                    Adquirir VIPRO Express
+                                </button>
+                            </div>
+                        ) : inProgress ? (
+                            /* Paid and in-progress state */
                             <div className="w-full bg-brand-light/45 border border-brand-primary/20 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
                                 <div className="flex flex-col gap-1">
                                     <span className="text-xs font-bold text-brand-primary uppercase tracking-widest">Cuestionario en Curso</span>
                                     <p className="text-lg font-serif font-semibold text-text-primary">
-                                        Tienes una evaluación iniciada para {countryMap[inProgressCountry]?.emoji || "✈️"} {countryMap[inProgressCountry]?.name || inProgressCountry}
+                                        Tienes una evaluación iniciada
                                     </p>
                                 </div>
-                                <p className="text-sm text-text-secondary">
+                                <p className="text-sm text-text-secondary font-sans">
                                     Puedes continuar respondiendo donde lo dejaste para recibir tu reporte de viabilidad y puntaje consular.
                                 </p>
                                 <div className="flex mt-2">
                                     <button
-                                        onClick={() => router.push(`/vipro-form/evaluation?country=${inProgressCountry}`)}
+                                        onClick={() => router.push("/vipro-form/evaluation")}
                                         className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer"
                                     >
                                         Continuar Evaluación
@@ -140,47 +173,26 @@ function ViproFormContent() {
                                 </div>
                             </div>
                         ) : (
-                            /* Normal Country Selection State */
-                            <>
-                                <div className="w-full flex flex-col gap-2 mt-2">
-                                    <label className="text-sm font-semibold text-text-primary text-left">Destino de viaje:</label>
-                                    <select 
-                                        value={selectedCountryCode}
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            handleSelectCountry(val);
-                                        }}
-                                        className="w-full max-w-sm border border-border-light rounded-md px-4 py-3.5 text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all cursor-pointer shadow-sm"
-                                    >
-                                        <option value="">🌎 Selecciona un país...</option>
-                                        {availableCountries.map(([code, details]) => (
-                                            <option key={code} value={code}>
-                                                {details.emoji} {details.name}
-                                            </option>
-                                        ))}
-                                    </select>
+                            /* Paid but not started state */
+                            <div className="w-full bg-brand-light/45 border border-brand-primary/20 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-bold text-brand-primary uppercase tracking-widest">Acceso Habilitado</span>
+                                    <p className="text-lg font-serif font-semibold text-text-primary">
+                                        Estás listo para realizar tu Evaluación
+                                    </p>
                                 </div>
-
-                                <div className="mt-2 flex flex-col gap-4 items-start">
-                                    <div className="flex items-end gap-3">
-                                        <span className="text-5xl font-bold text-text-primary">$19.99</span>
-                                        <span className="text-sm text-text-secondary mb-1">USD</span>
-                                    </div>
-                                    <span className="text-sm font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
-                                        🎉 Recibirás un 25% de descuento en tu asesoría
-                                    </span>
-                                </div>
-
-                                <div className="flex flex-col gap-4 mt-4 w-full max-w-sm">
-                                    <button 
-                                        disabled={!selectedCountryCode} 
-                                        onClick={() => router.push(`/vipro-form/evaluation?country=${selectedCountryCode}`)} 
-                                        className="disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full bg-brand-primary text-white font-semibold py-4 rounded-md hover:bg-brand-hover transition-colors shadow-md text-lg"
+                                <p className="text-xs text-text-secondary leading-relaxed">
+                                    Ya has adquirido tu evaluación VIPRO con éxito. Comienza ahora para obtener tu diagnóstico y recomendaciones de preparación.
+                                </p>
+                                <div className="flex mt-2">
+                                    <button
+                                        onClick={() => router.push("/vipro-form/evaluation")}
+                                        className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3.5 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer"
                                     >
-                                        Empezar Evaluación <span className="pl-2">{selectedCountry}</span>
+                                        Empezar Evaluación VIPRO
                                     </button>
                                 </div>
-                            </>
+                            </div>
                         )}
                     </div>
 
@@ -219,6 +231,18 @@ function ViproFormContent() {
                 </div>
             </main>
             <Footer />
+
+            {/* Simulated Payment checkout modal */}
+            {isCheckoutOpen && (
+                <CheckoutModal 
+                    product="vipro" 
+                    onClose={() => setIsCheckoutOpen(false)} 
+                    onSuccess={() => {
+                        setIsCheckoutOpen(false);
+                        router.push("/vipro-form/evaluation");
+                    }}
+                />
+            )}
         </div>
     );
 }
