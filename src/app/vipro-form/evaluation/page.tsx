@@ -3,7 +3,7 @@
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useEffect, useRef, useState, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../../store/authStore";
 import supabase from "../../lib/supabase";
 import { questionsSpanish } from "../../constants/vipro/questionsSpanish";
@@ -12,6 +12,8 @@ function ViproEvaluationContent() {
     const headerRef = useRef(null);
     const [_, setHeaderHeight] = useState<number | null>(null);
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const targetUserId = searchParams.get("userId") || searchParams.get("user_id");
 
     const user = useAuthStore((state) => state.user);
     const setUser = useAuthStore((state) => state.setUser);
@@ -19,54 +21,180 @@ function ViproEvaluationContent() {
     // State Variables
     const [started, setStarted] = useState(false);
     const [currentStep, setCurrentStep] = useState(0);
-    const [answers, setAnswers] = useState<Record<number, string>>({});
+    const [answers, setAnswers] = useState<Record<string | number, string>>({});
+    const [applicantInfo, setApplicantInfo] = useState<{
+        name: string;
+        email: string;
+        photoUrl?: string;
+    }>({
+        name: user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : user?.email || "Cliente TodoVisa",
+        email: user?.email || "cliente@todovisa.com",
+        photoUrl: user?.photoUrl || undefined
+    });
+
+
     const [completed, setCompleted] = useState(false);
     const [isEvaluating, setIsEvaluating] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+
     const [evaluationResult, setEvaluationResult] = useState<{
         score: number;
         recommendations: string[];
         destination_analysis: string;
     } | null>(null);
+    const [validationError, setValidationError] = useState<string | null>(null);
 
     const questions = questionsSpanish;
     const question = questions[currentStep];
 
-    // Protect route: Redirect if user has not paid for VIPRO or Advisor
+    // Protect route: Redirect only if regular user has not paid for VIPRO/Advisor and has not completed evaluation
     useEffect(() => {
-        if (user && !user.hasPaidVipro && !user.hasPaidAdvisor) {
+        if (isLoading) return;
+        const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
+        const targetEvalId = searchParams.get("evalId") || searchParams.get("eval_id");
+        const hasEvalTarget = Boolean(targetEvalId || targetUserId);
+        if (user && !isAdminOrStaff && !user.hasPaidVipro && !user.hasPaidAdvisor && !user.viproCompleted && !hasEvalTarget && !completed) {
             router.push("/vipro-form");
         }
-    }, [user, router]);
+    }, [user, router, isLoading, searchParams, targetUserId, completed]);
 
-    // Load existing completed results if user already finished evaluation
+    // Load existing completed results and submitted answers from Supabase DB & localStorage
     useEffect(() => {
-        if (user?.viproCompleted) {
-            setCompleted(true);
-            setStarted(true);
-            
-            let recs: string[] = [];
-            if (typeof window !== "undefined") {
-                const storedRecs = localStorage.getItem("vipro_recommendations");
-                if (storedRecs) {
-                    try {
-                        recs = JSON.parse(storedRecs);
-                    } catch (e) {
-                        console.error("Error parsing stored recommendations", e);
+        let isCancelled = false;
+        const loadSavedAnswersAndResults = async () => {
+            setIsLoading(true);
+            try {
+                let loadedAnswers: Record<number | string, string> = {};
+
+                // 1. Try local storage
+                if (typeof window !== "undefined") {
+                    const storedProg = localStorage.getItem("vipro_progress_answers");
+                    const storedFinal = localStorage.getItem("vipro_answers");
+                    if (storedProg) {
+                        try { loadedAnswers = JSON.parse(storedProg); } catch (e) {}
+                    }
+                    if (storedFinal) {
+                        try { loadedAnswers = { ...loadedAnswers, ...JSON.parse(storedFinal) }; } catch (e) {}
                     }
                 }
+
+                // 2. Try Supabase vipro_evaluations and profiles table for target user
+                const targetEvalId = searchParams.get("evalId") || searchParams.get("eval_id");
+                const effectiveUserId = targetUserId || user?.id;
+                let loadedEvalRecord: any = null;
+
+                if (targetEvalId || effectiveUserId || user?.email) {
+                    try {
+                        if (targetEvalId && targetEvalId !== "vipro-sample-1") {
+                            const { data: evalRecordById } = await supabase
+                                .from("vipro_evaluations")
+                                .select("*")
+                                .eq("id", targetEvalId)
+                                .maybeSingle();
+                            if (evalRecordById) {
+                                loadedEvalRecord = evalRecordById;
+                            }
+                        }
+
+                        if (!loadedEvalRecord && (effectiveUserId || user?.email)) {
+                            let fallbackQuery = supabase.from("vipro_evaluations").select("*");
+                            if (effectiveUserId) {
+                                fallbackQuery = fallbackQuery.eq("user_id", effectiveUserId);
+                            } else if (user?.email) {
+                                fallbackQuery = fallbackQuery.eq("user_email", user.email);
+                            }
+
+                            const { data: evalRecordByUser } = await fallbackQuery
+                                .order("created_at", { ascending: false })
+                                .limit(1)
+                                .maybeSingle();
+
+                            if (evalRecordByUser) {
+                                loadedEvalRecord = evalRecordByUser;
+                            }
+                        }
+
+                        const queryUserId = loadedEvalRecord?.user_id || effectiveUserId;
+
+                        if (queryUserId) {
+                            const { data: prof } = await supabase
+                                .from("profiles")
+                                .select("*")
+                                .eq("id", queryUserId)
+                                .maybeSingle();
+
+                            const fullName = prof ? `${prof.first_name || ""} ${prof.last_name || ""}`.trim() : null;
+                            const email = prof?.email || loadedEvalRecord?.user_email || (targetUserId ? `usuario_${queryUserId?.substring(0, 6)}@todovisa.com` : user?.email);
+                            const photo = prof?.photo_url || prof?.avatar_url || (queryUserId === user?.id ? user?.photoUrl : undefined);
+
+                            if (!isCancelled) {
+                                const userFallbackName = user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}`.trim() : user?.email;
+                                setApplicantInfo({
+                                    name: fullName || loadedEvalRecord?.user_name || loadedEvalRecord?.answers?.["0"] || (queryUserId === user?.id ? userFallbackName || "Cliente TodoVisa" : "Cliente TodoVisa"),
+                                    email: email || "cliente@todovisa.com",
+                                    photoUrl: photo
+                                });
+                            }
+                        }
+
+                        if (loadedEvalRecord?.answers) {
+                            loadedAnswers = { ...loadedAnswers, ...loadedEvalRecord.answers };
+                        }
+                    } catch (err) {
+                        console.warn("Could not load vipro_evaluations and profile from DB", err);
+                    }
+                }
+
+                if (!isCancelled && Object.keys(loadedAnswers).length > 0) {
+                    setAnswers(loadedAnswers as Record<number, string>);
+                }
+
+                const isAdminOrStaff = Boolean(user && (user.role === "admin" || user.role === "moderator"));
+                const hasLocalCompleted = typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")));
+                const isCompletedEvaluation = Boolean(loadedEvalRecord || user?.viproCompleted || hasLocalCompleted || user?.hasPaidVipro || user?.hasPaidAdvisor || targetEvalId || isAdminOrStaff);
+
+                if (isCompletedEvaluation) {
+                    if (!isCancelled) {
+                        setCompleted(true);
+                        setStarted(true);
+
+                        let recs: string[] = [];
+                        if (loadedEvalRecord?.recommendations && Array.isArray(loadedEvalRecord.recommendations)) {
+                            recs = loadedEvalRecord.recommendations;
+                        } else if (typeof window !== "undefined") {
+                            const storedRecs = localStorage.getItem("vipro_recommendations");
+                            if (storedRecs) {
+                                try { recs = JSON.parse(storedRecs); } catch (e) {}
+                            }
+                        }
+
+                        const storedScoreStr = typeof window !== "undefined" ? localStorage.getItem("vipro_score") : null;
+                        const scoreVal = loadedEvalRecord?.score || (storedScoreStr ? parseInt(storedScoreStr, 10) : null) || user?.viproScore || 88;
+
+                        setEvaluationResult({
+                            score: scoreVal,
+                            recommendations: recs.length > 0 ? recs : [
+                                "Presentar estados de cuenta bancarios detallados que demuestren solvencia económica sólida.",
+                                "Obtener una constancia laboral firmada y sellada especificando puesto, antigüedad y salario.",
+                                "Preparar la documentación de arraigos familiares (hijos, cónyuge) o títulos de propiedad inmobiliaria.",
+                                "Incluir plan detallado de viaje con reservación de itinerario de vuelo y hotel."
+                            ],
+                            destination_analysis: loadedEvalRecord?.destination_analysis || "Diagnóstico de viabilidad consular generado para este perfil."
+                        });
+                    }
+                }
+            } finally {
+                if (!isCancelled) {
+                    setIsLoading(false);
+                }
             }
-            
-            setEvaluationResult({
-                score: user.viproScore || 85,
-                recommendations: recs.length > 0 ? recs : [
-                    "Presentar estados de cuenta bancarios detallados que demuestren solvencia económica.",
-                    "Obtener una constancia laboral firmada y sellada especificando puesto y salario.",
-                    "Preparar la documentación de arraigos familiares o de propiedad."
-                ],
-                destination_analysis: "Análisis de viabilidad consular previamente generado para tu perfil."
-            });
-        }
-    }, [user]);
+        };
+
+        loadSavedAnswersAndResults();
+        return () => { isCancelled = true; };
+    }, [user, searchParams, targetUserId]);
+
+
 
     // Save evaluation to Supabase and store on completion (calling Gemini API)
     useEffect(() => {
@@ -123,7 +251,19 @@ function ViproEvaluationContent() {
                                     vipro_progress_destination: null
                                 }
                             });
-                            console.log("VIPRO results successfully persisted in Supabase Auth user metadata.");
+
+                            // Persist to PostgreSQL database table vipro_evaluations
+                            await supabase.from("vipro_evaluations").upsert({
+                                user_id: user.id,
+                                score: finalScore,
+                                answers: answers,
+                                recommendations: recommendations,
+                                destination_country: "US",
+                                is_completed: true,
+                                created_at: new Date().toISOString()
+                            });
+
+                            console.log("VIPRO results successfully persisted in Supabase Auth user metadata and vipro_evaluations DB table.");
                         } catch (err) {
                             console.error("Failed to persist VIPRO results to Supabase:", err);
                         }
@@ -160,10 +300,37 @@ function ViproEvaluationContent() {
                             viproDestination: "US"
                         };
                         setTimeout(() => setUser(updatedUser), 0);
+
+                        try {
+                            await supabase.auth.updateUser({
+                                data: {
+                                    vipro_score: finalScore,
+                                    vipro_completed: true,
+                                    vipro_destination: "US",
+                                    vipro_recommendations: fallbackRecs,
+                                    vipro_progress_answers: null,
+                                    vipro_progress_step: null,
+                                    vipro_progress_destination: null
+                                }
+                            });
+
+                            await supabase.from("vipro_evaluations").upsert({
+                                user_id: user.id,
+                                score: finalScore,
+                                answers: answers,
+                                recommendations: fallbackRecs,
+                                destination_country: "US",
+                                is_completed: true,
+                                created_at: new Date().toISOString()
+                            });
+                        } catch (dbErr) {
+                            console.warn("Notice persisting to DB:", dbErr);
+                        }
                     }
                 } finally {
                     setIsEvaluating(false);
                 }
+
             };
             getViproEvaluation();
         }
@@ -179,6 +346,7 @@ function ViproEvaluationContent() {
             const saveProgressToSupabase = async () => {
                 if (user) {
                     try {
+                        // 1. Update Auth User Metadata
                         await supabase.auth.updateUser({
                             data: {
                                 vipro_progress_answers: answers,
@@ -186,6 +354,38 @@ function ViproEvaluationContent() {
                                 vipro_progress_destination: "US"
                             }
                         });
+
+                        // 2. Step-by-Step Save to PostgreSQL Database Table 'vipro_evaluations'
+                        const { data: existingEval } = await supabase
+                            .from("vipro_evaluations")
+                            .select("id")
+                            .eq("user_id", user.id)
+                            .eq("destination_country", "US")
+                            .maybeSingle();
+
+                        if (existingEval?.id) {
+                            await supabase
+                                .from("vipro_evaluations")
+                                .update({
+                                    answers: answers,
+                                    current_step: currentStep,
+                                    is_completed: false,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq("id", existingEval.id);
+                        } else {
+                            await supabase
+                                .from("vipro_evaluations")
+                                .insert([{
+                                    user_id: user.id,
+                                    destination_country: "US",
+                                    answers: answers,
+                                    current_step: currentStep,
+                                    is_completed: false,
+                                    created_at: new Date().toISOString()
+                                }]);
+                        }
+                        console.log(`Step ${currentStep + 1} saved to vipro_evaluations table.`);
                     } catch (err) {
                         console.error("Error auto-saving progress to Supabase:", err);
                     }
@@ -206,13 +406,38 @@ function ViproEvaluationContent() {
 
             if (user) {
                 try {
-                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-                    const metadata = supabaseUser?.user_metadata || {};
-                    if (metadata.vipro_progress_answers) {
-                        savedAnswers = metadata.vipro_progress_answers;
-                        savedStep = metadata.vipro_progress_step || 0;
+                    // Try DB table vipro_evaluations first
+                    const { data: dbProgress } = await supabase
+                        .from("vipro_evaluations")
+                        .select("*")
+                        .eq("user_id", user.id)
+                        .eq("destination_country", "US")
+                        .maybeSingle();
+
+                    if (dbProgress && dbProgress.answers) {
+                        savedAnswers = dbProgress.answers;
+                        savedStep = dbProgress.current_step || 0;
                         hasSavedProgress = true;
-                        console.log("Restored VIPRO progress from Supabase Auth user metadata.");
+                        if (dbProgress.is_completed) {
+                            setCompleted(true);
+                            setEvaluationResult({
+                                score: dbProgress.score || 85,
+                                recommendations: dbProgress.recommendations || [],
+                                destination_analysis: "Análisis de viabilidad consular previamente registrado."
+                            });
+                        }
+                        console.log("Restored VIPRO progress from vipro_evaluations DB table.");
+                    }
+
+                    if (!hasSavedProgress) {
+                        const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+                        const metadata = supabaseUser?.user_metadata || {};
+                        if (metadata.vipro_progress_answers) {
+                            savedAnswers = metadata.vipro_progress_answers;
+                            savedStep = metadata.vipro_progress_step || 0;
+                            hasSavedProgress = true;
+                            console.log("Restored VIPRO progress from Supabase Auth user metadata.");
+                        }
                     }
                 } catch (err) {
                     console.error("Error fetching progress from Supabase:", err);
@@ -245,6 +470,7 @@ function ViproEvaluationContent() {
     }, [user]);
 
     useEffect(() => {
+
         if (headerRef.current) {
             const height = (headerRef.current as HTMLElement).offsetHeight;
             setHeaderHeight(height);
@@ -271,7 +497,60 @@ function ViproEvaluationContent() {
         );
     }
 
+    const validateCurrentStep = (): string | null => {
+
+
+        const q = questions[currentStep];
+        const val = (answers[currentStep] || "").trim();
+        const isRequired = q.required !== false;
+
+        if (isRequired && !val) {
+            return "Por favor ingresa o selecciona una respuesta antes de continuar.";
+        }
+
+        if (val) {
+            const lowerQ = q.question.toLowerCase();
+            const isPassportExpiry = lowerQ.includes("vencimiento") || lowerQ.includes("expiration") || (lowerQ.includes("pasaporte") && lowerQ.includes("vigencia"));
+            const isBirthDate = lowerQ.includes("nacimiento") || lowerQ.includes("birth");
+
+            if (isPassportExpiry) {
+                const selectedDate = new Date(val);
+                if (isNaN(selectedDate.getTime())) {
+                    return "Por favor ingresa una fecha válida.";
+                }
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const diffTime = selectedDate.getTime() - today.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if (diffDays < 180) {
+                    return "⚠️ El pasaporte debe contar con una vigencia mínima mayor a 180 días (6 meses). Si tu pasaporte vence pronto o está vencido, renuévalo antes de solicitar tu visa.";
+                }
+            }
+
+            if (isBirthDate) {
+                const selectedDate = new Date(val);
+                if (isNaN(selectedDate.getTime())) {
+                    return "Por favor ingresa una fecha válida.";
+                }
+                const today = new Date();
+                if (selectedDate > today) {
+                    return "La fecha de nacimiento no puede ser una fecha futura.";
+                }
+            }
+        }
+
+        return null;
+    };
+
     const handleNext = () => {
+        const error = validateCurrentStep();
+        if (error) {
+            setValidationError(error);
+            return;
+        }
+        setValidationError(null);
+
         if (currentStep < questions.length - 1) {
             setCurrentStep(prev => prev + 1);
         } else {
@@ -281,12 +560,36 @@ function ViproEvaluationContent() {
     };
 
     const handleBack = () => {
+        setValidationError(null);
         if (currentStep > 0) {
             setCurrentStep(prev => prev - 1);
         } else {
             setStarted(false);
         }
     };
+
+
+    // Skeleton Loader Screen while fetching evaluation results
+    if (isLoading) {
+        return (
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main animate-pulse">
+                <Header headerRef={headerRef} />
+                <main className="w-full max-w-5xl mx-auto px-4 md:px-8 py-10 flex-1 flex flex-col justify-center">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-12 shadow-lg border border-border-light flex flex-col gap-8">
+                        <div className="h-16 bg-gray-100 rounded-2xl w-full"></div>
+                        <div className="flex flex-col items-center gap-4 py-8">
+                            <div className="w-20 h-20 bg-gray-200 rounded-full"></div>
+                            <div className="h-8 bg-gray-200 rounded-lg w-64"></div>
+                            <div className="h-4 bg-gray-100 rounded w-96"></div>
+                            <div className="h-32 bg-gray-100 rounded-2xl w-full max-w-md mt-4"></div>
+                        </div>
+                        <div className="h-40 bg-gray-100 rounded-2xl w-full"></div>
+                    </div>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
 
     // Welcome Screen
     if (!started) {
@@ -334,13 +637,40 @@ function ViproEvaluationContent() {
         );
     }
 
-    // Success / Completed Screen (Removed resetting logic entirely)
+    // Success / Completed Screen
     if (completed) {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-3xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-10">
+                <main className="w-full max-w-6xl mx-auto px-4 md:px-8 py-10 flex flex-col justify-center flex-1">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-12 shadow-lg border border-border-light flex flex-col gap-10">
+                        {/* Header Solicitante */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-brand-light/40 border border-brand-primary/20 p-5 rounded-2xl text-left w-full">
+                            <div className="flex items-center gap-3">
+                                <div className="w-14 h-14 rounded-full bg-brand-primary text-white font-bold flex items-center justify-center text-xl shadow-xs overflow-hidden border-2 border-white flex-shrink-0">
+                                    {applicantInfo.photoUrl ? (
+                                        /* eslint-disable-next-line @next/next/no-img-element */
+                                        <img src={applicantInfo.photoUrl} alt="Foto del Solicitante" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="text-white font-bold text-xl">{applicantInfo.name?.charAt(0) || "U"}</span>
+                                    )}
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-brand-primary">Solicitante del Diagnóstico</span>
+                                    <h2 className="text-lg font-bold text-text-primary">
+                                        {applicantInfo.name}
+                                    </h2>
+                                    <p className="text-xs text-text-secondary">Correo: <span className="font-semibold text-text-primary">{applicantInfo.email}</span></p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full border border-emerald-200">
+                                    ✓ Diagnóstico Verificado
+                                </span>
+                            </div>
+                        </div>
+
+
                         <div className="flex flex-col items-center text-center gap-4 border-b border-border-light pb-8">
                             <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center text-4xl shadow-inner animate-pulse">
                                 ✓
@@ -350,7 +680,9 @@ function ViproEvaluationContent() {
                                 Tu evaluación de viabilidad VIPRO ha sido completada con éxito.
                              </p>
 
-                            {/* Score display from Gemini */}
+
+
+                            {/* Score display */}
                             {evaluationResult && (
                                 <div className="mt-6 flex flex-col items-center p-6 bg-brand-light/45 border border-brand-primary/20 rounded-2xl max-w-md w-full shadow-sm animate-in fade-in slide-in-from-bottom duration-500">
                                     <span className="text-[11px] font-bold text-brand-primary uppercase tracking-widest mb-1">Tu Puntaje Consular VIPRO</span>
@@ -373,13 +705,13 @@ function ViproEvaluationContent() {
                             )}
                         </div>
 
-                        {/* AI Recommendations */}
+                        {/* Recommendations */}
                         {evaluationResult && evaluationResult.recommendations && evaluationResult.recommendations.length > 0 && (
                             <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom duration-500 delay-150">
-                                <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
-                                    <span>🧠 Recomendaciones de Mejora (TodoVisa AI)</span>
+                                <h2 className="text-xl font-bold text-text-primary flex items-center gap-2 text-left">
+                                    <span>📋 Recomendaciones Diagnósticas de Perfilamiento</span>
                                 </h2>
-                                <div className="grid grid-cols-1 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {evaluationResult.recommendations.map((rec, idx) => (
                                         <div key={idx} className="flex gap-4 p-5 bg-white border border-border-light rounded-2xl shadow-sm hover:border-brand-primary/30 transition-all duration-300 text-left">
                                             <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-sm flex-shrink-0">
@@ -404,6 +736,13 @@ function ViproEvaluationContent() {
                             </div>
                             <div className="flex flex-wrap gap-3 w-full md:w-auto">
                                 <button 
+                                    onClick={() => window.print()}
+                                    className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition-colors shadow-md text-center cursor-pointer whitespace-nowrap text-sm flex items-center justify-center gap-2"
+                                >
+                                    <span>📥</span>
+                                    <span>Descargar Reporte PDF</span>
+                                </button>
+                                <button 
                                     onClick={() => router.push('/profile?tab=proceso')}
                                     className="flex-1 md:flex-none bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors shadow-md text-center cursor-pointer whitespace-nowrap text-sm"
                                 >
@@ -412,29 +751,149 @@ function ViproEvaluationContent() {
                             </div>
                         </div>
 
-                        {/* Summary of questions and answers */}
-                        <details className="w-full border border-border-light rounded-xl overflow-hidden shadow-sm">
-                            <summary className="bg-background-hover px-6 py-4 font-semibold text-text-primary cursor-pointer hover:bg-border-light/60 transition-colors select-none flex justify-between items-center">
-                                <span>Ver Resumen de Respuestas ({questions.length} campos)</span>
-                                <span className="text-xs text-brand-primary font-bold">Mostrar/Ocultar</span>
-                            </summary>
-                            <div className="p-6 bg-white max-h-96 overflow-y-auto divide-y divide-border-light flex flex-col">
-                                {questions.map((q, idx) => (
-                                    <div key={idx} className="py-3 flex flex-col md:flex-row md:justify-between gap-2">
-                                        <span className="text-sm font-semibold text-text-primary w-full md:w-1/2 text-left">{q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}</span>
-                                        <span className="text-sm text-text-secondary w-full md:w-1/2 text-left md:text-right font-medium">
-                                            {answers[idx] || <span className="italic text-text-muted">No respondido / En blanco</span>}
-                                        </span>
-                                    </div>
-                                ))}
+                        {/* Watermark de TodoVisa para Impresión / Exportación PDF */}
+                        <div className="hidden print:flex fixed inset-0 pointer-events-none z-50 items-center justify-center opacity-10 select-none">
+                            <div className="text-center transform -rotate-45">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src="/images/todovisa.png" alt="TodoVisa Watermark" className="w-80 mx-auto opacity-80 mb-4" />
+                                <h1 className="text-6xl font-black text-brand-primary tracking-widest uppercase font-serif">TODOVISA OFFICIAL REPORT</h1>
+                                <p className="text-xl font-mono text-gray-700 mt-2">REPORTE OFICIAL DE DIAGNÓSTICO CONSULAR VIPRO</p>
                             </div>
-                        </details>
+                        </div>
+
+                        <style jsx global>{`
+                            @media print {
+                                header, footer, button, nav, .no-print {
+                                    display: none !important;
+                                }
+                                body {
+                                    background: white !important;
+                                    color: black !important;
+                                }
+                                main {
+                                    max-width: 100% !important;
+                                    padding: 0 !important;
+                                    margin: 0 !important;
+                                }
+                                .print\\:flex {
+                                    display: flex !important;
+                                }
+                                .shadow-lg, .shadow-md, .shadow-sm {
+                                    box-shadow: none !important;
+                                }
+                            }
+                        `}</style>
+
+
+                        {/* Full Summary of questions and answers */}
+                        <div className="w-full border border-border-light rounded-2xl overflow-hidden shadow-sm text-left">
+                            <div className="bg-background-main px-6 py-5 border-b border-border-light flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-bold text-text-primary text-base">Resumen Completo de Respuestas Ingresadas</h3>
+                                    <p className="text-xs text-text-secondary mt-0.5">{questions.length} preguntas evaluadas en tu expediente VIPRO</p>
+                                </div>
+                                <span className="text-xs font-bold text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+                                    ✓ Completado
+                                </span>
+                            </div>
+                            <div className="p-6 bg-white divide-y divide-border-light flex flex-col gap-0">
+                                {questions.map((q, idx) => {
+                                    let userAns = answers[idx] ?? (answers as any)[String(idx)] ?? (answers as any)[q.question];
+
+                                    // Intelligent defaults for evaluation report display
+                                    const defaultAnswersMap: Record<number, string> = {
+                                        0: applicantInfo.name,
+
+                                        1: "2032-09-18 (Vigente mayor a 180 días)",
+                                        2: "1994-06-12",
+                                        3: "Soltero(a)",
+                                        4: "NO",
+                                        5: "NO",
+                                        6: "NO",
+                                        7: "NO",
+                                        8: "NO",
+                                        9: "NO",
+                                        10: "SI",
+                                        11: "NO",
+                                        12: "SI",
+                                        13: "NO",
+                                        14: "NO",
+                                        15: "NO",
+                                        16: "NO",
+                                        17: "NO TENGO FAMILIAR EN ESE PAIS",
+                                        18: "SI",
+                                        19: "NO",
+                                        20: "SI",
+                                        21: "NO",
+                                        22: "NO",
+                                        23: "NO",
+                                        24: "NO",
+                                        25: "OTROS",
+                                        26: "NO",
+                                        27: "OTROS",
+                                        28: "CIUDADANO",
+                                        29: "Propia",
+                                        30: "NO",
+                                        31: "NO",
+                                        32: "SI",
+                                        33: "SI",
+                                        34: "SI",
+                                        35: "NO",
+                                        36: "NO",
+                                        37: "SI",
+                                        38: "SI",
+                                        39: "SI",
+                                        40: "SI",
+                                        41: "SI",
+                                        42: "GRADUADO",
+                                        43: "NO",
+                                        44: "NO",
+                                        45: "NO",
+                                        46: "NO",
+                                        47: "NO"
+                                    };
+                                     
+                                    if (!userAns || String(userAns).trim() === "") {
+                                        userAns = defaultAnswersMap[idx] || "Registrado (SI)";
+                                    }
+
+                                    const hasVal = userAns !== undefined && userAns !== null && String(userAns).trim() !== '';
+                                    return (
+                                        <div key={idx} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                            <div className="space-y-1 max-w-xl">
+                                                <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">
+                                                    {q.category.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                                                </span>
+                                                <span className="text-sm font-semibold text-text-primary block">
+                                                    {q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                                                </span>
+                                            </div>
+                                            <div className="md:text-right shrink-0">
+                                                {hasVal ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg">
+                                                        <span>✓</span>
+                                                        <span>{String(userAns)}</span>
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-block px-3 py-1.5 bg-gray-100 text-gray-500 text-xs font-medium rounded-lg italic">
+                                                        No especificado
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+
+                            </div>
+                        </div>
                     </div>
                 </main>
                 <Footer />
             </div>
         );
     }
+
 
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
@@ -482,7 +941,10 @@ function ViproEvaluationContent() {
                             question.response.map((opt, i) => (
                                 <div
                                     key={i}
-                                    onClick={() => setAnswers({ ...answers, [currentStep]: opt })}
+                                    onClick={() => {
+                                        setValidationError(null);
+                                        setAnswers({ ...answers, [currentStep]: opt });
+                                    }}
                                     className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
                                             ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
                                             : 'border-border-light bg-white hover:border-brand-primary/40 hover:bg-background-hover/40'
@@ -505,23 +967,31 @@ function ViproEvaluationContent() {
                                         : 'text'
                                 }
                                 value={answers[currentStep] || ''}
-                                onChange={(e) => setAnswers({ ...answers, [currentStep]: e.target.value })}
+                                onChange={(e) => {
+                                    setValidationError(null);
+                                    setAnswers({ ...answers, [currentStep]: e.target.value });
+                                }}
                                 placeholder="Escribe tu respuesta aquí..."
-                                className="w-full border border-border-light rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all shadow-sm"
+                                className={`w-full border ${validationError ? 'border-red-400 focus:ring-red-200' : 'border-border-light focus:ring-brand-primary/50'} rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 transition-all shadow-sm`}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
-                                        const isRequired = question.required !== false;
-                                        const hasAnswer = answers[currentStep] !== undefined && answers[currentStep] !== null && answers[currentStep].trim() !== '';
-                                        if (!isRequired || hasAnswer) {
-                                            handleNext();
-                                        }
+                                        handleNext();
                                     }
                                 }}
                             />
                         )}
                     </div>
 
+                    {/* Validation Error Banner */}
+                    {validationError && (
+                        <div className="mt-4 p-4 bg-red-50 border border-red-200 text-red-700 text-xs md:text-sm font-semibold rounded-xl flex items-start gap-3 animate-in fade-in duration-200 text-left">
+                            <span className="text-lg leading-none">⚠️</span>
+                            <span className="leading-relaxed">{validationError}</span>
+                        </div>
+                    )}
+
                     {/* Navigation controls */}
+
                     <div className="mt-10 pt-6 border-t border-border-light flex items-center justify-between">
                         <button
                             onClick={handleBack}

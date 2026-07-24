@@ -15,11 +15,19 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
     useEffect(() => {
         setIsMounted(true);
+        if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search);
+            const refParam = params.get("ref") || params.get("agency_ref");
+            if (refParam) {
+                localStorage.setItem("todovisa_agency_ref", refParam);
+            }
+        }
         const timer = setTimeout(() => {
             setShowLoader(false);
         }, 300);
         return () => clearTimeout(timer);
     }, []);
+
 
     useEffect(() => {
         const syncSession = async () => {
@@ -81,9 +89,15 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
             <header ref={headerRef} className="w-full bg-background-main sticky top-0 z-50 flex flex-col justify-center border-b border-border-light/50">
                 {/* Promo Banner */}
                 <div className="bg-brand-primary w-full p-2.5 flex justify-center font-bold text-white text-xs md:text-sm text-center">
-                    <Link href="/vipro-form" className="hover:underline flex items-center gap-1">
-                        <span>Evaluación VIPRO — Obtén un 25% de descuento al completar tu perfil &nbsp;→</span>
-                    </Link>
+                    {userData?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))) ? (
+                        <Link href="/profile?tab=proceso" className="hover:underline flex items-center gap-1">
+                            <span>📋 Diagnóstico Consular VIPRO completado — Revisa tu perfilamiento aquí &nbsp;→</span>
+                        </Link>
+                    ) : (
+                        <Link href="/vipro-form" className="hover:underline flex items-center gap-1">
+                            <span>Evaluación VIPRO — Obtén un 25% de descuento al completar tu perfil &nbsp;→</span>
+                        </Link>
+                    )}
                 </div>
 
                 <div className="flex flex-col w-full py-3.5 relative">
@@ -169,17 +183,20 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-[10px] text-text-secondary mt-1">Encuentra tu experto</span>
                                             </div>
                                         </Link>
-                                        <Link href="/profile?tab=asesor" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
-                                            <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 10.742h.01m5.624 0h.01m-5.632 4.41h5.631M12 21a9 9 0 100-18 9 9 0 000 18z" />
-                                                </svg>
-                                            </span>
-                                            <div className="flex flex-col text-left">
-                                                <span className="font-semibold text-xs leading-none">Mi asesor asignado</span>
-                                                <span className="text-[10px] text-text-secondary mt-1">Acceso directo al chat</span>
-                                            </div>
-                                        </Link>
+                                        {userData?.hasPaidAdvisor && (
+                                            <Link href="/profile?tab=asesor" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
+                                                <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 10.742h.01m5.624 0h.01m-5.632 4.41h5.631M12 21a9 9 0 100-18 9 9 0 000 18z" />
+                                                    </svg>
+                                                </span>
+                                                <div className="flex flex-col text-left">
+                                                    <span className="font-semibold text-xs leading-none">Mi asesor asignado</span>
+                                                    <span className="text-[10px] text-text-secondary mt-1">Acceso directo al chat</span>
+                                                </div>
+                                            </Link>
+                                        )}
+
                                         <Link href="/agents/apply" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
                                             <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -324,8 +341,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                 <div className="flex flex-col gap-2.5">
                                     <span className="text-xs font-bold text-text-muted uppercase tracking-widest">Agentes</span>
                                     <Link href="/agents" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Buscar expertos</Link>
-                                    <Link href="/profile?tab=asesor" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Mi asesor asignado</Link>
+                                    {userData?.hasPaidAdvisor && (
+                                        <Link href="/profile?tab=asesor" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Mi asesor asignado</Link>
+                                    )}
                                     <Link href="/agents/apply" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Unirte a la red</Link>
+
                                 </div>
 
                                 <hr className="border-border-light/60" />

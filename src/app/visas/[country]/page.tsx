@@ -10,18 +10,20 @@ import { useParams } from "next/navigation";
 
 export default function VisaDetailPage() {
     const params = useParams();
-    const countryCode = (params?.country as string)?.toUpperCase();
+    const rawCode = (params?.country as string) || "";
+    const countryKey = rawCode.toLowerCase();
     const [openRegion, setOpenRegion] = useState<string | null>(null);
     const [activeDocTab, setActiveDocTab] = useState<"photos" | "bank" | "ties" | "job">("photos");
     const headerRef = useRef(null);
 
-    useEffect(() => {
-        if (!countryCode) notFound();
-    }, [countryCode]);
+    const country = countryVisaData[countryKey] || countryVisaData[rawCode.toUpperCase()];
 
-    const country = countryVisaData[countryCode];
+    useEffect(() => {
+        if (!rawCode) notFound();
+    }, [rawCode]);
 
     if (!country) return null;
+
 
     return (
         <div className="min-h-screen w-full flex flex-col bg-[#F9F9F8]">

@@ -95,7 +95,7 @@ export default function AgentesPage() {
               id: `agency-${profile.id}`,
               userId: profile.id,
               name,
-              title: "Agencia de Viajes B2B y Asesoría Consular",
+              title: "Agencia de Viajes y Asesoría Consular",
               photo: profile.photo_url ||
                 `https://unavatar.io/${encodeURIComponent(profile.email?.trim().toLowerCase() || "")}` +
                 `?fallback=https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1a56db&color=fff`,
@@ -107,7 +107,8 @@ export default function AgentesPage() {
               experience: app?.experience_years ? `${app.experience_years} años` : "—",
               availability: "Inmediata",
               bio: profile.bio || app?.biography ||
-                `Entidad Corporativa B2B. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
+                `Agencia Registrada. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
+
               whatsapp: `https://wa.me/${phone}?text=Hola%20${encodeURIComponent(name)},%20me%20gustar%C3%ADa%20contratar%20sus%20servicios.`,
               featured: true,
               partnerType: "b2b_agency_entity",
@@ -197,7 +198,7 @@ export default function AgentesPage() {
   const allSpecialties = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.specialties))).sort()];
   const allLanguages = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.languages))).sort()];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
-  const partnerTypes = ["Todos", "Asesores Independientes", "Agencias de Viajes B2B"];
+  const partnerTypes = ["Todos", "Asesores Independientes", "Agencias de Viajes"];
 
   // Filter logic
   const filteredAgents = agents.filter((agent) => {
@@ -225,7 +226,8 @@ export default function AgentesPage() {
     const matchesPartnerType =
       selectedPartnerType === "Todos" ||
       (selectedPartnerType === "Asesores Independientes" && agent.partnerType === "outsourced_agent") ||
-      (selectedPartnerType === "Agencias de Viajes B2B" && agent.partnerType === "b2b_agency_entity");
+      (selectedPartnerType === "Agencias de Viajes" && agent.partnerType === "b2b_agency_entity");
+
 
     return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability && matchesPartnerType;
   });

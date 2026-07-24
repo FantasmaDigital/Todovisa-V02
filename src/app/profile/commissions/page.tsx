@@ -12,7 +12,10 @@ interface AgentCommission {
   id: string;
   agent_id: string;
   client_name: string;
-  visa_type: string;
+  visa_type?: string;
+  service_type?: string;
+  gross_amount?: number;
+  commission_rate?: number;
   commission_amount: number;
   status: string;
   created_at: string;
@@ -22,6 +25,7 @@ interface AgentCommission {
     email: string;
   };
 }
+
 
 export default function ComisionesPage() {
   const headerRef = useRef(null);
@@ -66,22 +70,29 @@ export default function ComisionesPage() {
   }, [isMounted, user?.id]);
 
   // Statistics calculation helper
-  const getCommissionRate = () => {
+  const getCommissionRateLabel = () => {
     if (user?.role === ROLES.AGENCY) {
-      return 0.85; // 85%
+      return "30% (Referido)";
     }
-    return 0.80; // 80%
+    return "60% / 40%";
   };
 
   const getGrossEarnings = () => {
     return agentCommissions
-      .filter((c) => c.status === "completed")
+      .filter((c) => c.status === "completed" || c.status === "pending")
+      .reduce((sum, c) => sum + (c.gross_amount || c.commission_amount || 0), 0);
+  };
+
+  const getNetEarnings = () => {
+    return agentCommissions
+      .filter((c) => c.status === "completed" || c.status === "pending")
       .reduce((sum, c) => sum + (c.commission_amount || 0), 0);
   };
 
-  const getAgentShare = () => getGrossEarnings() * getCommissionRate();
-  const getPlatformFee = () => getAgentShare() * 0.05;
-  const getNetEarnings = () => getAgentShare() - getPlatformFee();
+  const getPlatformShare = () => {
+    return getGrossEarnings() - getNetEarnings();
+  };
+
 
   if (!isMounted || !user) {
     return (
@@ -123,14 +134,15 @@ export default function ComisionesPage() {
           </div>
 
           <div className="p-4 bg-white border border-border-light rounded-sm shadow-xs">
-            <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Tasa de Comisión</span>
-            <p className="text-xl font-bold text-emerald-600 font-mono mt-1">{(getCommissionRate() * 100).toFixed(0)}%</p>
+            <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Esquema de Comisión</span>
+            <p className="text-xl font-bold text-emerald-600 font-mono mt-1">{getCommissionRateLabel()}</p>
           </div>
 
           <div className="p-4 bg-white border border-border-light rounded-sm shadow-xs">
-            <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Deducción TodoVisa (5%)</span>
-            <p className="text-xl font-bold text-red-650 font-mono mt-1">-${getPlatformFee().toFixed(2)} USD</p>
+            <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Parte TodoVisa</span>
+            <p className="text-xl font-bold text-text-secondary font-mono mt-1">${getPlatformShare().toFixed(2)} USD</p>
           </div>
+
 
           <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm shadow-xs">
             <span className="text-[10px] text-brand-primary uppercase tracking-wider font-bold">Liquidación Neta Acumulada</span>
@@ -174,7 +186,8 @@ export default function ComisionesPage() {
                           {c.profile ? `${c.profile.first_name} ${c.profile.last_name}` : "N/A"}
                         </td>
                       )}
-                      <td className="py-3 text-text-secondary">{c.visa_type}</td>
+                      <td className="py-3 text-text-secondary">{c.service_type || c.visa_type || "Visa"}</td>
+
                       <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
                       <td className="py-3">
                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
