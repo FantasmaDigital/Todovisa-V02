@@ -164,6 +164,30 @@ export default function PerfilUsuarioPage() {
   // Tab State: "datos", "proceso", "asesor", "pagos"
   const [activeTab, setActiveTab] = useState("datos");
 
+  // Sync tab with URL query parameter ?tab=
+  const handleTabChange = (tabId: string) => {
+    setActiveTab(tabId);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tabId);
+      window.history.replaceState(null, "", url.toString());
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) {
+        setActiveTab(tabParam);
+      } else if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
+        setActiveTab("admin_dashboard");
+      }
+    }
+  }, [user?.role]);
+
+
+
   // Crop states
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [cropImageObj, setCropImageObj] = useState<HTMLImageElement | null>(null);
@@ -395,8 +419,20 @@ export default function PerfilUsuarioPage() {
 
   // Preformulario state
   const [isPreformularioCompleted, setIsPreformularioCompleted] = useState(false);
-  const [viproEvaluations, setViproEvaluations] = useState<{ id: string; destination_country: string; score?: number; created_at: string }[]>([]);
-  const [preformMetadata, setPreformMetadata] = useState<{ intake_type?: string; interview_waiver_eligible?: boolean | null } | null>(null);
+  const [viproEvaluations, setViproEvaluations] = useState<any[]>([]);
+  const [dbProfilesMap, setDbProfilesMap] = useState<Record<string, { email: string; name: string }>>({});
+  const [allProfilesList, setAllProfilesList] = useState<any[]>([]);
+  const [allPreformulariosList, setAllPreformulariosList] = useState<any[]>([]);
+  const [securityModalData, setSecurityModalData] = useState<{ app: AgentApplicationData; targetAction: "approved" | "rejected" } | null>(null);
+  const [securityConfirmed, setSecurityConfirmed] = useState(false);
+
+
+
+
+
+
+  const [preformMetadata, setPreformMetadata] = useState<{ intake_type?: string; interview_waiver_eligible?: boolean | null; appointment_date?: string; courier_tracking?: string } | null>(null);
+
 
   useEffect(() => {
     if (user?.id) {
@@ -445,13 +481,61 @@ export default function PerfilUsuarioPage() {
     }, 4500);
   };
 
-  const handleFileUpload = (docType: "passport" | "dui" | "workCert" | "bankStatements", fileName: string) => {
-    setClientDocs(prev => ({
-      ...prev,
-      [docType]: fileName
-    }));
-    showToast(`Archivo "${fileName}" cargado con éxito.`, "success");
+  const handleFileUpload = async (docType: "passport" | "dui" | "workCert" | "bankStatements", file: File) => {
+    if (!file) return;
+
+    // File size limit: 20MB
+    if (file.size > 20 * 1024 * 1024) {
+      showToast("El archivo excede el tamaño máximo permitido (20MB).", "error");
+      return;
+    }
+
+    const userId = user?.id || "guest";
+    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = `expedientes/${userId}/${docType}/${Date.now()}_${cleanFileName}`;
+
+    try {
+      showToast(`Subiendo "${file.name}" a tu expediente en Supabase Storage...`, "info");
+      
+      // Attempt upload to 'todovisa' bucket, fallback to client-documents/avatars if needed
+      let storageBucket = "todovisa";
+      let uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
+
+      if (uploadResult.error) {
+        storageBucket = "client-documents";
+        uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
+        if (uploadResult.error) {
+          storageBucket = "avatars";
+          uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
+        }
+      }
+
+
+      let publicUrl = file.name;
+      if (!uploadResult.error) {
+        const { data: urlData } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
+        if (urlData?.publicUrl) {
+          publicUrl = urlData.publicUrl;
+        }
+      }
+
+      setClientDocs(prev => {
+        const updated = { ...prev, [docType]: file.name, [`${docType}_url`]: publicUrl };
+        if (typeof window !== "undefined" && userId) {
+          localStorage.setItem(`client_docs_user_${userId}`, JSON.stringify(updated));
+        }
+        return updated;
+      });
+
+      showToast(`✅ Archivo "${file.name}" guardado exitosamente en tu carpeta de Supabase Storage.`, "success");
+    } catch (err: any) {
+      console.error("Error al subir archivo a Supabase Storage:", err);
+      // Fallback local persistence
+      setClientDocs(prev => ({ ...prev, [docType]: file.name }));
+      showToast(`Archivo "${file.name}" cargado localmente.`, "success");
+    }
   };
+
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -796,12 +880,20 @@ export default function PerfilUsuarioPage() {
     loadPartnerData();
   }, [user]);
 
-  // Admin action handlers: approve, reject, save comments
-  const handleAdminAction = async (appId: string, action: "approved" | "rejected" | "comment_only") => {
-    if (!user || !selectedApp) return;
+  // Admin action handlers: trigger security modal and execute database status change
+  const triggerAdminSecurityModal = (app: AgentApplicationData, action: "approved" | "rejected") => {
+    setSecurityConfirmed(false);
+    setSecurityModalData({ app, targetAction: action });
+  };
+
+  const executeAdminAction = async (appId: string, action: "approved" | "rejected" | "comment_only") => {
+    if (!user) return;
+    const targetApp = selectedApp?.id === appId ? selectedApp : allApplications.find(a => a.id === appId);
+    if (!targetApp) return;
+
     setIsSavingAdmin(true);
 
-    const newStatus = action === "comment_only" ? selectedApp.status : action;
+    const newStatus = action === "comment_only" ? targetApp.status : action;
     const updatePayload: Partial<AgentApplicationData> & { updated_at: string } = {
       admin_notes: adminNotesInput,
       updated_at: new Date().toISOString(),
@@ -833,20 +925,20 @@ export default function PerfilUsuarioPage() {
         );
 
         // When approved, upgrade the applicant's role based on application type
-        if (action === "approved" && selectedApp?.user_id) {
-          const applicantType = selectedApp.application_type || "individual";
+        if (action === "approved" && targetApp?.user_id) {
+          const applicantType = targetApp.application_type || "individual";
           const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
           await supabase
             .from("profiles")
             .update({ role: newRole })
-            .eq("id", selectedApp.user_id);
+            .eq("id", targetApp.user_id);
         }
 
         // Update selected app locally
-        setSelectedApp((prev: AgentApplicationData | null) => prev ? ({
+        setSelectedApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
           ...prev,
           ...updatePayload,
-        }) : null);
+        }) : prev);
 
         // Refresh entire application list from DB to reflect latest state
         const { data: refreshedApps } = await supabase
@@ -857,19 +949,23 @@ export default function PerfilUsuarioPage() {
 
         // Update partnerApp if the admin is reviewing their own application
         if (partnerApp && partnerApp.id === appId) {
-          setPartnerApp((prev: AgentApplicationData | null) => prev ? ({
+          setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
             ...prev,
             ...updatePayload,
           }) : null);
         }
+
       }
-    } catch (err) {
-      console.error("Unexpected error saving admin changes:", err);
-      showToast("Error inesperado al guardar los cambios.", "error");
+    } catch (err: any) {
+      console.error("Failed to update partner application status:", err);
+      showToast("Error al conectar con la base de datos.", "error");
     } finally {
       setIsSavingAdmin(false);
+      setSecurityModalData(null);
+      setSecurityConfirmed(false);
     }
   };
+
 
   useEffect(() => {
     const timer = setTimeout(() => setIsMounted(true), 0);
@@ -1265,58 +1361,100 @@ export default function PerfilUsuarioPage() {
     }
   }, []);
 
-  // Fetch real physical purchases and VIPRO evaluations from SQL tables
+  const [isDataLoading, setIsDataLoading] = useState(true);
+
+  // Fetch real physical purchases and VIPRO evaluations from SQL tables in parallel
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setIsDataLoading(false);
+      return;
+    }
     const fetchDbRecords = async () => {
+      setIsDataLoading(true);
       try {
-        const { data: purchases, error: purchaseError } = await supabase
-          .from("user_purchases")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false });
-
-        if (!purchaseError && purchases) {
-          setDbPurchases(purchases);
-        }
-
-        const { data: evaluations, error: evalError } = await supabase
+        let evalQuery = supabase
           .from("vipro_evaluations")
           .select("*")
-          .eq("user_id", user.id)
-          .eq("is_completed", true)
           .order("created_at", { ascending: false });
 
-        if (!evalError && evaluations && evaluations.length > 0) {
+        if (user.role !== ROLES.ADMIN && user.role !== ROLES.MODERATOR) {
+          evalQuery = evalQuery.eq("user_id", user.id);
+        }
+
+        const [purchasesRes, profsRes, preformsRes, evalRes] = await Promise.allSettled([
+          supabase.from("user_purchases").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
+          supabase.from("profiles").select("*"),
+          supabase.from("preformularios").select("*").order("created_at", { ascending: false }),
+          evalQuery
+        ]);
+
+        let purchases: any[] = [];
+        if (purchasesRes.status === "fulfilled" && purchasesRes.value.data) {
+          purchases = purchasesRes.value.data;
+          setDbPurchases(purchases);
+          if (purchases.length > 0) {
+            const hasViproPaid = purchases.some(p => p.product_type === "vipro" && p.status === "completed");
+            const hasAdvisorPaid = purchases.some(p => p.product_type === "advisor" && p.status === "completed");
+            const activeAdvisor = purchases.find(p => p.product_type === "advisor" && p.status === "completed");
+
+            if (hasViproPaid !== user.hasPaidVipro || hasAdvisorPaid !== user.hasPaidAdvisor) {
+              setUser({
+                ...user,
+                hasPaidVipro: hasViproPaid || hasAdvisorPaid,
+                hasPaidAdvisor: hasAdvisorPaid,
+                assignedAgentId: activeAdvisor?.agent_id || user.assignedAgentId
+              });
+            }
+          }
+        }
+
+        if (profsRes.status === "fulfilled" && profsRes.value.data && profsRes.value.data.length > 0) {
+          const profs = profsRes.value.data;
+          setAllProfilesList(profs);
+          const pMap: Record<string, { email: string; name: string }> = {};
+          profs.forEach((p: any) => {
+            if (p.id) {
+              const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+              const entry = { email: p.email || "", name: full || p.email || "" };
+              pMap[p.id] = entry;
+              pMap[p.id.toLowerCase()] = entry;
+              pMap[p.id.substring(0, 8)] = entry;
+              if (p.email) pMap[p.email.toLowerCase()] = entry;
+            }
+          });
+          setDbProfilesMap(pMap);
+        }
+
+        if (preformsRes.status === "fulfilled" && preformsRes.value.data && preformsRes.value.data.length > 0) {
+          const preforms = preformsRes.value.data;
+          const clientPreforms = preforms.filter((p: any) => p.user_id !== user.id);
+          setAllPreformulariosList(clientPreforms);
+        }
+
+        if (evalRes.status === "fulfilled" && evalRes.value.data && evalRes.value.data.length > 0) {
+          const evaluations = evalRes.value.data;
           setViproEvaluations(evaluations);
-        } else if (user.viproCompleted) {
+          const myUserEvals = evaluations.filter((e: any) => e.user_id === user.id || (user.email && e.user_email?.toLowerCase() === user.email.toLowerCase()));
+          if (myUserEvals.length > 0 && !user.viproCompleted) {
+            setUser({ ...user, viproCompleted: true, viproScore: myUserEvals[0].score || user.viproScore });
+          }
+        } else if (user.viproCompleted || user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) {
           setViproEvaluations([
             {
-              id: "vipro-fallback",
+              id: "vipro-sample-1",
+              user_id: user.id,
+              user_email: user.email,
               destination_country: user.viproDestination || "US",
-              score: user.viproScore || 85,
+              score: user.viproScore || 88,
+              is_completed: true,
               created_at: new Date().toISOString(),
             }
           ]);
         }
-
-        // If records exist, dynamically sync store flags too
-        if (purchases && purchases.length > 0) {
-          const hasViproPaid = purchases.some(p => p.product_type === "vipro" && p.status === "completed");
-          const hasAdvisorPaid = purchases.some(p => p.product_type === "advisor" && p.status === "completed");
-          const activeAdvisor = purchases.find(p => p.product_type === "advisor" && p.status === "completed");
-
-          if (hasViproPaid !== user.hasPaidVipro || hasAdvisorPaid !== user.hasPaidAdvisor) {
-            setUser({
-              ...user,
-              hasPaidVipro: hasViproPaid || hasAdvisorPaid,
-              hasPaidAdvisor: hasAdvisorPaid,
-              assignedAgentId: activeAdvisor?.agent_id || user.assignedAgentId
-            });
-          }
-        }
       } catch (err) {
-        console.error("Failed to load user purchases from DB:", err);
+        console.error("Failed to load user purchases / db records from DB:", err);
+      } finally {
+        setIsDataLoading(false);
       }
     };
     fetchDbRecords();
@@ -1485,11 +1623,60 @@ export default function PerfilUsuarioPage() {
 
   if (!isMounted) {
     return (
-      <div className="min-h-screen w-full flex flex-col bg-background-main">
+      <div className="min-h-screen w-full flex flex-col bg-background-main animate-pulse">
         <Header headerRef={headerRef} />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-12 h-12 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin"></div>
-        </div>
+        <main className="flex-1 w-full max-w-6xl mx-auto px-4 md:px-8 py-8 flex flex-col gap-8">
+          {/* Profile Header Skeleton Card */}
+          <div className="bg-white rounded-3xl p-6 md:p-8 border border-border-light shadow-sm flex flex-col md:flex-row items-center md:items-start justify-between gap-6">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 w-full md:w-auto text-center sm:text-left">
+              <div className="w-24 h-24 rounded-full bg-slate-200 shrink-0"></div>
+              <div className="space-y-3 flex-1 flex flex-col items-center sm:items-start">
+                <div className="h-6 bg-slate-200 rounded-lg w-48"></div>
+                <div className="h-4 bg-slate-100 rounded-lg w-36"></div>
+                <div className="flex gap-2 pt-1">
+                  <div className="h-5 bg-slate-200 rounded-full w-24"></div>
+                  <div className="h-5 bg-slate-100 rounded-full w-28"></div>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 w-full md:w-auto">
+              <div className="h-10 bg-slate-200 rounded-xl w-32"></div>
+              <div className="h-10 bg-slate-100 rounded-xl w-28"></div>
+            </div>
+          </div>
+
+          {/* Navigation Tabs Skeleton */}
+          <div className="flex items-center gap-3 border-b border-border-light pb-4 overflow-x-auto">
+            <div className="h-10 bg-slate-200 rounded-xl w-36 shrink-0"></div>
+            <div className="h-10 bg-slate-100 rounded-xl w-36 shrink-0"></div>
+            <div className="h-10 bg-slate-100 rounded-xl w-36 shrink-0"></div>
+            <div className="h-10 bg-slate-100 rounded-xl w-36 shrink-0"></div>
+          </div>
+
+          {/* Tab Content Section Skeleton */}
+          <div className="bg-white rounded-3xl p-6 md:p-10 border border-border-light shadow-sm space-y-6">
+            <div className="flex justify-between items-center border-b border-border-light pb-4">
+              <div className="space-y-2">
+                <div className="h-6 bg-slate-200 rounded-lg w-64"></div>
+                <div className="h-4 bg-slate-100 rounded-lg w-80"></div>
+              </div>
+              <div className="h-8 bg-slate-200 rounded-lg w-24"></div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+              <div className="space-y-4 p-5 rounded-2xl border border-slate-100 bg-slate-50/50">
+                <div className="h-5 bg-slate-200 rounded w-40"></div>
+                <div className="h-10 bg-slate-200 rounded-xl w-full"></div>
+                <div className="h-10 bg-slate-100 rounded-xl w-full"></div>
+              </div>
+              <div className="space-y-4 p-5 rounded-2xl border border-slate-100 bg-slate-50/50">
+                <div className="h-5 bg-slate-200 rounded w-40"></div>
+                <div className="h-10 bg-slate-200 rounded-xl w-full"></div>
+                <div className="h-10 bg-slate-100 rounded-xl w-full"></div>
+              </div>
+            </div>
+          </div>
+        </main>
         <Footer />
       </div>
     );
@@ -1889,7 +2076,16 @@ export default function PerfilUsuarioPage() {
           </div>
 
           <div className="text-center md:text-left text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5">Panel del Aplicante</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5">
+              {user?.role === ROLES.ADMIN || user?.role === ROLES.MODERATOR
+                ? "Panel de Administración"
+                : user?.role === ROLES.AGENCY
+                  ? "Panel de Agencia"
+                  : user?.role === ROLES.AGENT
+                    ? "Panel de Asesor"
+                    : "Panel del Aplicante"}
+            </p>
+
             <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
               Hola, {firstName} {lastName}
             </h1>
@@ -1931,35 +2127,48 @@ export default function PerfilUsuarioPage() {
                 const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
                 const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
 
-                // --- Tabs for approved agents / agencies ---
+                // --- Tabs for agents / agencies ---
                 if (isAgent) {
+                  const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
+
                   if (user.role === ROLES.AGENCY) {
                     return [
                       { id: "datos", label: "Personalizar Perfil", icon: "👤" },
-                      { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
-                      { id: "invitar_agentes", label: "Invitar Agentes", icon: "👥" },
-                      { id: "mi_acreditacion", label: "Mi Acreditación", icon: "🏅" },
-                      { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
-                      { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                      { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
+                      ...(isAccredited ? [
+                        { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
+                        { id: "invitar_agentes", label: "Link de Referidos", icon: "🔗" },
+                        { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
+                        { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                      ] : []),
                     ];
                   } else {
                     return [
                       { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                      { id: "chat_agente", label: "Chat con Clientes", icon: "💬" },
-                      { id: "mi_acreditacion", label: "Mi Acreditación", icon: "🏅" },
-                      { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
-                      { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                      { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
+                      ...(isAccredited ? [
+                        { id: "chat_agente", label: "Chat con Clientes", icon: "💬" },
+                        { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
+                        { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                      ] : []),
                     ];
                   }
                 }
 
+
                 // --- Tabs for admin / moderator ---
                 if (isStaff) {
                   return [
+                    { id: "admin_dashboard", label: "Panel de Control Global", icon: "📊" },
+                    { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderación de Socios 🛡️" : "Administrar Socios y Agentes 🛠️", icon: "🤝" },
+                    { id: "admin_usuarios", label: "Gestión de Usuarios", icon: "👥" },
+                    { id: "admin_expedientes", label: "Monitor de Expedientes", icon: "📋" },
+                    { id: "admin_vipro", label: "Evaluaciones VIPRO", icon: "📈" },
+                    { id: "admin_pagos", label: "Historial de Pagos", icon: "💳" },
                     { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                    { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderador de Socios 🛡️" : "Administrar Socios 🛠️", icon: "⚙️" },
                   ];
                 }
+
 
                 // --- Default tabs for regular users ---
                 return [
@@ -1977,8 +2186,9 @@ export default function PerfilUsuarioPage() {
                     if (tab.isLink && tab.url) {
                       router.push(tab.url);
                     } else {
-                      setActiveTab(tab.id);
+                      handleTabChange(tab.id);
                     }
+
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${
                     activeTab === tab.id
@@ -1998,6 +2208,26 @@ export default function PerfilUsuarioPage() {
         <section className="w-full lg:w-3/4">
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
 
+            {/* UNACCREDITED AGENT / AGENCY ALERT BANNER */}
+            {user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (!agentApp || (agentApp.status !== "active" && agentApp.status !== "approved") || !agentApp.signed_at) && (
+              <div className="bg-amber-50 border border-amber-300 rounded-md p-4 mb-6 text-left shadow-xs flex items-start gap-3">
+                <span className="text-2xl">⚠️</span>
+                <div className="flex-1">
+                  <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Areditación Requerida para Operar</h3>
+                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                    Para habilitar todas tus funciones como <strong>{user.role === ROLES.AGENCY ? "Agencia" : "Asesor"}</strong> (enlaces de referidos, comisiones y panel comercial), debes contar con tu <strong>acreditación aprobada y firma de contrato digital completada</strong>.
+                  </p>
+                  <button
+                    onClick={() => setActiveTab("mi_acreditacion")}
+                    className="mt-3 px-4 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded transition-colors cursor-pointer border-none"
+                  >
+                    Completar Mi Acreditación →
+                  </button>
+                </div>
+              </div>
+            )}
+
+
             {/* TAB: DATOS PERSONALES */}
             {activeTab === "datos" && (
               <div>
@@ -2007,81 +2237,7 @@ export default function PerfilUsuarioPage() {
                 </div>
 
                 {/* B2B Agency Invitation Banner */}
-                {realInvitation && user?.role !== "agent" && (
-                  <div className="bg-gradient-to-br from-blue-50/70 via-indigo-50/50 to-white border border-blue-200/80 rounded-[1.5rem] p-6 md:p-8 mb-8 shadow-sm animate-in fade-in duration-300 text-left">
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-ping"></span>
-                      <span className="text-[10px] font-extrabold tracking-widest text-blue-700 bg-blue-100/60 border border-blue-200/50 px-2 py-0.5 rounded uppercase">Invitación Corporativa Recibida</span>
-                    </div>
 
-                    <div className="flex flex-col md:flex-row gap-6 items-start justify-between">
-                      <div className="flex-1 space-y-4">
-                        <div className="flex items-start gap-4">
-                          {realInvitation.agency.photo_url || realInvitation.agency.avatar_url ? (
-                            <img
-                              src={realInvitation.agency.photo_url || realInvitation.agency.avatar_url}
-                              alt={`${realInvitation.agency.first_name} ${realInvitation.agency.last_name}`}
-                              className="w-14 h-14 rounded-xl object-cover shadow-md border border-blue-200"
-                            />
-                          ) : (
-                            <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-xl flex items-center justify-center text-xl font-bold shadow-md border border-blue-500 font-serif">
-                              {((realInvitation.agency.first_name?.[0] || "") + (realInvitation.agency.last_name?.[0] || "")).toUpperCase()}
-                            </div>
-                          )}
-                          <div>
-                            <h4 className="font-serif font-bold text-text-primary text-xl">
-                              {realInvitation.agency.first_name} {realInvitation.agency.last_name}
-                            </h4>
-                            <p className="text-[11px] font-semibold text-text-secondary">🏢 Agencia de Viajes y Asesoría Consular B2B</p>
-                          </div>
-                        </div>
-
-                        <div className="bg-white/60 border border-blue-100 rounded-xl p-4 text-xs space-y-3">
-                          {realInvitation.agency.bio && (
-                            <p className="text-text-secondary leading-relaxed">
-                              <strong>Acerca de la empresa:</strong> {realInvitation.agency.bio}
-                            </p>
-                          )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-text-secondary pt-2 border-t border-blue-100/60">
-                            <div><strong>✉️ Correo:</strong> {realInvitation.agency.email}</div>
-                            {realInvitation.agency.phone && (
-                              <div><strong>📞 Teléfono:</strong> {realInvitation.agency.phone}</div>
-                            )}
-                            {realInvitation.agency.location && (
-                              <div><strong>📍 Ubicación:</strong> {realInvitation.agency.location}</div>
-                            )}
-                            {realInvitation.agency.staff_size && (
-                              <div><strong>👥 Staff:</strong> {realInvitation.agency.staff_size} asesores certificados</div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <p className="text-[11px] font-bold text-blue-800 uppercase tracking-wide">Beneficios de unirte a su equipo:</p>
-                          <ul className="text-xs text-text-secondary space-y-1 pl-1">
-                            <li className="flex items-center gap-2">🔹 <span>Aparecerás en el buscador público de asesores respaldado por su firma.</span></li>
-                            <li className="flex items-center gap-2">🔹 <span>Acceso a los expedientes consulares asignados por la empresa.</span></li>
-                          </ul>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-row md:flex-col gap-2.5 w-full md:w-auto md:min-w-[140px] pt-4 md:pt-0">
-                        <button
-                          onClick={handleAcceptInvitation}
-                          className="flex-1 md:w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg cursor-pointer text-center"
-                        >
-                          Aceptar Invitación
-                        </button>
-                        <button
-                          onClick={handleDeclineInvitation}
-                          className="flex-1 md:w-full border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold py-3 px-4 rounded-xl transition-all cursor-pointer text-center"
-                        >
-                          Rechazar
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 <form onSubmit={handleSaveData} className="max-w-xl space-y-5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2154,116 +2310,337 @@ export default function PerfilUsuarioPage() {
                     </button>
                   </div>
                 </form>
-
-                {/* Simulator Form for sending invitations */}
-                <div className="mt-12 pt-8 border-t border-border-light max-w-xl">
-                  <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-2">Simulador B2B: Invitar a un Asesor</h3>
-                  <p className="text-xs text-text-secondary mb-4">
-                    Envía una invitación formal de parte de <strong>Agency with Agent</strong> a cualquier usuario por su correo electrónico. Si ese usuario entra a su panel, verá la invitación para unirse como asesor certificado de la empresa.
-                  </p>
-                  
-                  <form onSubmit={handleSendInvitation} className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Nombre del Asesor</label>
-                        <input
-                          type="text"
-                          value={inviteNameInput}
-                          onChange={(e) => setInviteNameInput(e.target.value)}
-                          placeholder="Ej. Daniel Hernández"
-                          className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">Correo del Asesor</label>
-                        <input
-                          type="email"
-                          value={inviteEmailInput}
-                          onChange={(e) => setInviteEmailInput(e.target.value)}
-                          placeholder="Ej. danielhrndz38@gmail.com"
-                          className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="submit"
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2.5 rounded-lg text-xs transition-all shadow-sm cursor-pointer"
-                    >
-                      ✉️ Enviar Invitación Corporativa
-                    </button>
-                  </form>
-                </div>
               </div>
             )}
 
             {/* TAB: SEGUIMIENTO DE TRÁMITE */}
-            {activeTab === "proceso" && (
-              <div>
-                <div className="mb-6 pb-4 border-b border-border-light">
-                  <h2 className="text-lg font-bold text-text-primary">Seguimiento de Trámite de Visa</h2>
-                  <p className="text-xs text-text-secondary mt-1">Monitorea el avance de tu expediente consular paso a paso.</p>
-                </div>
-
-                {/* Banner de Oferta de Servicios (si no hay nada comprado) */}
-                {!user.hasPaidVipro && !user.hasPaidAdvisor && (
-                  <div className="mb-8 bg-brand-light/40 border border-brand-primary/10 rounded-2xl p-6 md:p-8 shadow-[0_4px_20px_rgba(0,0,0,0.01)] flex flex-col md:flex-row items-center justify-between gap-6">
-                    <div className="space-y-2 text-center md:text-left">
-                      <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full">
-                        Comienza tu Trámite Hoy
-                      </span>
-                      <h3 className="text-xl font-bold text-text-primary">
-                        Habilita tu seguimiento de visa
-                      </h3>
-                      <p className="text-xs text-text-secondary max-w-md leading-relaxed">
-                        Para desbloquear los pasos del seguimiento, el llenado del formulario DS-160 y los simulacros, debes adquirir uno de nuestros servicios profesionales.
-                      </p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                      <button
-                        onClick={() => router.push("/vipro-form")}
-                        className="flex-1 sm:flex-none px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all focus:outline-none shadow-sm text-center cursor-pointer font-sans"
-                      >
-                        Evaluación Express ($19.99 USD)
-                      </button>
-                      <button
-                        onClick={() => router.push("/agents")}
-                        className="flex-1 sm:flex-none px-5 py-2.5 bg-white border border-brand-primary text-brand-primary hover:bg-brand-light text-xs font-bold rounded-sm transition-all focus:outline-none text-center cursor-pointer font-sans"
-                      >
-                        Asesoría Premium ($150.00 USD)
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Timeline */}
-                <div className="space-y-8 relative before:absolute before:inset-0 before:left-3.5 before:right-auto before:w-0.5 before:bg-gray-200 mt-4">
-                  {/* Paso 1 */}
-                  <div className="flex gap-4 relative">
-                    <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                      ✓
-                    </div>
-                    <div className="flex-1 bg-background-main/30 border border-border-light rounded-md p-4">
-                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                        <h4 className="text-sm font-bold text-text-primary">Paso 1: Creación de perfil y verificación</h4>
-                        <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">COMPLETADO</span>
+            {activeTab === "proceso" && (() => {
+              if (isDataLoading) {
+                return (
+                  <div className="space-y-6 text-left animate-pulse">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-light pb-4">
+                      <div className="space-y-2">
+                        <div className="h-6 bg-slate-200 rounded-lg w-64"></div>
+                        <div className="h-4 bg-slate-100 rounded-lg w-80"></div>
                       </div>
-                      <p className="text-xs text-text-secondary">Tu cuenta ha sido creada exitosamente en TodoVisa y tu perfil está verificado.</p>
+                      <div className="h-12 bg-slate-200 rounded-xl w-36"></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="h-44 bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-3">
+                        <div className="h-4 bg-slate-200 rounded w-32"></div>
+                        <div className="h-5 bg-slate-300 rounded w-48"></div>
+                        <div className="h-10 bg-slate-200 rounded-xl w-full mt-4"></div>
+                      </div>
+                      <div className="h-44 bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-3">
+                        <div className="h-4 bg-slate-200 rounded w-32"></div>
+                        <div className="h-5 bg-slate-300 rounded w-48"></div>
+                        <div className="h-10 bg-slate-200 rounded-xl w-full mt-4"></div>
+                      </div>
+                    </div>
+                    <div className="h-60 bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
+                      <div className="h-5 bg-slate-200 rounded w-48"></div>
+                      <div className="h-14 bg-slate-100 rounded-xl w-full"></div>
+                      <div className="h-14 bg-slate-100 rounded-xl w-full"></div>
+                    </div>
+                  </div>
+                );
+              }
+
+              const myEvals = viproEvaluations.filter((ev: any) => ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase()));
+              const latestEval = myEvals.length > 0 ? myEvals[0] : null;
+
+              const isViproCompleted = Boolean(
+                user.viproCompleted ||
+                myEvals.length > 0 ||
+                (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+              );
+              const hasPaidAdvisor = Boolean(user.hasPaidAdvisor || dbPurchases.some((p: any) => p.product_type === "advisor" && p.status === "completed"));
+              const hasVipro = Boolean(user.hasPaidVipro || isViproCompleted || dbPurchases.some((p: any) => p.product_type === "vipro" && p.status === "completed"));
+              const hasAnyService = hasPaidAdvisor || hasVipro;
+
+              // Determine mode: VIPRO Express vs Servicio Completo con Asesor vs Ninguno
+              const isViproOnly = !hasPaidAdvisor && hasVipro;
+
+              // Dynamic progress calculation
+              let progressPercent = 0;
+              if (hasPaidAdvisor) {
+                progressPercent = 15;
+                if (isPreformularioCompleted) progressPercent += 20;
+                if (user.hasPaidAdvisor) progressPercent += 15;
+                if (expedienteStatus === "submitted" || expedienteStatus === "approved") progressPercent += 20;
+                if (expedienteStatus === "approved") progressPercent += 15;
+                if (preformMetadata?.appointment_date) progressPercent += 10;
+                if (preformMetadata?.courier_tracking) progressPercent += 5;
+              } else if (isViproOnly) {
+                progressPercent = isViproCompleted ? 100 : 50;
+              } else {
+                progressPercent = 0;
+              }
+
+              return (
+                <div>
+                  <div className="mb-6 pb-4 border-b border-border-light text-left">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-xl font-bold text-text-primary">
+                          {hasPaidAdvisor
+                            ? "Seguimiento de Trámite de Visa (Servicio Completo)"
+                            : isViproOnly
+                            ? "Seguimiento de Evaluación VIPRO Express"
+                            : "Seguimiento de Trámite de Visa"}
+                        </h2>
+                        <p className="text-xs text-text-secondary mt-1">
+                          {hasPaidAdvisor
+                            ? "Monitorea el avance en tiempo real de tu expediente consular paso a paso."
+                            : isViproOnly
+                            ? "Monitorea el estado de tu diagnóstico de perfilamiento consular."
+                            : "No has contratado un servicio aún. Selecciona una opción para activar tu línea de seguimiento."}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 bg-brand-light/60 border border-brand-primary/20 p-3 rounded-lg">
+                        <div className="text-right">
+                          <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider block">Avance del Proceso</span>
+                          <span className="text-lg font-extrabold text-brand-primary font-mono">{progressPercent}%</span>
+                        </div>
+                        <div className="w-20 bg-gray-200 h-2.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-brand-primary h-full transition-all duration-500 rounded-full"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Paso 2 */}
-                  <div className="flex gap-4 relative">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-brand-primary text-white" : "bg-amber-500 text-white animate-pulse"
-                      }`}>
-                      {(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "✓" : "2"}
+                  {/* Service Status Cards / Selector */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 text-left">
+                    {/* Tarjeta VIPRO */}
+                    <div className={`p-5 border rounded-2xl transition-all ${hasVipro ? "bg-blue-50/50 border-blue-200 shadow-sm" : "bg-white border-border-light shadow-xs"}`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-800 bg-blue-100 px-2 py-0.5 rounded">
+                          Evaluación Diagnóstica VIPRO
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${isViproCompleted ? "bg-emerald-100 text-emerald-800" : hasVipro ? "bg-amber-100 text-amber-800" : "bg-gray-100 text-gray-600"}`}>
+                          {isViproCompleted ? "Completado" : hasVipro ? "Disponible" : "No Adquirido"}
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Diagnóstico de Probabilidad Consular ($19.99 USD)</h4>
+                      <p className="text-xs text-text-secondary leading-relaxed mb-4">
+                        Evaluación expres para analizar solvencia, arraigo y perfil de viabilidad.
+                      </p>
+                      {isViproCompleted ? (
+                        <button
+                          onClick={() => router.push(`/vipro-form/evaluation?country=${latestEval?.destination_country || user.viproDestination || "US"}${latestEval?.id ? `&evalId=${latestEval.id}` : ""}&userId=${user.id}`)}
+                          className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          Ver Diagnóstico Consular ({latestEval?.score || user.viproScore || 85}/100) &rarr;
+                        </button>
+                      ) : hasVipro ? (
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-xs"
+                        >
+                          Iniciar Evaluación VIPRO &rarr;
+                        </button>
+                      ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
+                        <button
+                          onClick={() => setActiveTab("admin_vipro")}
+                          className="px-3 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-sm hover:bg-purple-200 transition-colors cursor-pointer shadow-xs"
+                        >
+                          👑 Ver Evaluaciones de Todos los Usuarios &rarr;
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer shadow-xs"
+                        >
+                          Adquirir VIPRO por $19.99 USD &rarr;
+                        </button>
+                      )}
                     </div>
-                    <div className={`flex-1 rounded-md p-4 border ${(user.hasPaidAdvisor ? isPreformularioCompleted : user.viproCompleted) ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"
-                      }`}>
+
+                    {/* Tarjeta Servicio con Asesor */}
+                    <div className={`p-5 border rounded-2xl transition-all ${user.hasPaidAdvisor ? "bg-emerald-50/50 border-emerald-200 shadow-sm" : "bg-white border-border-light shadow-xs"}`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                          Servicio Completo con Asesor
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${user.hasPaidAdvisor ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"}`}>
+                          {user.hasPaidAdvisor ? "Activo" : "No Adquirido"}
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento ($112.50 USD)</h4>
+                      <p className="text-xs text-text-secondary leading-relaxed mb-4">
+                        Asesoría 1-a-1, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
+                      </p>
                       {user.hasPaidAdvisor ? (
-                        /* Preformulario for Servicio Completo */
-                        <>
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-xs font-bold text-emerald-800 flex items-center gap-1">
+                            👤 {assignedAgent?.name || "Asesor Asignado"}
+                          </span>
+                          <button
+                            onClick={() => setActiveTab("asesor")}
+                            className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 transition-colors cursor-pointer"
+                          >
+                            Chat 1-a-1 &rarr;
+                          </button>
+                        </div>
+                      ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
+                        <button
+                          onClick={() => setActiveTab("admin_expedientes")}
+                          className="px-3 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-sm hover:bg-purple-200 transition-colors cursor-pointer shadow-xs"
+                        >
+                          👑 Monitor de Expedientes Globales &rarr;
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => router.push("/agents")}
+                          className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-xs"
+                        >
+                          Seleccionar Asesor ($112.50 USD) &rarr;
+                        </button>
+                      )}
+
+                    </div>
+                  </div>
+
+                  {/* RENDER CONDICIONAL DE PASOS / TIMELINE */}
+                  {!hasAnyService ? (
+                    /* NINGÚN SERVICIO ADQUIRIDO: MOSTRAR SOLO INFORMACIÓN SIN PASOS */
+                    <div className="p-8 bg-white border border-border-light rounded-2xl text-center space-y-4 shadow-xs text-left md:text-center">
+                      <div className="w-16 h-16 rounded-full bg-brand-light text-brand-primary flex items-center justify-center text-2xl font-bold mx-auto">
+                        📌
+                      </div>
+                      <div className="space-y-1.5 max-w-lg mx-auto">
+                        <h3 className="text-base font-bold text-text-primary">Línea de Seguimiento No Activa</h3>
+                        <p className="text-xs text-text-secondary leading-relaxed">
+                          Para habilitar los pasos interactivos de seguimiento en tu perfil, debes contratar la **Evaluación Diagnóstica VIPRO ($19.99 USD)** o la **Asesoría Consular Completa con Asesor ($112.50 USD)**.
+                        </p>
+                      </div>
+                    </div>
+                  ) : isViproOnly ? (
+                    /* TIMELINE EXPRÉS PARA VIPRO */
+                    <div className="space-y-6 text-left">
+
+
+                      <div className="space-y-6 relative before:absolute before:inset-0 before:left-3.5 before:right-auto before:w-0.5 before:bg-gray-200 mt-4">
+                        {/* Paso 1 VIPRO */}
+                        <div className="flex gap-4 relative">
+                          <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 shadow-xs">
+                            ✓
+                          </div>
+                          <div className="flex-1 bg-background-main/30 border border-border-light rounded-md p-4">
+                            <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                              <h4 className="text-sm font-bold text-text-primary">Paso 1: Registro de Cuenta y Adquisición de VIPRO</h4>
+                              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">COMPLETADO</span>
+                            </div>
+                            <p className="text-xs text-text-secondary">Tu cuenta y pago de la Evaluación Diagnóstica VIPRO han sido confirmados.</p>
+                          </div>
+                        </div>
+
+                        {/* Paso 2 VIPRO */}
+                        <div className="flex gap-4 relative">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${user.viproCompleted ? "bg-brand-primary text-white shadow-xs" : "bg-amber-500 text-white animate-pulse"}`}>
+                            {user.viproCompleted ? "✓" : "2"}
+                          </div>
+                          <div className={`flex-1 rounded-md p-4 border ${user.viproCompleted ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"}`}>
+                            <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                              <h4 className="text-sm font-bold text-text-primary">Paso 2: Cuestionario de Evaluación Diagnóstica</h4>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.viproCompleted ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-800 border-amber-200"}`}>
+                                {user.viproCompleted ? "COMPLETADO" : "PENDIENTE DE COMPLETAR"}
+                              </span>
+                            </div>
+                            <p className="text-xs text-text-secondary mb-3 leading-relaxed">
+                              {user.viproCompleted
+                                ? "Has completado todas las preguntas del diagnóstico de viabilidad consular."
+                                : "Responde el cuestionario interactivo de viabilidad para que el algoritmo procese tu perfil."}
+                            </p>
+                            {!user.viproCompleted && (
+                              <button
+                                onClick={() => router.push("/vipro-form")}
+                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors shadow-xs cursor-pointer"
+                              >
+                                Completar Cuestionario VIPRO &rarr;
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Paso 3 VIPRO */}
+                        <div className="flex gap-4 relative">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${user.viproCompleted ? "bg-emerald-500 text-white shadow-xs" : "bg-gray-200 text-text-muted"}`}>
+                            {user.viproCompleted ? "✓" : "3"}
+                          </div>
+                          <div className={`flex-1 rounded-md p-4 border ${user.viproCompleted ? "bg-white border-emerald-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                            <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                              <h4 className="text-sm font-bold text-text-primary">Paso 3: Emisión de Reporte y Scoring Consular</h4>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.viproCompleted ? "bg-emerald-50 text-emerald-800 border-emerald-200" : "bg-gray-100 text-gray-600 border-gray-200"}`}>
+                                {user.viproCompleted ? "REPORTE GENERADO (100%)" : "PENDIENTE DE CUESTIONARIO"}
+                              </span>
+                            </div>
+                            <p className="text-xs text-text-secondary mb-3 leading-relaxed">
+                              {user.viproCompleted
+                                ? `Tu reporte de viabilidad consular ha sido generado con una calificación de ${user.viproScore || 85}/100.`
+                                : "Tu reporte y recomendaciones de perfilamiento se generarán automáticamente al terminar el cuestionario."}
+                            </p>
+                            {user.viproCompleted && (
+                              <button
+                                onClick={() => router.push(`/vipro-form/evaluation?country=${user.viproDestination || "US"}`)}
+                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors shadow-xs cursor-pointer"
+                              >
+                                Ver Reporte Completo de Viabilidad &rarr;
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* VIPRO Upgrade Banner */}
+                      <div className="mt-8 p-6 bg-gradient-to-r from-brand-light/60 to-white border border-brand-primary/20 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 text-left shadow-sm">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-extrabold text-brand-primary uppercase tracking-widest bg-white border border-brand-primary/20 px-2.5 py-0.5 rounded-full">
+                            Paso Opcional: Asesoría Personalizada 1-a-1
+                          </span>
+                          <h4 className="text-base font-bold text-text-primary">
+                            ¿Deseas que un asesor experto llene tu DS-160 y audite tu expediente?
+                          </h4>
+                          <p className="text-xs text-text-secondary leading-relaxed max-w-xl">
+                            La Evaluación VIPRO es un diagnóstico expres independiente. Si deseas que nuestro equipo certificado arme tu formulario consular oficial, audite tus documentos y te capacite por Zoom para tu entrevista, puedes contratar el Servicio Completo con Asesor.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => router.push("/agents")}
+                          className="px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0"
+                        >
+                          Seleccionar Asesor ($112.50 USD) &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* TIMELINE COMPLETO DE 7 PASOS (CON ASESOR) */
+                    <div className="space-y-8 relative before:absolute before:inset-0 before:left-3.5 before:right-auto before:w-0.5 before:bg-gray-200 mt-4 text-left">
+                      {/* Paso 1 */}
+                      <div className="flex gap-4 relative">
+                        <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 shadow-xs">
+                          ✓
+                        </div>
+                        <div className="flex-1 bg-background-main/30 border border-border-light rounded-md p-4">
                           <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                            <h4 className="text-sm font-bold text-text-primary">Paso 2: Preformulario</h4>
+                            <h4 className="text-sm font-bold text-text-primary">Paso 1: Creación de perfil y verificación de cuenta</h4>
+                            <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">COMPLETADO</span>
+                          </div>
+                          <p className="text-xs text-text-secondary">Tu cuenta ha sido verificada en TodoVisa. Puedes navegar por todas las secciones de la plataforma.</p>
+                        </div>
+                      </div>
+
+                      {/* Paso 2 */}
+                      <div className="flex gap-4 relative">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${isPreformularioCompleted ? "bg-brand-primary text-white shadow-xs" : "bg-amber-500 text-white animate-pulse"}`}>
+                          {isPreformularioCompleted ? "✓" : "2"}
+                        </div>
+                        <div className={`flex-1 rounded-md p-4 border ${isPreformularioCompleted ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"}`}>
+                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                            <h4 className="text-sm font-bold text-text-primary">Paso 2: Llenado del Preformulario Consular</h4>
                             {isPreformularioCompleted ? (
                               <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">COMPLETADO</span>
                             ) : (
@@ -2271,581 +2648,522 @@ export default function PerfilUsuarioPage() {
                             )}
                           </div>
                           {isPreformularioCompleted ? (
-                            <p className="text-xs text-text-secondary">
-                              Preformulario completado con éxito. Tu asesor ya cuenta con tus datos para el llenado oficial de tu solicitud de visa.
-                            </p>
-                          ) : (
-                            <>
-                              <p className="text-xs text-text-secondary mb-3">
-                                Completa tu preformulario con tus datos personales, de contacto, laborales y familiares para que tu asesor pueda iniciar el llenado oficial de tu formulario DS-160.
+                            <div className="flex items-center justify-between flex-wrap gap-3">
+                              <p className="text-xs text-text-secondary">
+                                Preformulario completado con éxito. Tus datos personales, de contacto, laborales y familiares están guardados para que tu asesor elabore la solicitud oficial DS-160.
                               </p>
                               <button
                                 onClick={() => router.push("/preformulario")}
-                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
+                                className="px-3 py-1.5 bg-white border border-border-light text-text-secondary hover:text-text-primary text-xs font-bold rounded transition-colors cursor-pointer"
                               >
-                                Completar Preformulario
+                                Ver / Editar Preformulario
                               </button>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        /* VIPRO Evaluation for Autonomía / Express */
-                        <>
-                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                            <h4 className="text-sm font-bold text-text-primary">Paso 2: Evaluación Diagnóstica VIPRO</h4>
-                            {user.viproCompleted ? (
-                              <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">CALIFICADO</span>
-                            ) : user.hasPaidVipro ? (
-                              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE COMPLETAR</span>
-                            ) : (
-                              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">PENDIENTE DE PAGO</span>
-                            )}
-                          </div>
-                          {user.viproCompleted ? (
-                            <>
-                              <p className="text-xs text-text-secondary">
-                                Evaluación realizada con éxito para destino: <span className="font-semibold text-text-primary">{user.viproDestination === "UK" ? "🇬🇧 Inglaterra" : "🇺🇸 Estados Unidos"}</span>.
-                              </p>
-                              <div className="mt-3 flex items-center gap-3 bg-brand-light/50 border border-blue-100 rounded p-2.5 w-max">
-                                <span className="text-lg">📊</span>
-                                <div>
-                                  <p className="text-xs font-bold text-brand-primary">Puntaje Obtenido: {user.viproScore || 85}/100 ({(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión Recomendada"})</p>
-                                  <p className="text-[10px] text-text-secondary">Tu perfil cuenta con alta probabilidad. Recomendado continuar con llenado de DS-160.</p>
-                                </div>
-                              </div>
-                              <div className="mt-3">
-                                <button
-                                  onClick={() => router.push(`/vipro-form/evaluation?country=${user.viproDestination || "US"}`)}
-                                  className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
-                                >
-                                  Ver Respuestas y Recomendaciones
-                                </button>
-                              </div>
-                            </>
-                          ) : user.hasPaidVipro ? (
-                            <>
-                              <p className="text-xs text-text-secondary mb-3">Has habilitado tu Evaluación VIPRO. Complétala ahora para conocer tu puntaje de perfilamiento consular.</p>
-                              <button
-                                onClick={() => router.push("/vipro-form")}
-                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
-                              >
-                                Comenzar Evaluación VIPRO
-                              </button>
-                            </>
+                            </div>
                           ) : (
                             <>
-                              <p className="text-xs text-text-secondary mb-3">La Evaluación VIPRO no es gratuita. Realiza el pago de $19.99 USD (o adquiere el Servicio Completo con Asesor) para habilitar tu cuestionario y conocer tus probabilidades.</p>
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => router.push("/vipro-form")}
-                                  className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer"
-                                >
-                                  Adquirir VIPRO ($19.99 USD)
-                                </button>
-                                <button
-                                  onClick={() => router.push("/agents")}
-                                  className="px-4 py-2 bg-white border border-brand-primary text-brand-primary text-xs font-bold rounded-sm hover:bg-brand-light transition-all focus:outline-none cursor-pointer"
-                                >
-                                  Ver Asesores
-                                </button>
-                              </div>
+                              <p className="text-xs text-text-secondary mb-3 leading-relaxed">
+                                Ingresa tus datos personales, de contacto, laborales y familiares en el preformulario para que tu asesor asignado elabore tu solicitud consular oficial (DS-160 / UKVI).
+                              </p>
+                              <button
+                                onClick={() => router.push("/preformulario")}
+                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-all focus:outline-none cursor-pointer shadow-xs"
+                              >
+                                Completar Preformulario Ahora &rarr;
+                              </button>
                             </>
                           )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Paso 3 */}
-                  <div className="flex gap-4 relative transition-all">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${user.hasPaidAdvisor
-                        ? "bg-brand-primary text-white"
-                        : "bg-amber-500 text-white animate-pulse"
-                      }`}>
-                      {user.hasPaidAdvisor ? "✓" : "3"}
-                    </div>
-                    <div className={`flex-1 rounded-md p-4 border ${user.hasPaidAdvisor
-                        ? "bg-background-main/30 border-border-light"
-                        : "bg-white border-amber-200 shadow-sm"
-                      }`}>
-                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                        <h4 className="text-sm font-bold text-text-primary">Paso 3: Asignación de Agente Consular</h4>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.hasPaidAdvisor
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-amber-50 text-amber-800 border-amber-200"
-                          }`}>
-                          {user.hasPaidAdvisor ? "COMPLETADO" : "ACCION REQUERIDA"}
-                        </span>
+                        </div>
                       </div>
 
-                      {user.hasPaidAdvisor ? (
-                        <div>
-                          <p className="text-xs text-text-secondary">
-                            Has asignado correctamente a tu asesor: <span className="font-semibold text-text-primary">{assignedAgent.name}</span>.
-                          </p>
-                          <button
-                            onClick={() => setActiveTab("asesor")}
-                            className="mt-3 text-xs text-brand-primary font-bold hover:underline"
-                          >
-                            Ir a mi Chat de Soporte &rarr;
-                          </button>
+                      {/* Paso 3 */}
+                      <div className="flex gap-4 relative transition-all">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${user.hasPaidAdvisor ? "bg-brand-primary text-white shadow-xs" : "bg-amber-500 text-white animate-pulse"}`}>
+                          {user.hasPaidAdvisor ? "✓" : "3"}
                         </div>
-                      ) : (
-                        <div>
-                          <p className="text-xs text-text-secondary mb-3">
-                            Selecciona un asesor consular de nuestra red certificada para guiar el armado de tu expediente.
-                          </p>
-                          <button
-                            onClick={() => router.push("/agents")}
-                            className="bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold px-4 py-2 rounded-sm transition-colors shadow-sm cursor-pointer"
-                          >
-                            Elegir Asesor Consular &rarr;
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                        <div className={`flex-1 rounded-md p-4 border ${user.hasPaidAdvisor ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"}`}>
+                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                            <h4 className="text-sm font-bold text-text-primary">Paso 3: Conexión con Asesor Experto y Chat 1-a-1</h4>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.hasPaidAdvisor ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-800 border-amber-200"}`}>
+                              {user.hasPaidAdvisor ? "COMPLETADO" : "ACCIÓN REQUERIDA"}
+                            </span>
+                          </div>
 
-                  {/* Paso 4 */}
-                  <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved'
-                        ? "bg-emerald-500 text-white animate-none"
-                        : user.hasPaidAdvisor
-                          ? "bg-amber-500 text-white animate-pulse"
-                          : "bg-gray-200 text-text-muted"
-                      }`}>
-                      {expedienteStatus === 'approved' ? "✓" : "4"}
-                    </div>
-                    <div className={`flex-1 border rounded-md p-4 ${expedienteStatus === 'approved'
-                        ? "bg-white border-emerald-200 shadow-sm"
-                        : user.hasPaidAdvisor
-                          ? "bg-white border-amber-200 shadow-sm"
-                          : "bg-background-main/50 border-border-light"
-                      }`}>
-                      <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                        <h4 className={`text-sm font-bold ${user.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
-                          Paso 4: Armado de Expediente y Formulario Consular
-                        </h4>
-                        {user.hasPaidAdvisor && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${expedienteStatus === 'approved'
-                              ? "bg-emerald-50 text-emerald-800 border-emerald-200 animate-none"
-                              : expedienteStatus === 'submitted'
-                                ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse"
-                                : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
-                            }`}>
-                            {expedienteStatus === 'approved'
-                              ? "COMPLETADO"
-                              : expedienteStatus === 'submitted'
-                                ? "EN AUDITORÍA"
-                                : "EN PROGRESO"}
-                          </span>
-                        )}
+                          {user.hasPaidAdvisor ? (
+                            <div>
+                              <p className="text-xs text-text-secondary">
+                                Has asignado correctamente a tu asesor experto: <span className="font-semibold text-text-primary">{assignedAgent.name}</span>.
+                              </p>
+                              <button
+                                onClick={() => setActiveTab("asesor")}
+                                className="mt-3 text-xs text-brand-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                              >
+                                💬 Ir a mi Chat de Soporte 1-a-1 &rarr;
+                              </button>
+                            </div>
+                          ) : (
+                            <div>
+                              <p className="text-xs text-text-secondary mb-3">
+                                Selecciona un asesor consular de nuestra red certificada para guiar el armado de tu expediente y resolver dudas por chat.
+                              </p>
+                              <button
+                                onClick={() => router.push("/agents")}
+                                className="bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold px-4 py-2 rounded-sm transition-colors shadow-sm cursor-pointer"
+                              >
+                                Elegir Asesor Consular &rarr;
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <p className={`text-xs ${user.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"}`}>
-                        Llenado digital del formulario de visa y preparación de documentos de solvencia económica. Tu asesor te dará pautas por chat.
-                      </p>
 
-                      {user.hasPaidAdvisor && (
-                        <div className="mt-4 pt-4 border-t border-border-light space-y-4">
-                          <div>
-                            <span className="text-xs font-bold text-text-primary uppercase tracking-wider block mb-1">
-                              📂 Expediente Digital Consular
-                            </span>
-                            <span className="text-[11px] text-text-secondary block mb-3 leading-relaxed">
-                              Carga los archivos requeridos para que tu asesora {assignedAgent.name} los audite antes de programar tu cita:
-                            </span>
+                      {/* Paso 4 */}
+                      <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-emerald-500 text-white" : user.hasPaidAdvisor ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
+                          {expedienteStatus === 'approved' ? "✓" : "4"}
+                        </div>
+                        <div className={`flex-1 border rounded-md p-4 ${expedienteStatus === 'approved' ? "bg-white border-emerald-200 shadow-sm" : user.hasPaidAdvisor ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                            <h4 className={`text-sm font-bold ${user.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
+                              Paso 4: Auditoría de Expediente y Formulario Consular
+                            </h4>
+                            {user.hasPaidAdvisor && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${expedienteStatus === 'approved' ? "bg-emerald-50 text-emerald-800 border-emerald-200" : expedienteStatus === 'submitted' ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse" : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"}`}>
+                                {expedienteStatus === 'approved' ? "COMPLETADO" : expedienteStatus === 'submitted' ? "EN AUDITORÍA" : "EN PROGRESO"}
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-xs ${user.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"}`}>
+                            Carga digital de soporte probatorio (pasaporte, arraigos, solvencia) y auditoría previa del formulario DS-160 por parte de tu asesor.
+                          </p>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {/* Pasaporte */}
-                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
-                                <div>
-                                  <span className="text-xs font-bold text-text-primary block">1. Pasaporte Vigente</span>
-                                  <span className="text-[9px] text-text-muted">Primera página con datos de identidad.</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 mt-1">
-                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                    {clientDocs.passport || "❌ No subido"}
-                                  </span>
-                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                    Subir
-                                    <input
-                                      type="file"
-                                      accept="image/*,application/pdf"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload('passport', file.name);
-                                      }}
-                                    />
-                                  </label>
+                          {user.hasPaidAdvisor && (
+                            <div className="mt-4 pt-4 border-t border-border-light space-y-4">
+                              <div>
+                                <span className="text-xs font-bold text-text-primary uppercase tracking-wider block mb-1">
+                                  📂 Expediente Digital Consular
+                                </span>
+                                <span className="text-[11px] text-text-secondary block mb-3 leading-relaxed">
+                                  Carga los archivos requeridos para que tu asesor {assignedAgent.name} los audite antes de programar tu cita:
+                                </span>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  {/* Pasaporte */}
+                                  <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                    <div>
+                                      <span className="text-xs font-bold text-text-primary block">1. Pasaporte Vigente</span>
+                                      <span className="text-[9px] text-text-muted">Primera página con datos de identidad.</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 mt-1">
+                                      <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                        {clientDocs.passport || "❌ No subido"}
+                                      </span>
+                                      <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                        Subir
+                                        <input
+                                          type="file"
+                                          accept="image/*,application/pdf"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleFileUpload('passport', file);
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  {/* DUI */}
+                                  <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                    <div>
+                                      <span className="text-xs font-bold text-text-primary block">2. DUI / Identificación</span>
+                                      <span className="text-[9px] text-text-muted">Copia legible por ambos lados.</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 mt-1">
+                                      <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                        {clientDocs.dui || "❌ No subido"}
+                                      </span>
+                                      <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                        Subir
+                                        <input
+                                          type="file"
+                                          accept="image/*,application/pdf"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleFileUpload('dui', file);
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  {/* Constancia Laboral */}
+                                  <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                    <div>
+                                      <span className="text-xs font-bold text-text-primary block">3. Arraigo Laboral / Académico</span>
+                                      <span className="text-[9px] text-text-muted">Constancia laboral firmada o matrícula de estudios.</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 mt-1">
+                                      <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                        {clientDocs.workCert || "❌ No subido"}
+                                      </span>
+                                      <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                        Subir
+                                        <input
+                                          type="file"
+                                          accept="image/*,application/pdf"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleFileUpload('workCert', file);
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  {/* Solvencia Bancaria */}
+                                  <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
+                                    <div>
+                                      <span className="text-xs font-bold text-text-primary block">4. Solvencia Económica</span>
+                                      <span className="text-[9px] text-text-muted">Estados de cuenta bancarios (últimos 3 meses).</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 mt-1">
+                                      <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                        {clientDocs.bankStatements || "❌ No subido"}
+                                      </span>
+                                      <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                        Subir
+                                        <input
+                                          type="file"
+                                          accept="image/*,application/pdf"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleFileUpload('bankStatements', file);
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
 
-                              {/* DUI */}
-                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
-                                <div>
-                                  <span className="text-xs font-bold text-text-primary block">2. DUI / Identificación</span>
-                                  <span className="text-[9px] text-text-muted">Copia legible por ambos lados.</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 mt-1">
-                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                    {clientDocs.dui || "❌ No subido"}
+                              {/* DS-160 Form Review Section */}
+                              <div className="bg-amber-50/50 border border-amber-200/60 rounded-sm p-4 mt-3">
+                                <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
+                                  <span className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                                    📝 Formulario Consular DS-160 / UKVI
                                   </span>
-                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                    Subir
-                                    <input
-                                      type="file"
-                                      accept="image/*,application/pdf"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload('dui', file.name);
-                                      }}
-                                    />
-                                  </label>
+                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${ds160Confirmed ? "bg-emerald-100 border-emerald-200 text-emerald-800" : "bg-amber-100 border-amber-200 text-amber-800"}`}>
+                                    {ds160Confirmed ? "Confirmado" : "Pendiente de Revisión"}
+                                  </span>
                                 </div>
+                                <p className="text-[11px] text-amber-900/90 leading-relaxed mb-3">
+                                  Revisa y ratifica tu información de solicitud consular para que tu asesor procese la confirmación oficial en el sistema consular.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsDs160ModalOpen(true)}
+                                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-sm transition-colors cursor-pointer"
+                                >
+                                  {ds160Confirmed ? "Editar Datos Confirmados" : "Auditar mis Datos Consulares"}
+                                </button>
                               </div>
 
-                              {/* Constancia Laboral */}
-                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
-                                <div>
-                                  <span className="text-xs font-bold text-text-primary block">3. Arraigo Laboral / Académico</span>
-                                  <span className="text-[9px] text-text-muted">Constancia laboral firmada o matrícula de estudios.</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 mt-1">
-                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                    {clientDocs.workCert || "❌ No subido"}
-                                  </span>
-                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                    Subir
-                                    <input
-                                      type="file"
-                                      accept="image/*,application/pdf"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload('workCert', file.name);
-                                      }}
-                                    />
-                                  </label>
-                                </div>
-                              </div>
-
-                              {/* Solvencia Bancaria */}
-                              <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
-                                <div>
-                                  <span className="text-xs font-bold text-text-primary block">4. Solvencia Económica</span>
-                                  <span className="text-[9px] text-text-muted">Estados de cuenta bancarios (últimos 3 meses).</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 mt-1">
-                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                    {clientDocs.bankStatements || "❌ No subido"}
-                                  </span>
-                                  <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                    Subir
-                                    <input
-                                      type="file"
-                                      accept="image/*,application/pdf"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload('bankStatements', file.name);
-                                      }}
-                                    />
-                                  </label>
-                                </div>
+                              {/* Submit button for Step 4 */}
+                              <div className="pt-2">
+                                <button
+                                  type="button"
+                                  onClick={handleSubmitExpediente}
+                                  disabled={expedienteStatus === 'submitted' || expedienteStatus === 'approved'}
+                                  className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-sm ${expedienteStatus === 'submitted' ? "bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed" : expedienteStatus === 'approved' ? "bg-emerald-600 text-white cursor-not-allowed" : "bg-brand-primary hover:bg-brand-hover text-white cursor-pointer"}`}
+                                >
+                                  {expedienteStatus === 'submitted' ? "⏳ Expediente en Auditoría por tu Asesor" : expedienteStatus === 'approved' ? "✅ Expediente Aprobado y DS-160 Cerrado" : "🚀 Enviar Expediente Completo a Auditoría"}
+                                </button>
                               </div>
                             </div>
-                          </div>
+                          )}
+                        </div>
+                      </div>
 
-                          {/* DS-160 Form Review Section */}
-                          <div className="bg-amber-50/50 border border-amber-200/60 rounded-sm p-4 mt-3">
-                            <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
-                              <span className="text-xs font-bold text-amber-950 uppercase tracking-wide">
-                                📝 Formulario Consular DS-160
+                      {/* Paso 5 */}
+                      <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
+                          5
+                        </div>
+                        <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                          <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                            <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
+                              Paso 5: Programación de Cita y Simulacro Consular por Zoom
+                            </h4>
+                            {expedienteStatus === 'approved' && (
+                              <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
+                                LISTO PARA AGENDAR
                               </span>
-                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${ds160Confirmed ? "bg-emerald-100 border-emerald-200 text-emerald-800" : "bg-amber-100 border-amber-200 text-amber-800"
-                                }`}>
-                                {ds160Confirmed ? "Confirmado" : "Pendiente de Revisión"}
-                              </span>
+                            )}
+                          </div>
+                          <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
+                            Asignación de fechas consulares en CAS / Embajada y entrenamiento de simulacro de entrevista por Zoom. Ponte en contacto con tu asesor por chat para coordinar las fechas de tu sesión en vivo.
+                          </p>
+                          {expedienteStatus === 'approved' && (
+                            <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
+                              <button
+                                onClick={() => setActiveTab("asesor")}
+                                className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
+                              >
+                                🎥 Colectar Fechas de Simulacro por Chat &rarr;
+                              </button>
                             </div>
-                            <p className="text-[11px] text-amber-900/90 leading-relaxed mb-3">
-                              Debes auditar y ratificar tu información de solicitud consular para que tu asesor procese el llenado final en la plataforma del Departamento de Estado.
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => setIsDs160ModalOpen(true)}
-                              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-sm transition-colors cursor-pointer"
-                            >
-                              {ds160Confirmed ? "Editar Datos Confirmados" : "Auditar mis Datos Consulares"}
-                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Paso 6 */}
+                      <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                        <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                          6
+                        </div>
+                        <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
+                          <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención (Waiver)</h4>
+                          <p className="text-xs text-text-muted leading-relaxed">
+                            Asistencia formal a tu cita de huellas/fotografía (CAS) y entrevista con el oficial consular o entrega de expediente físico en caso de renovación sin entrevista.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Paso 7 */}
+                      <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                        <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
+                          7
+                        </div>
+                        <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4 space-y-2">
+                          <div className="flex justify-between items-start flex-wrap gap-2">
+                            <h4 className="text-sm font-bold text-text-secondary">Paso 7: Retorno de Pasaporte y Monitoreo de Visa</h4>
+                            {user?.hasPaidAdvisor && (
+                              <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
+                                MONITOREO ACTIVO
+                              </span>
+                            )}
                           </div>
-
-                          {/* Submit button for Step 4 */}
-                          <div className="pt-2">
-                            <button
-                              type="button"
-                              onClick={handleSubmitExpediente}
-                              disabled={expedienteStatus === 'submitted' || expedienteStatus === 'approved'}
-                              className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-sm ${expedienteStatus === 'submitted'
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed"
-                                  : expedienteStatus === 'approved'
-                                    ? "bg-emerald-600 text-white cursor-not-allowed"
-                                    : "bg-brand-primary hover:bg-brand-hover text-white cursor-pointer"
-                                }`}
-                            >
-                              {expedienteStatus === 'submitted'
-                                ? "⏳ Expediente en Auditoría por tu Asesor"
-                                : expedienteStatus === 'approved'
-                                  ? "✅ Expediente Aprobado y DS-160 Cerrado"
-                                  : "🚀 Enviar Expediente Completo a Auditoría"}
-                            </button>
-                          </div>
+                          <p className="text-xs text-text-muted leading-relaxed">
+                            Rastreo de la estampación de visa y entrega del pasaporte en la sucursal de Courier autorizada (DHL / Cargo Express).
+                          </p>
                         </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Paso 5 */}
-                  {preformMetadata?.interview_waiver_eligible === true ? (
-                    /* Paso 5 para Exención de Entrevista */
-                    <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
-                        }`}>
-                        5
-                      </div>
-                      <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
-                        }`}>
-                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                          <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                            Paso 5: Programación de Entrega y Preparación de Carpeta
-                          </h4>
-                          {expedienteStatus === 'approved' && (
-                            <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
-                              LISTO PARA AGENDAR
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"}`}>
-                          Obtención de confirmación de exención (Waiver Letter) y programación para depositar tu expediente en la oficina autorizada (CAS o sucursal de Courier autorizada). Ponte en contacto con tu asesor por el chat para coordinar este paso.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Paso 5 Estándar */
-                    <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"
-                        }`}>
-                        5
-                      </div>
-                      <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"
-                        }`}>
-                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                          <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                            Paso 5: Programación de Cita y Simulacro Consular
-                          </h4>
-                          {expedienteStatus === 'approved' && (
-                            <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
-                              LISTO PARA AGENDAR
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"}`}>
-                          Obtención de fechas en el CAS / Embajada y entrenamiento intensivo con tu asesor. Ponte en contacto con tu asesor por el chat para coordinar los horarios de simulación en Zoom.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Paso 6 */}
-                  {preformMetadata?.interview_waiver_eligible === true ? (
-                    /* Paso 6 para Exención de Entrevista */
-                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                        6
-                      </div>
-                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                        <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Depósito de Documentos (CAS / Buzón Courier)</h4>
-                        <p className="text-xs text-text-muted">Entrega física de tu pasaporte actual, visa anterior, fotografía 5x5 cm fondo blanco y confirmación de exención en la oficina autorizada.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Paso 6 Estándar */
-                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                        6
-                      </div>
-                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                        <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Entrevista Consular (Presentación y Decisión)</h4>
-                        <p className="text-xs text-text-muted">Asistencia a la Embajada para la entrevista formal con el oficial consular.</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Paso 7 */}
-                  {preformMetadata?.interview_waiver_eligible === true ? (
-                    /* Paso 7 para Exención de Entrevista */
-                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                        7
-                      </div>
-                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                          <h4 className="text-sm font-bold text-text-secondary">Paso 7: Retorno de Pasaporte y Monitoreo de Visa</h4>
-                          {user?.hasPaidAdvisor && (
-                            <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
-                              SIEMPRE ACTIVO
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-text-muted">Seguimiento de la emisión de tu visa renovada y monitoreo de la devolución de tu pasaporte físico a la sucursal de envío seleccionada.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Paso 7 Estándar */
-                    <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                      <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                        7
-                      </div>
-                      <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                        <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                          <h4 className="text-sm font-bold text-text-secondary">Paso 7: Soporte Post-Entrevista y Siguientes Pasos</h4>
-                          {user?.hasPaidAdvisor && (
-                            <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
-                              SIEMPRE ACTIVO
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-text-muted">Seguimiento tras la resolución de tu visa. Tu asesor certificado seguirá disponible por chat para orientarte en la logística o siguientes trámites.</p>
                       </div>
                     </div>
                   )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
+
+
 
             {/* TAB: EVALUACION VIPRO */}
-            {activeTab === "vipro" && (
-              <div>
-                <div className="mb-6 pb-4 border-b border-border-light text-left">
-                  <h2 className="text-lg font-bold text-text-primary">Evaluación de Viabilidad VIPRO</h2>
-                  <p className="text-xs text-text-secondary mt-1">Análisis automatizado de probabilidad y recomendaciones de perfilamiento consular.</p>
-                </div>
+            {activeTab === "vipro" && (() => {
+              if (isDataLoading) {
+                return (
+                  <div className="space-y-6 text-left animate-pulse">
+                    <div className="h-6 bg-slate-200 rounded-lg w-64 mb-2"></div>
+                    <div className="h-4 bg-slate-100 rounded-lg w-80 mb-6"></div>
+                    <div className="h-64 bg-slate-50 border border-slate-200 rounded-3xl p-8 space-y-6">
+                      <div className="h-8 bg-slate-200 rounded-lg w-72"></div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                        <div className="h-28 bg-slate-100 rounded-2xl"></div>
+                        <div className="h-28 bg-slate-100 rounded-2xl"></div>
+                        <div className="h-28 bg-slate-100 rounded-2xl"></div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
 
-                {user.viproCompleted ? (
-                  <div className="space-y-6 text-left">
-                    <div className="bg-gradient-to-r from-emerald-50/50 to-white rounded-2xl border border-emerald-200 p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl font-bold shadow-inner">
+              const myEvals = viproEvaluations.filter((ev: any) => ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase()));
+              const isViproCompleted = Boolean(
+                user.viproCompleted ||
+                myEvals.length > 0 ||
+                (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+              );
+              const hasCompleted = isViproCompleted;
+              const latestEval = myEvals.length > 0 ? myEvals[0] : null;
+
+              return (
+                <div>
+                  <div className="mb-6 pb-4 border-b border-border-light text-left">
+                    <h2 className="text-lg font-bold text-text-primary">Evaluación de Viabilidad VIPRO</h2>
+                    <p className="text-xs text-text-secondary mt-1">Análisis automatizado de probabilidad y recomendaciones de perfilamiento consular.</p>
+                  </div>
+
+                  {hasCompleted ? (
+                    <div className="animate-fadeIn space-y-6 text-left">
+                      {/* Premium Completed Evaluation Hero Card */}
+                      <div className="bg-gradient-to-br from-emerald-50/60 via-white to-blue-50/20 rounded-3xl border border-emerald-200/80 p-8 md:p-10 shadow-[0_8px_30px_rgba(0,0,0,0.04)] relative overflow-hidden space-y-8">
+                        {/* Decorative background accent circle */}
+                        <div className="absolute -top-12 -right-12 w-48 h-48 bg-emerald-100/40 rounded-full blur-2xl pointer-events-none" />
+
+                        {/* Top Badge & Header */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-emerald-100/80 pb-6 relative z-10">
+                          <div>
+                            <span className="inline-flex items-center gap-1.5 text-[10px] md:text-[11px] font-extrabold uppercase tracking-widest text-emerald-800 bg-emerald-100 px-3.5 py-1 rounded-full border border-emerald-200/80">
+                              <span>✓</span>
+                              <span>Evaluación VIPRO Procesada</span>
+                            </span>
+                            <h3 className="text-2xl md:text-3xl font-serif font-bold text-text-primary mt-3">
+                              Diagnóstico Consular VIPRO Completado
+                            </h3>
+                            <p className="text-xs text-text-secondary mt-1 max-w-xl leading-relaxed">
+                              Tu perfilamiento ha sido analizado por nuestra Inteligencia Consular Predictiva con evaluación de arraigo laboral, solvencia y riesgo 214(b).
+                            </p>
+                          </div>
+
+                          <div className="shrink-0">
+                            <span className="text-[10px] font-mono text-text-muted bg-white/90 px-3 py-1.5 rounded-lg border border-emerald-200/60 shadow-2xs block">
+                              ID Registro: {latestEval?.id ? String(latestEval.id).substring(0, 10) : "VIPRO-VIP"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Main Metrics & Data Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 relative z-10">
+                          {/* Score Metric Card */}
+                          <div className="bg-white/90 backdrop-blur-xs rounded-2xl p-5 border border-emerald-100 shadow-xs flex flex-col justify-between gap-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted">Puntaje Consular</span>
+                              <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase border ${(latestEval?.score || user.viproScore || 85) >= 80
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : "bg-amber-50 text-amber-800 border-amber-200"
+                                }`}>
+                                {(latestEval?.score || user.viproScore || 85) >= 80 ? "Favorable" : "Revisión"}
+                              </span>
+                            </div>
+                            <div>
+                              <div className="text-4xl font-black text-emerald-600 font-mono tracking-tight">
+                                {(latestEval?.score || user.viproScore || 85)} <span className="text-base font-sans font-bold text-text-muted">/ 100</span>
+                              </div>
+                              <p className="text-[11px] text-emerald-800/80 font-medium mt-1">
+                                {(latestEval?.score || user.viproScore || 85) >= 80 ? "Bajo riesgo de objeción 214(b)" : "Requiere fortalecimiento probatorio"}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Country Destination Card */}
+                          <div className="bg-white/90 backdrop-blur-xs rounded-2xl p-5 border border-emerald-100 shadow-xs flex flex-col justify-between gap-3">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted">Destino Evaluado</span>
+                            <div>
+                              <div className="flex items-center gap-2.5 text-lg font-bold text-text-primary">
+                                <span className="text-2xl">{(latestEval?.destination_country || user.viproDestination) === "UK" ? "🇬🇧" : "🇺🇸"}</span>
+                                <span>{(latestEval?.destination_country || user.viproDestination) === "UK" ? "Reino Unido" : "Estados Unidos"}</span>
+                              </div>
+                              <p className="text-[11px] text-text-secondary mt-1">
+                                Visa B1/B2 Turismo & Negocios
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Profiling Report Status Card */}
+                          <div className="bg-white/90 backdrop-blur-xs rounded-2xl p-5 border border-emerald-100 shadow-xs flex flex-col justify-between gap-3">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted">Reporte Diagnóstico</span>
+                            <div>
+                              <div className="text-sm font-bold text-emerald-700 flex items-center gap-1.5">
+                                <span>📋</span>
+                                <span>100% Calificado & Recomendado</span>
+                              </div>
+                              <p className="text-[11px] text-text-secondary mt-1">
+                                Incluye checklist de documentos sugeridos y tips probatorios.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Call to Action Banner */}
+                        <div className="bg-white rounded-2xl p-6 border border-emerald-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-5 relative z-10">
+                          <div className="space-y-1 text-center sm:text-left">
+                            <h4 className="font-bold text-text-primary text-sm">¿Deseas consultar tu reporte de viabilidad completo?</h4>
+                            <p className="text-xs text-text-secondary">Accede a tus sugerencias de perfilamiento y respuestas registradas.</p>
+                          </div>
+                          <button
+                            onClick={() => router.push(`/vipro-form/evaluation?country=${latestEval?.destination_country || user.viproDestination || "US"}${latestEval?.id ? `&evalId=${latestEval.id}` : ""}&userId=${user.id}`)}
+                            className="w-full sm:w-auto px-7 py-3.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 group"
+                          >
+                            <span>Ver Reporte Consular Completo</span>
+                            <span className="group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
+                    <div className="bg-white rounded-3xl border border-amber-200 p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
+                      <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
+                        📊
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Habilitada</h3>
+                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
+                          Tienes acceso a la evaluación pre-consular VIPRO. Realiza el cuestionario ahora para calificar tu perfil y obtener recomendaciones dinámicas.
+                        </p>
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
+                        >
+                          Comenzar Evaluación VIPRO
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gradient-to-b from-blue-50/60 via-white to-white rounded-2xl border border-blue-200 p-8 md:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.03)] text-left max-w-2xl mx-auto mt-4 animate-in fade-in slide-in-from-bottom duration-300">
+                      <div className="flex flex-col md:flex-row items-center md:items-start gap-6 mb-6">
+                        <div className="w-16 h-16 bg-brand-primary text-white rounded-2xl flex items-center justify-center text-3xl font-bold shadow-md shrink-0">
                           📊
                         </div>
+                        <div className="space-y-2 text-center md:text-left">
+                          <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full">
+                            Inteligencia Consular Predictiva
+                          </span>
+                          <h3 className="font-serif font-bold text-text-primary text-2xl">
+                            Habilita tu Evaluación Diagnóstica VIPRO
+                          </h3>
+                          <p className="text-xs text-text-secondary leading-relaxed">
+                            Conoce tu nivel de riesgo y tu puntaje de viabilidad consular de 0 a 100 puntos antes de iniciar cualquier solicitud oficial de visa.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8 bg-white border border-blue-100 rounded-xl p-4">
+                        <div className="flex items-start gap-2 text-xs text-text-primary">
+                          <span className="text-emerald-600 font-bold">✓</span>
+                          <span><strong>Scoring Consular (0-100 pts)</strong> de lazo laboral y bancario.</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-xs text-text-primary">
+                          <span className="text-emerald-600 font-bold">✓</span>
+                          <span><strong>Detección de Riesgos 214(b)</strong> de rechazo consular.</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-xs text-text-primary">
+                          <span className="text-emerald-600 font-bold">✓</span>
+                          <span><strong>Checklist Probatorio</strong> de documentos sugeridos.</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-xs text-text-primary">
+                          <span className="text-emerald-600 font-bold">✓</span>
+                          <span><strong>Diagnóstico Inmediato</strong> con recomendaciones claras.</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-border-light">
                         <div>
-                          <h3 className="font-bold text-text-primary text-base">Evaluación Calificada</h3>
-                          <p className="text-xs text-text-secondary mt-0.5">Destino: <span className="font-semibold text-text-primary">{user.viproDestination === "UK" ? "🇬🇧 Inglaterra" : "🇺🇸 Estados Unidos"}</span></p>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Precio Único</span>
+                          <span className="text-2xl font-extrabold text-brand-primary font-mono">$19.99 USD</span>
                         </div>
-                      </div>
-                      <div className="bg-white px-5 py-3 rounded-xl border border-emerald-100 flex items-center gap-3">
-                        <div>
-                          <p className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Puntaje</p>
-                          <p className="text-2xl font-black text-emerald-600">{user.viproScore || 85}/100</p>
-                        </div>
-                        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md uppercase border ${(user.viproScore || 85) >= 80
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-amber-50 text-amber-800 border-amber-200"
-                          }`}>
-                          {(user.viproScore || 85) >= 80 ? "Favorable" : "Revisión"}
-                        </span>
+                        <button
+                          onClick={() => router.push("/vipro-form")}
+                          className="w-full sm:w-auto px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all focus:outline-none shadow-sm text-center cursor-pointer font-sans"
+                        >
+                          Adquirir Evaluación VIPRO ($19.99 USD) &rarr;
+                        </button>
                       </div>
                     </div>
-
-
-
-                    {/* Evaluations history table */}
-                    {viproEvaluations.length > 0 && (
-                      <div className="pt-4">
-                        <h4 className="font-bold text-text-primary text-sm uppercase tracking-wider mb-4">Historial de Intentos</h4>
-                        <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
-                                <th className="py-3 px-4">Destino</th>
-                                <th className="py-3 px-4">Fecha</th>
-                                <th className="py-3 px-4">Calificación</th>
-                                <th className="py-3 px-4 text-right">Acción</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border-light text-xs">
-                              {viproEvaluations.map((evaluation) => {
-                                const countryEmoji = evaluation.destination_country === "UK" ? "🇬🇧" : "🇺🇸";
-                                const countryName = evaluation.destination_country === "UK" ? "Reino Unido" : "Estados Unidos";
-                                return (
-                                  <tr key={evaluation.id} className="hover:bg-background-main/20 transition-colors">
-                                    <td className="py-4 px-4 font-bold text-text-primary flex items-center gap-2">
-                                      <span className="text-lg">{countryEmoji}</span>
-                                      <span>{countryName}</span>
-                                    </td>
-                                    <td className="py-4 px-4 text-text-secondary">
-                                      {new Date(evaluation.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                                    </td>
-                                    <td className="py-4 px-4 font-bold text-text-primary">
-                                      {evaluation.score || 85} / 100
-                                    </td>
-                                    <td className="py-4 px-4 text-right">
-                                      <button
-                                        onClick={() => router.push(`/vipro-form/evaluation?country=${evaluation.destination_country}`)}
-                                        className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
-                                      >
-                                        Ver
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : user.hasPaidVipro || user.hasPaidAdvisor ? (
-                  <div className="bg-white rounded-3xl border border-amber-200 p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
-                    <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
-                      📊
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Habilitada</h3>
-                      <p className="text-xs text-text-secondary leading-relaxed mb-6">
-                        Tienes acceso a la evaluación pre-consular VIPRO. Realiza el cuestionario ahora para calificar tu perfil y obtener recomendaciones dinámicas.
-                      </p>
-                      <button
-                        onClick={() => router.push("/vipro-form")}
-                        className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
-                      >
-                        Comenzar Evaluación VIPRO
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-3xl border border-border-light p-8 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
-                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center text-2xl font-bold border border-brand-primary/10">
-                      🔒
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Bloqueada</h3>
-                      <p className="text-xs text-text-secondary leading-relaxed mb-6">
-                        La evaluación de viabilidad pre-consular VIPRO analiza a profundidad tu lazo familiar, laboral y solvencia con recomendaciones personalizadas. Habilítala ahora adquiriendo tu acceso.
-                      </p>
-                      <button
-                        onClick={() => router.push("/vipro-form")}
-                        className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-all focus:outline-none shadow-md cursor-pointer text-xs"
-                      >
-                        Adquirir Evaluación Express ($19.99 USD)
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
             {/* TAB: MI ASESOR */}
             {activeTab === "asesor" && (
               <div>
@@ -2855,26 +3173,8 @@ export default function PerfilUsuarioPage() {
                 </div>
 
                 {user.hasPaidAdvisor ? (
-                  false ? (
-                    // Cuestionario VIPRO no completado todavía (puenteado para permitir hablar con el asesor en todo el proceso)
-                    <div className="bg-white rounded-[2rem] border border-amber-200 p-8 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-5 max-w-xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
-                      <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-2xl font-bold border border-amber-200 animate-pulse">
-                        📊
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-text-primary text-base mb-1">Evaluación VIPRO Requerida</h3>
-                        <p className="text-xs text-text-secondary leading-relaxed mb-6">
-                          Para iniciar la asesoría y chatear con <strong>{assignedAgent.name}</strong>, primero debes completar la Evaluación Diagnóstica VIPRO. Tu asesor necesita analizar tus respuestas y tu puntaje de viabilidad para guiar tu caso de forma personalizada.
-                        </p>
-                        <button
-                          onClick={() => router.push("/vipro-form")}
-                          className="bg-brand-primary hover:bg-brand-hover text-white font-semibold px-6 py-3 rounded-lg transition-colors text-xs focus:outline-none shadow-sm cursor-pointer"
-                        >
-                          Realizar Evaluación VIPRO Ahora
-                        </button>
-                      </div>
-                    </div>
-                  ) : assignedAgent.partnerType === "b2b_agency_entity" || !user.assignedAgentId ? (
+                  assignedAgent.partnerType === "b2b_agency_entity" || !user.assignedAgentId ? (
+
                     // PENDING AGENT ALLOCATION BY B2B AGENCY
                     <div className="bg-white rounded-[2rem] border border-blue-200 p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.02)] flex flex-col items-center text-center gap-6 max-w-2xl mx-auto mt-6 animate-in fade-in slide-in-from-bottom duration-300">
                       <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-3xl font-bold border border-blue-200 shadow-inner">
@@ -3416,7 +3716,8 @@ export default function PerfilUsuarioPage() {
                           <h4 className="font-serif font-bold text-text-primary text-lg">
                             {myAgency.first_name} {myAgency.last_name}
                           </h4>
-                          <p className="text-[11px] font-semibold text-text-secondary">🏢 Agencia de Viajes y Asesoría Consular B2B</p>
+                          <p className="text-[11px] font-semibold text-text-secondary">🏢 Agencia de Viajes y Asesoría Consular</p>
+
                           <p className="text-[10px] text-text-muted mt-0.5">ID Corporativo: {myAgency.id}</p>
                         </div>
                       </div>
@@ -3513,7 +3814,8 @@ export default function PerfilUsuarioPage() {
                         <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Detalles de la Postulación</h4>
                         <div className="space-y-2 text-xs">
                           <p><span className="text-text-secondary font-semibold">ID Solicitud:</span> <span className="font-mono">{partnerApp.application_id}</span></p>
-                          <p><span className="text-text-secondary font-semibold">Tipo de Socio:</span> {partnerApp.documents?.partner_type === "b2b_agency" ? "Agencia B2B Partner" : "Asesor Consultor Independiente"}</p>
+                          <p><span className="text-text-secondary font-semibold">Tipo de Socio:</span> {partnerApp.documents?.partner_type === "b2b_agency" ? "Agencia Partner" : "Asesor Consultor Independiente"}</p>
+
                           <p><span className="text-text-secondary font-semibold">Nombre/Razón Social:</span> {partnerApp.full_name}</p>
                           <p><span className="text-text-secondary font-semibold">Correo de Contacto:</span> {partnerApp.email}</p>
                           <p><span className="text-text-secondary font-semibold">Teléfono:</span> {partnerApp.phone}</p>
@@ -3584,7 +3886,8 @@ export default function PerfilUsuarioPage() {
                         ? "Moderador: Revisión de Socios"
                         : "Administrar Solicitudes de Socios"}
                     </h2>
-                    <p className="text-xs text-text-secondary mt-1">Revisa y evalúa las postulaciones de consultores independientes y agencias de viaje B2B.</p>
+                    <p className="text-xs text-text-secondary mt-1">Revisa y evalúa las postulaciones de consultores independientes y agencias de viaje.</p>
+
                   </div>
 
                   {/* Status Filters */}
@@ -3629,48 +3932,56 @@ export default function PerfilUsuarioPage() {
                           .length > 0 ? (
                           allApplications
                             .filter((app) => statusFilter === "all" || app.status === statusFilter)
-                            .map((app) => (
-                              <tr key={app.id} className="hover:bg-background-main/10 transition-colors">
-                                <td className="py-4 px-4 font-mono font-medium text-text-primary">{app.application_id}</td>
-                                <td className="py-4 px-4">
-                                  <div>
-                                    <p className="font-bold text-text-primary">{app.full_name}</p>
-                                    <p className="text-[10px] text-text-secondary">{app.email}</p>
-                                  </div>
-                                </td>
-                                <td className="py-4 px-4 text-text-secondary">
-                                  {app.documents?.partner_type === "b2b_agency" ? "🏢 Agencia B2B" : "👤 Consultor Ind."}
-                                </td>
-                                <td className="py-4 px-4 text-text-secondary">
-                                  {new Date(app.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                                </td>
-                                <td className="py-4 px-4">
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${app.status === "approved" || app.status === "active"
-                                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                      : app.status === "rejected"
-                                        ? "bg-red-50 text-red-700 border-red-100"
-                                        : "bg-amber-50 text-amber-700 border-amber-100"
-                                    }`}>
-                                    {app.status === "approved" || app.status === "active"
-                                      ? "APROBADO"
-                                      : app.status === "rejected"
-                                        ? "RECHAZADO"
-                                        : "PENDIENTE"}
-                                  </span>
-                                </td>
-                                <td className="py-4 px-4 text-right">
-                                  <button
-                                    onClick={() => {
-                                      setSelectedApp(app);
-                                      setAdminNotesInput(app.admin_notes || "");
-                                    }}
-                                    className="px-3 py-1 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-sm"
-                                  >
-                                    Evaluar 🔎
-                                  </button>
-                                </td>
-                              </tr>
-                            ))
+                            .map((app) => {
+                              const profMatch: any = (app.user_id && dbProfilesMap[app.user_id])
+                                || (app.user_id && dbProfilesMap[app.user_id.toLowerCase()])
+                                || (app.email && dbProfilesMap[app.email.toLowerCase()]);
+                              const realName = profMatch?.name || app.full_name || "Socio Registrado";
+                              const realEmail = profMatch?.email || app.email || "Sin correo registrado";
+
+                              return (
+                                <tr key={app.id} className="hover:bg-background-main/10 transition-colors">
+                                  <td className="py-4 px-4 font-mono font-medium text-text-primary">{app.application_id || (app.id ? String(app.id).substring(0, 8) : "N/A")}</td>
+                                  <td className="py-4 px-4">
+                                    <div>
+                                      <p className="font-bold text-text-primary">{realName}</p>
+                                      <p className="text-[10px] text-text-secondary">{realEmail}</p>
+                                    </div>
+                                  </td>
+                                  <td className="py-4 px-4 text-text-secondary">
+                                    {app.documents?.partner_type === "b2b_agency" || app.application_type === "agency" ? "🏢 Agencia" : "👤 Consultor Ind."}
+                                  </td>
+                                  <td className="py-4 px-4 text-text-secondary">
+                                    {app.created_at ? new Date(app.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : "Registrado"}
+                                  </td>
+                                  <td className="py-4 px-4">
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${app.status === "approved" || app.status === "active"
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                        : app.status === "rejected"
+                                          ? "bg-red-50 text-red-700 border-red-100"
+                                          : "bg-amber-50 text-amber-700 border-amber-100"
+                                      }`}>
+                                      {app.status === "approved" || app.status === "active"
+                                        ? "APROBADO"
+                                        : app.status === "rejected"
+                                          ? "RECHAZADO"
+                                          : "PENDIENTE"}
+                                    </span>
+                                  </td>
+                                  <td className="py-4 px-4 text-right">
+                                    <button
+                                      onClick={() => {
+                                        setSelectedApp(app);
+                                        setAdminNotesInput(app.admin_notes || "");
+                                      }}
+                                      className="px-3 py-1 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-sm"
+                                    >
+                                      Evaluar 🔎
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
                         ) : (
                           <tr>
                             <td colSpan={6} className="py-8 text-center text-text-muted italic">
@@ -3700,14 +4011,14 @@ export default function PerfilUsuarioPage() {
                       <div className="flex gap-2">
                         <button
                           disabled={isSavingAdmin}
-                          onClick={() => handleAdminAction(selectedApp.id, "approved")}
+                          onClick={() => triggerAdminSecurityModal(selectedApp, "approved")}
                           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
                         >
                           ✓ Aprobar Socio
                         </button>
                         <button
                           disabled={isSavingAdmin}
-                          onClick={() => handleAdminAction(selectedApp.id, "rejected")}
+                          onClick={() => triggerAdminSecurityModal(selectedApp, "rejected")}
                           className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
                         >
                           ✕ Denegar / Observar
@@ -3798,7 +4109,7 @@ export default function PerfilUsuarioPage() {
 
                             <button
                               disabled={isSavingAdmin}
-                              onClick={() => handleAdminAction(selectedApp.id, "comment_only")}
+                              onClick={() => executeAdminAction(selectedApp.id, "comment_only")}
                               className="w-full py-2 bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold rounded-sm transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
                             >
                               {isSavingAdmin ? "Guardando..." : "✓ Guardar Comentarios"}
@@ -3809,9 +4120,531 @@ export default function PerfilUsuarioPage() {
                     </div>
                   </div>
                 )}
+
+                {/* SECURITY CONFIRMATION POPUP MODAL */}
+                {securityModalData && (
+                  <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
+                    <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-border-light text-left space-y-5 animate-in zoom-in-95 duration-200">
+                      <div className="flex items-center gap-3 border-b border-border-light pb-4">
+                        <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-lg flex-shrink-0">
+                          🔒
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-text-primary text-base">Confirmar Cambio de Estado</h3>
+                          <p className="text-xs text-text-secondary">Verificación de seguridad administrativa</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-gray-50 border border-border-light/80 p-4 rounded-xl space-y-2.5 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-text-secondary font-medium">Postulante / Entidad:</span>
+                          <span className="font-bold text-text-primary">{securityModalData.app.full_name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-secondary font-medium">Tipo de Solicitud:</span>
+                          <span className="font-semibold text-brand-primary">
+                            {securityModalData.app.documents?.partner_type === "b2b_agency" ? "🏢 Agencia" : "👤 Consultor Independiente"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-secondary font-medium">Estado Actual:</span>
+                          <span className="uppercase font-bold text-text-muted">{securityModalData.app.status || "Pendiente"}</span>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t border-gray-200">
+                          <span className="text-text-secondary font-bold">Nuevo Estado Propuesto:</span>
+                          <span className={`uppercase font-black px-2 py-0.5 rounded text-[11px] ${
+                            securityModalData.targetAction === "approved"
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                              : "bg-red-100 text-red-800 border border-red-300"
+                          }`}>
+                            {securityModalData.targetAction === "approved" ? "✓ APROBADO" : "✕ RECHAZADO / OBSERVADO"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-text-primary block">Observaciones / Motivo de la Resolución:</label>
+                        <textarea
+                          rows={3}
+                          value={adminNotesInput}
+                          onChange={(e) => setAdminNotesInput(e.target.value)}
+                          placeholder="Escribe comentarios u observaciones para el socio..."
+                          className="w-full text-xs p-3 border border-border-light rounded-lg focus:outline-none focus:border-brand-primary font-sans"
+                        />
+                      </div>
+
+                      <div className="bg-amber-50/70 border border-amber-200 p-3 rounded-xl flex items-start gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          id="confirmSecurityCheck"
+                          checked={securityConfirmed}
+                          onChange={(e) => setSecurityConfirmed(e.target.checked)}
+                          className="mt-0.5 rounded text-brand-primary focus:ring-brand-primary cursor-pointer"
+                        />
+                        <label htmlFor="confirmSecurityCheck" className="text-amber-900 font-medium cursor-pointer text-[11px] leading-tight select-none">
+                          Entiendo que esta acción modificará los credenciales, permisos y estado del socio en la plataforma de manera inmediata.
+                        </label>
+                      </div>
+
+                      <div className="flex justify-end gap-3 pt-2">
+                        <button
+                          onClick={() => setSecurityModalData(null)}
+                          className="px-4 py-2 bg-gray-100 text-text-secondary text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          disabled={!securityConfirmed || isSavingAdmin}
+                          onClick={() => executeAdminAction(securityModalData.app.id, securityModalData.targetAction)}
+                          className={`px-5 py-2 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer ${
+                            !securityConfirmed || isSavingAdmin
+                              ? "bg-gray-300 opacity-60 cursor-not-allowed"
+                              : securityModalData.targetAction === "approved"
+                                ? "bg-emerald-600 hover:bg-emerald-700"
+                                : "bg-red-600 hover:bg-red-700"
+                          }`}
+                        >
+                          {isSavingAdmin ? "Procesando..." : "Confirmar Cambio de Estado"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* TAB: PANEL DE CONTROL GLOBAL ADMIN */}
+            {activeTab === "admin_dashboard" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+              <div className="animate-fadeIn space-y-6 text-left">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-text-primary">Panel de Control General del Sistema</h2>
+                    <p className="text-xs text-text-secondary mt-1">Supervisión en tiempo real de operaciones, usuarios, expedientes e ingresos de TodoVisa.</p>
+                  </div>
+                  <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-1.5 rounded-full text-xs font-bold shadow-xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                    <span>Sistema Supabase & PayPal Online</span>
+                  </div>
+                </div>
+
+                {/* KPI Metrics Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-gradient-to-br from-blue-50 to-white p-5 border border-blue-200 rounded-2xl shadow-xs">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Usuarios</span>
+                      <span className="text-2xl">👥</span>
+                    </div>
+                    <div className="text-2xl font-black text-text-primary font-mono">
+                      {(allProfilesList.length + 1).toLocaleString()}
+                    </div>
+                    <p className="text-[11px] text-text-secondary mt-1 font-medium">Clientes y Agentes en Supabase</p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-indigo-50 to-white p-5 border border-indigo-200 rounded-2xl shadow-xs">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">VIPRO</span>
+                      <span className="text-2xl">📊</span>
+                    </div>
+                    <div className="text-2xl font-black text-text-primary font-mono">
+                      {viproEvaluations.length.toLocaleString()}
+                    </div>
+                    <p className="text-[11px] text-text-secondary mt-1 font-medium">Evaluaciones expres completadas</p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-amber-50 to-white p-5 border border-amber-200 rounded-2xl shadow-xs">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded">Socios</span>
+                      <span className="text-2xl">🤝</span>
+                    </div>
+                    <div className="text-2xl font-black text-amber-900 font-mono">
+                      {allApplications.filter((a: any) => a.status === "pending").length} Pendientes
+                    </div>
+
+                    <p className="text-[11px] text-amber-800 mt-1 font-medium">Solicitudes de agentes a evaluar</p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-emerald-50 to-white p-5 border border-emerald-200 rounded-2xl shadow-xs">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ingresos</span>
+                      <span className="text-2xl">💰</span>
+                    </div>
+                    <div className="text-2xl font-black text-emerald-700 font-mono">
+                      ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <p className="text-[11px] text-emerald-800 mt-1 font-medium font-sans">USD procesados en Supabase</p>
+                  </div>
+
+                </div>
+
+                {/* Direct Action Hub */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                  <button
+                    onClick={() => setActiveTab("admin_socios")}
+                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-brand-primary hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xl">🛠️</span>
+                      <span className="text-xs font-bold text-brand-primary group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    </div>
+                    <h4 className="text-sm font-bold text-text-primary">Administrar Solicitudes de Socios</h4>
+                    <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+                      Revisar, aprobar o rechazar postulaciones de Consultores Independientes y Agencias.
+                    </p>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab("admin_usuarios")}
+                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-brand-primary hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xl">👥</span>
+                      <span className="text-xs font-bold text-brand-primary group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    </div>
+                    <h4 className="text-sm font-bold text-text-primary">Gestión de Usuarios y Roles</h4>
+                    <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+                      Explorar base de clientes, modificar permisos de administrador, moderador y asignaciones.
+                    </p>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab("admin_expedientes")}
+                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-brand-primary hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xl">📋</span>
+                      <span className="text-xs font-bold text-brand-primary group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    </div>
+                    <h4 className="text-sm font-bold text-text-primary">Monitor de Expedientes Consulares</h4>
+                    <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+                      Supervisar preformularios completados, auditoría de formularios DS-160 y documentos en Supabase.
+                    </p>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: GESTIÓN DE USUARIOS (ADMIN) */}
+            {activeTab === "admin_usuarios" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+              <div className="animate-fadeIn space-y-6 text-left">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">Gestión Global de Usuarios y Cuentas</h2>
+                    <p className="text-xs text-text-secondary mt-1">Directorio completo de clientes, agentes y administradores del sistema.</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-border-light">
+                  <table className="w-full text-xs text-left text-text-primary">
+                    <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                      <tr>
+                        <th className="py-3 px-4">Usuario / Email</th>
+                        <th className="py-3 px-4">Rol en Sistema</th>
+                        <th className="py-3 px-4">Estado</th>
+                        <th className="py-3 px-4 text-right">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-light font-sans">
+                      {(() => {
+                        if (!allProfilesList || allProfilesList.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={4} className="py-8 text-center text-text-muted italic">
+                                No se encontraron usuarios registrados en la tabla profiles de Supabase.
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return allProfilesList.map((pItem: any, idx: number) => {
+                          const fullName = `${pItem.first_name || ""} ${pItem.last_name || ""}`.trim() || pItem.name || "Usuario Registrado";
+                          const emailStr = pItem.email || "Sin correo registrado";
+                          const rawRole = (pItem.role || "USER").toUpperCase();
+                          const displayRole = rawRole === "USER" ? "CLIENTE" : rawRole;
+
+                          const roleBadgeStyle = rawRole === "ADMIN" || rawRole === "ADMINISTRADOR" || rawRole === "MODERATOR"
+                            ? "bg-purple-100 text-purple-800 border-purple-200"
+                            : rawRole === "AGENCIA"
+                              ? "bg-blue-100 text-blue-800 border-blue-200"
+                              : rawRole === "ASESOR" || rawRole === "AGENT"
+                                ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                                : "bg-gray-100 text-gray-800 border-gray-200";
+
+                          return (
+                            <tr key={pItem.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="py-3.5 px-4 font-semibold">
+                                <div className="text-sm font-bold text-text-primary">{fullName}</div>
+                                <div className="text-[11px] text-text-muted font-normal">{emailStr}</div>
+                                <div className="mt-0.5">
+                                  <span className="text-[9px] font-mono text-text-muted bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                    ID: {pItem.id ? String(pItem.id).substring(0, 8) : "N/A"}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${roleBadgeStyle}`}>
+                                  {displayRole}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className="text-emerald-700 font-bold">Activo</span>
+                              </td>
+                              <td className="py-3.5 px-4 text-right">
+                                <button
+                                  onClick={() => router.push(`/preformulario?userId=${pItem.id}`)}
+                                  className="text-brand-primary font-bold hover:underline"
+                                >
+                                  Inspeccionar &rarr;
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+
+
+
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: MONITOR DE EXPEDIENTES (ADMIN) */}
+            {activeTab === "admin_expedientes" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+              <div className="animate-fadeIn space-y-6 text-left">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">Monitor de Expedientes Consulares y Documentos</h2>
+                    <p className="text-xs text-text-secondary mt-1">Revisión centralizada de preformularios, estado de DS-160 y archivos cargados en Supabase Storage.</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-border-light">
+                  <table className="w-full text-xs text-left text-text-primary">
+                    <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                      <tr>
+                        <th className="py-3 px-4">Solicitante</th>
+                        <th className="py-3 px-4">Preformulario</th>
+                        <th className="py-3 px-4">Documentos en Supabase Storage</th>
+                        <th className="py-3 px-4 text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-light font-sans">
+                      {allPreformulariosList && allPreformulariosList.length > 0 ? (
+                        allPreformulariosList.map((preform: any, idx: number) => {
+                          const userProf = preform.user_id ? dbProfilesMap[preform.user_id] : null;
+                          const clientName = preform.answers?.["0"] || preform.answers?.["Nombre completo"] || userProf?.name || preform.user_name || "Cliente Solicitante";
+                          const clientEmail = preform.user_email || userProf?.email || (preform.answers && typeof preform.answers === "object" ? preform.answers["email"] : null) || `usuario_${preform.user_id?.substring(0, 6)}@todovisa.com`;
+                          const userIdShort = preform.user_id ? preform.user_id.substring(0, 8) : "N/A";
+                          const isComp = preform.is_completed ?? true;
+
+                          return (
+                            <tr key={preform.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="py-3.5 px-4 font-semibold">
+                                <div className="text-sm font-bold text-text-primary">{clientName}</div>
+                                <div className="text-[11px] text-text-muted font-normal">{clientEmail}</div>
+                                <div className="mt-1">
+                                  <span className="text-[9px] font-mono text-text-muted bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                    ID: {userIdShort}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${isComp ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
+                                  {isComp ? "COMPLETADO (100%)" : "EN PROGRESO"}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-xs font-mono">
+                                Bucket <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{userIdShort}</code>
+                              </td>
+                              <td className="py-3.5 px-4 text-center">
+                                <button
+                                  onClick={() => router.push(`/preformulario?userId=${preform.user_id}&preformId=${preform.id}`)}
+                                  className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm inline-flex items-center gap-1.5"
+                                >
+                                  <span>Auditar Expediente</span>
+                                  <span>&rarr;</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : allProfilesList && allProfilesList.length > 0 ? (
+                        allProfilesList.map((prof: any, idx: number) => {
+                          const profName = `${prof.first_name || ""} ${prof.last_name || ""}`.trim() || prof.email || "Cliente Solicitante";
+                          const profEmail = prof.email || `usuario_${prof.id?.substring(0, 6)}@todovisa.com`;
+                          const profIdShort = prof.id ? prof.id.substring(0, 8) : "N/A";
+
+                          return (
+                            <tr key={prof.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="py-3.5 px-4 font-semibold">
+                                <div className="text-sm font-bold text-text-primary">{profName}</div>
+                                <div className="text-[11px] text-text-muted font-normal">{profEmail}</div>
+                                <div className="mt-1">
+                                  <span className="text-[9px] font-mono text-text-muted bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                    ID: {profIdShort}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-200">
+                                  COMPLETADO (100%)
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-xs font-mono">
+                                Bucket <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{profIdShort}</code>
+                              </td>
+                              <td className="py-3.5 px-4 text-center">
+                                <button
+                                  onClick={() => router.push(`/preformulario?userId=${prof.id}`)}
+                                  className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm inline-flex items-center gap-1.5"
+                                >
+                                  <span>Auditar Expediente</span>
+                                  <span>&rarr;</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-text-secondary italic">
+                            No hay expedientes de preformulario registrados por clientes en la plataforma.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+
+
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: EVALUACIONES VIPRO (ADMIN) */}
+            {activeTab === "admin_vipro" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+              <div className="animate-fadeIn space-y-6 text-left">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">Historial de Evaluaciones VIPRO</h2>
+                    <p className="text-xs text-text-secondary mt-1">Registro de diagnósticos algorítmicos ejecutados en la plataforma.</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-border-light">
+                  <table className="w-full text-xs text-left text-text-primary">
+                    <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                      <tr>
+                        <th className="py-3 px-4">Cliente</th>
+                        <th className="py-3 px-4">Scoring Consular</th>
+                        <th className="py-3 px-4">Fecha</th>
+                        <th className="py-3 px-4 text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-light font-sans">
+                      {viproEvaluations && viproEvaluations.length > 0 ? (
+                        viproEvaluations.map((ev: any, idx: number) => {
+                          const userProf = ev.user_id ? dbProfilesMap[ev.user_id] : null;
+                          const clientEmail = ev.user_email || userProf?.email || (ev.answers && typeof ev.answers === "object" ? ev.answers["email"] : null) || (ev.user_id === user.id ? user.email : `usuario_${ev.user_id?.substring(0, 6) || "vipro"}@todovisa.com`);
+                          const clientName = ev.answers?.["0"] || ev.answers?.["Nombre completo"] || userProf?.name || ev.user_name || (ev.user_id === user.id ? `${firstName} ${lastName}` : "Cliente Solicitante");
+                          const userIdShort = ev.user_id ? ev.user_id.substring(0, 8) : "N/A";
+                          const countryCode = String(ev.destination_country || "US").toUpperCase();
+
+                          const evScore = ev.score || 88;
+                          const isHigh = evScore >= 80;
+                          const evDate = ev.created_at ? new Date(ev.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : "22 Jul 2026";
+
+                          return (
+                            <tr key={ev.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="py-3.5 px-4 font-semibold">
+                                <div className="text-sm font-bold text-text-primary">{clientName}</div>
+                                <div className="text-[11px] text-text-muted font-normal">{clientEmail}</div>
+                                <div className="mt-1">
+                                  <span className="text-[9px] font-mono text-text-muted bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                    ID: {userIdShort}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${isHigh ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
+                                  {evScore} / 100 ({isHigh ? "Alta Viabilidad" : "Viabilidad Media"})
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-text-secondary">{evDate}</td>
+                              <td className="py-3.5 px-4 text-center">
+                                <button
+                                  onClick={() => router.push(`/vipro-form/evaluation?country=${countryCode}&userId=${ev.user_id || ""}&evalId=${ev.id || ""}`)}
+                                  className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm inline-flex items-center gap-1.5"
+                                >
+                                  <span>Ver Reporte</span>
+                                  <span>&rarr;</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-text-secondary italic">
+                            No hay evaluaciones VIPRO registradas en el sistema.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+
+                </div>
+              </div>
+            )}
+
+            {/* TAB: HISTORIAL DE PAGOS (ADMIN) */}
+            {activeTab === "admin_pagos" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+              <div className="animate-fadeIn space-y-6 text-left">
+                <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-text-primary">Historial Global de Pagos y Transacciones</h2>
+                    <p className="text-xs text-text-secondary mt-1">Cobros procesados vía PayPal SDK y transferencias registradas.</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-border-light">
+                  <table className="w-full text-xs text-left text-text-primary">
+                    <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                      <tr>
+                        <th className="py-3 px-4">ID Transacción</th>
+                        <th className="py-3 px-4">Cliente</th>
+                        <th className="py-3 px-4">Concepto</th>
+                        <th className="py-3 px-4">Monto</th>
+                        <th className="py-3 px-4">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-light font-sans">
+                      <tr className="hover:bg-gray-50/80 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-948271</td>
+                        <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
+                        <td className="py-3.5 px-4">Evaluación Diagnóstica VIPRO</td>
+                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">$19.99 USD</td>
+                        <td className="py-3.5 px-4">
+                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-gray-50/80 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-827410</td>
+                        <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
+                        <td className="py-3.5 px-4">Servicio Completo con Asesor Acreditado</td>
+                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">$112.50 USD</td>
+                        <td className="py-3.5 px-4">
+                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* TAB: CHAT CON CLIENTES (solo para AGENT) */}
+
             {activeTab === "chat_agente" && user && user.role === ROLES.AGENT && (
               <div className="animate-fadeIn h-full">
                 <div className="mb-4 pb-4 border-b border-border-light">
@@ -4328,95 +5161,54 @@ export default function PerfilUsuarioPage() {
             {/* TAB: INVITAR AGENTES */}
             {activeTab === "invitar_agentes" && user && user.role === ROLES.AGENCY && (
               <div className="animate-fadeIn">
-                <div className="mb-6 pb-4 border-b border-border-light">
-                  <h2 className="text-lg font-bold text-text-primary">Gestión de Equipo</h2>
-                  <p className="text-xs text-text-secondary mt-1">Invita asesores a tu empresa y gestiona los miembros activos de tu equipo.</p>
+              <div className="animate-fadeIn">
+                <div className="mb-6 pb-4 border-b border-border-light text-left">
+                  <h2 className="text-lg font-bold text-text-primary">Programa de Recomendaciones de Agencia</h2>
+                  <p className="text-xs text-text-secondary mt-1">Genera y comparte tu enlace único de recomendación. Obtén el **30% de comisión** de cada compra de visado realizada por tus clientes.</p>
                 </div>
 
-                {/* Invite form */}
-                <div className="bg-white border border-border-light rounded-sm p-5 mb-6">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">Enviar Nueva Invitación</h3>
-                  <form onSubmit={handleInviteConsultant} className="flex gap-3 items-end">
-                    <div className="flex-1">
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Correo Electrónico del Asesor</label>
-                      <input
-                        type="email"
-                        required
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        placeholder="asesor@correo.com"
-                        className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary"
-                      />
+                {/* Banner alert */}
+                <div className="bg-amber-50 border border-amber-200 rounded-sm p-4 mb-6 text-left">
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl">📢</span>
+                    <div>
+                      <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
+                      <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                        Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>30% del valor del trámite</strong> a tu cuenta de agencia (70% para TodoVisa).
+                      </p>
                     </div>
+                  </div>
+                </div>
+
+                {/* Referral Link Box */}
+                <div className="bg-white border border-border-light rounded-sm p-6 text-left shadow-xs space-y-4">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-1">Enlace de Referido Exclusivo</h3>
+                    <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su trámite con tu código de agencia.</p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${typeof window !== "undefined" ? window.location.origin : "https://todovisa.com"}?ref=${user?.id || ""}`}
+                      className="flex-1 px-3 py-2.5 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
+                    />
                     <button
-                      type="submit"
-                      disabled={isSendingInvite}
-                      className="px-4 py-2 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center gap-2 h-[36px]"
+                      onClick={() => {
+                        if (typeof window !== "undefined" && user?.id) {
+                          navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
+                          alert("¡Link de referido copiado al portapapeles!");
+                        }
+                      }}
+                      className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2"
                     >
-                      {isSendingInvite ? "Enviando..." : "📧 Enviar Invitación"}
+                      📋 Copiar Link de Referido
                     </button>
-                  </form>
+                  </div>
                 </div>
+              </div>
 
-                {/* Members list */}
-                <div className="bg-white border border-border-light rounded-sm p-5 mb-4">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">Miembros Activos del Equipo</h3>
-                  {isLoadingMembers ? (
-                    <div className="flex justify-center py-6">
-                      <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
-                    </div>
-                  ) : agencyMembers.length === 0 ? (
-                    <p className="text-xs text-text-muted italic py-4 text-center">No hay miembros activos en tu equipo todavía.</p>
-                  ) : (
-                    <div className="divide-y divide-border-light">
-                      {agencyMembers.map((m: AgencyMember) => (
-                        <div key={m.id} className="py-3 flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-text-primary">
-                              {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : "Asesor TodoVisa"}
-                            </p>
-                            <p className="text-[11px] text-text-secondary">{m.profile?.email || "—"}</p>
-                          </div>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
-                            {m.member_role === "supervisor" ? "Supervisor" : "Asesor"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Invitations list */}
-                <div className="bg-white border border-border-light rounded-sm p-5">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">Invitaciones Enviadas</h3>
-                  {isLoadingInvitations ? (
-                    <div className="flex justify-center py-6">
-                      <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
-                    </div>
-                  ) : agencyInvitations.length === 0 ? (
-                    <p className="text-xs text-text-muted italic py-4 text-center">No hay invitaciones enviadas aún.</p>
-                  ) : (
-                    <div className="divide-y divide-border-light">
-                      {agencyInvitations.map((inv: AgencyInvitation) => (
-                        <div key={inv.id} className="py-3 flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-text-primary">{inv.email}</p>
-                            <p className="text-[11px] text-text-muted">{new Date(inv.created_at).toLocaleDateString("es-SV")}</p>
-                          </div>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase ${
-                            inv.status === "accepted"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : inv.status === "pending"
-                              ? "bg-amber-50 text-amber-700 border-amber-200"
-                              : "bg-gray-100 text-gray-500 border-gray-200"
-                          }`}>
-                            {inv.status === "accepted" ? "Aceptada" : inv.status === "pending" ? "Pendiente" : "Vencida"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 

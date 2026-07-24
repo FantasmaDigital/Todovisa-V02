@@ -430,12 +430,9 @@ function AgentPortalContent() {
           setMemberCases(counts);
         }
 
-        // Block if user is corporate and has no members
-        if (agent.application_id?.startsWith("B2B-") && !agent.application_id?.includes("B2B-AGENT-") && !error && membersLength === 0) {
-          setHasNoAdvisors(true);
-        } else {
-          setHasNoAdvisors(false);
-        }
+        // Agencies work via referral links now and do not require adding members
+        setHasNoAdvisors(false);
+
       } catch (err) {
         console.error("Error checking agency members in portal:", err);
       } finally {
@@ -769,6 +766,25 @@ function AgentPortalContent() {
       </div>
 
       <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col gap-8">
+        {agent && (!agent.signed_at || (agent.status !== "active" && agent.status !== "approved")) && (
+          <div className="bg-red-50 border border-red-200 rounded-sm p-6 text-left shadow-xs flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-red-800 font-bold text-sm">
+              <span>🛑</span> Acreditación Pendiente de Firma / Aprobación
+            </div>
+            <p className="text-xs text-red-700 leading-relaxed">
+              Para ser oficialmente reconocido como <strong>Agente o Agencia en TodoVisa</strong>, debes contar con tu expediente de postulación aprobado por la administración y haber firmado tu contrato de acreditación comercial digital.
+            </p>
+            <div>
+              <button
+                onClick={() => router.push("/profile?tab=mi_acreditacion")}
+                className="px-4 py-2 bg-red-700 hover:bg-red-800 text-white text-xs font-bold rounded-sm transition-colors cursor-pointer border-none"
+              >
+                Ir a Mi Acreditación para Firmar →
+              </button>
+            </div>
+          </div>
+        )}
+
         {agent && agent.is_local && (
           <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-sm text-amber-900 text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
             <span className="flex items-center gap-2">
@@ -777,6 +793,7 @@ function AgentPortalContent() {
             </span>
           </div>
         )}
+
         {/* LOADING STATE */}
         {loading && (
           <div className="py-20 flex flex-col items-center justify-center text-center gap-4">

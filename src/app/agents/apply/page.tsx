@@ -54,20 +54,35 @@ export default function AgentApplyPage() {
     cv: null,
   });
 
-  const handleDocUpload = (key: string, file: File) => {
-    setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 0 } }));
+  const handleDocUpload = async (key: string, file: File) => {
+    setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 10 } }));
     if (errors[`doc_${key}`]) setErrors((prev) => ({ ...prev, [`doc_${key}`]: "" }));
-    let p = 0;
-    const iv = setInterval(() => {
-      p += 20;
-      if (p >= 100) {
-        clearInterval(iv);
-        setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null } }));
-      } else {
-        setDocs((prev) => (prev[key] ? { ...prev, [key]: { name: prev[key]!.name, progress: p } } : prev));
+
+    try {
+      const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const filePath = `postulaciones_agentes/${key}/${Date.now()}_${cleanFileName}`;
+
+      let storageBucket = "todovisa";
+      let uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
+
+      if (uploadResult.error) {
+        storageBucket = "client-documents";
+        uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
       }
-    }, 120);
+
+      let publicUrl = file.name;
+      if (!uploadResult.error) {
+        const { data: urlData } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
+        if (urlData?.publicUrl) publicUrl = urlData.publicUrl;
+      }
+
+      setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null, url: publicUrl } }));
+    } catch (err) {
+      console.error("Error uploading document to Supabase storage:", err);
+      setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null } }));
+    }
   };
+
 
   const removeDoc = (key: string) => setDocs((prev) => ({ ...prev, [key]: null }));
 
@@ -633,51 +648,52 @@ export default function AgentApplyPage() {
                 <div className="space-y-6 animate-fadeIn text-left">
                   <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Revisar Datos Ingresados</h3>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm bg-background-main p-5 border border-border-light rounded-sm text-left">
-                    <div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm bg-background-main p-5 border border-border-light rounded-sm text-left max-w-full overflow-hidden">
+                    <div className="min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Nombre Completo</span>
-                      <span className="font-semibold text-text-primary">{formData.fullName}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.fullName}</span>
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Correo Electrónico</span>
-                      <span className="font-semibold text-text-primary">{formData.email}</span>
+                      <span className="font-semibold text-text-primary break-all">{formData.email}</span>
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Teléfono / WhatsApp</span>
-                      <span className="font-semibold text-text-primary">{formData.phone}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.phone}</span>
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Ubicación</span>
-                      <span className="font-semibold text-text-primary">{formData.countryResidence}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.countryResidence}</span>
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Experiencia</span>
-                      <span className="font-semibold text-text-primary">{formData.experienceYears}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.experienceYears}</span>
                     </div>
                     {formData.linkedin && (
-                      <div>
+                      <div className="min-w-0 break-all">
                         <span className="block text-[10px] font-bold text-text-secondary uppercase">LinkedIn</span>
-                        <a href={formData.linkedin} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-primary hover:underline">{formData.linkedin}</a>
+                        <a href={formData.linkedin} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-primary hover:underline break-all">{formData.linkedin}</a>
                       </div>
                     )}
-                    <div className="md:col-span-2">
+                    <div className="md:col-span-2 min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Especialidades</span>
-                      <span className="font-semibold text-text-primary">{formData.specialties.join(", ")}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.specialties.join(", ")}</span>
                     </div>
-                    <div className="md:col-span-2">
+                    <div className="md:col-span-2 min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Países Destino</span>
-                      <span className="font-semibold text-text-primary">{formData.targetCountries.join(", ")}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.targetCountries.join(", ")}</span>
                     </div>
-                    <div className="md:col-span-2">
+                    <div className="md:col-span-2 min-w-0 break-words">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Idiomas</span>
-                      <span className="font-semibold text-text-primary">{formData.languages.join(", ")}</span>
+                      <span className="font-semibold text-text-primary break-words">{formData.languages.join(", ")}</span>
                     </div>
 
-                    <div className="md:col-span-2">
+                    <div className="md:col-span-2 min-w-0 overflow-hidden">
                       <span className="block text-[10px] font-bold text-text-secondary uppercase">Biografía</span>
-                      <p className="text-xs text-text-secondary mt-1 italic leading-relaxed">&ldquo;{formData.biography}&rdquo;</p>
+                      <p className="text-xs text-text-secondary mt-1 italic leading-relaxed break-words break-all whitespace-pre-wrap max-w-full overflow-hidden">&ldquo;{formData.biography}&rdquo;</p>
                     </div>
                   </div>
+
 
                   <div className="pt-4 border-t border-border-light">
                     <label className="flex items-start gap-3 cursor-pointer">

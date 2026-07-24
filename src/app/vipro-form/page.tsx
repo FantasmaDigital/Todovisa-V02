@@ -103,53 +103,74 @@ function ViproFormContent() {
                         </p>
 
                         {completed ? (
-                            /* Already completed state (can only complete it once) */
-                            <div className="w-full bg-emerald-50 border border-emerald-200 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
-                                <div className="flex flex-col gap-1">
-                                    <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest">Evaluación Finalizada</span>
-                                    <p className="text-lg font-serif font-semibold text-emerald-900">
-                                        ¡Ya has completado tu Evaluación VIPRO!
+                            /* Already completed state matching TodoVisa design system */
+                            <div className="w-full bg-white border border-border-light rounded-2xl p-8 shadow-[0_4px_24px_rgba(0,0,0,0.03)] flex flex-col gap-5 text-left">
+                                <div className="space-y-2">
+                                    <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-3 py-1 rounded-full">
+                                        ✓ Diagnóstico Registrado
+                                    </span>
+                                    <h2 className="text-2xl font-serif font-bold text-text-primary">
+                                        ¡Has completado tu Evaluación VIPRO!
+                                    </h2>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        Tu expediente diagnóstico ha sido procesado exitosamente. Puedes consultar tu puntaje de viabilidad consular, tu desglose de respuestas y tus recomendaciones de perfilamiento en cualquier momento desde tu panel.
                                     </p>
                                 </div>
-                                <p className="text-sm text-emerald-800/80">
-                                    De acuerdo con nuestras políticas, la evaluación diagnóstica VIPRO se realiza una sola vez. Puedes consultar tu reporte de viabilidad y tus recomendaciones detalladas directamente en tu panel.
-                                </p>
-                                <div className="flex mt-2">
+                                <div className="pt-2">
                                     <button
-                                        onClick={() => router.push("/profile?tab=proceso")}
-                                        className="w-full sm:w-auto bg-emerald-600 text-white font-semibold py-3 px-8 rounded-md hover:bg-emerald-700 transition-colors shadow-md text-sm cursor-pointer"
+                                        onClick={() => router.push("/profile?tab=vipro")}
+                                        className="w-full sm:w-auto bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold py-3.5 px-8 rounded-sm transition-all shadow-sm cursor-pointer text-center"
                                     >
-                                        Ver Resultados en Mi Panel
+                                        Ver Diagnóstico en Mi Panel &rarr;
                                     </button>
                                 </div>
                             </div>
                         ) : !hasPaid ? (
-                            /* Not paid: Display payment simulation gate */
-                            <div className="w-full bg-amber-50/45 border border-amber-200/50 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
-                                <div className="flex flex-col gap-1">
-                                    <span className="text-xs font-bold text-amber-700 uppercase tracking-widest">Acceso de Pago</span>
-                                    <p className="text-lg font-serif font-semibold text-amber-900">
-                                        Adquiere tu Evaluación VIPRO
+                            /* Not paid: High-conversion TodoVisa design system card */
+                            <div className="w-full bg-white border border-border-light rounded-2xl p-8 shadow-[0_4px_24px_rgba(0,0,0,0.03)] flex flex-col gap-6 text-left">
+                                <div className="space-y-2">
+                                    <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+                                        Inteligencia Consular Predictiva
+                                    </span>
+                                    <h2 className="text-2xl font-serif font-bold text-text-primary">
+                                        Diagnostica tu Perfil Consular con VIPRO
+                                    </h2>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        Evalúa tu lazo laboral, familiar e historial de viajes con nuestro sistema algorítmico de viabilidad antes de presentar tu solicitud oficial.
                                     </p>
                                 </div>
-                                <p className="text-xs text-text-secondary leading-relaxed">
-                                    Para comenzar el cuestionario diagnóstico y recibir tu reporte automatizado con inteligencia artificial, debes completar el pago seguro de la evaluación.
-                                </p>
-                                <div className="flex flex-col gap-4 mt-2">
-                                    <div className="flex items-end gap-3">
-                                        <span className="text-4xl font-bold text-text-primary">$19.99</span>
-                                        <span className="text-sm text-text-secondary mb-1">USD</span>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-brand-light/35 border border-brand-primary/10 rounded-xl p-4">
+                                    <div className="flex items-start gap-2 text-xs text-text-primary">
+                                        <span className="text-emerald-600 font-bold">✓</span>
+                                        <span><strong>Scoring Consular (0-100 pts)</strong> de solvencia y perfil.</span>
                                     </div>
-                                    <span className="text-xs font-medium text-brand-primary bg-brand-light px-4 py-1.5 rounded-full w-max">
-                                        🎉 Recibirás un 25% de descuento en tu asesoría posterior
-                                    </span>
+                                    <div className="flex items-start gap-2 text-xs text-text-primary">
+                                        <span className="text-emerald-600 font-bold">✓</span>
+                                        <span><strong>Detección de Riesgos 214(b)</strong> de rechazo consular.</span>
+                                    </div>
+                                    <div className="flex items-start gap-2 text-xs text-text-primary">
+                                        <span className="text-emerald-600 font-bold">✓</span>
+                                        <span><strong>Checklist de Documentos Probatorios</strong> sugeridos.</span>
+                                    </div>
+                                    <div className="flex items-start gap-2 text-xs text-text-primary">
+                                        <span className="text-emerald-600 font-bold">✓</span>
+                                        <span><strong>Recomendaciones Preventivas</strong> de preparación.</span>
+                                    </div>
                                 </div>
-                                <button
-                                    onClick={() => setIsCheckoutOpen(true)}
-                                    className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer mt-2 text-center"
-                                >
-                                    Adquirir VIPRO Express
-                                </button>
+
+                                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-border-light">
+                                    <div>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Precio Único</span>
+                                        <span className="text-3xl font-extrabold text-brand-primary font-mono">$19.99 <span className="text-xs font-sans text-text-muted">USD</span></span>
+                                    </div>
+                                    <button
+                                        onClick={() => setIsCheckoutOpen(true)}
+                                        className="w-full sm:w-auto bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold py-3.5 px-8 rounded-sm transition-all shadow-sm cursor-pointer text-center"
+                                    >
+                                        Adquirir Evaluación VIPRO ($19.99 USD) &rarr;
+                                    </button>
+                                </div>
                             </div>
                         ) : inProgress ? (
                             /* Paid and in-progress state */

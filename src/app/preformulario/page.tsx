@@ -48,6 +48,8 @@ function PreformularioContent() {
     const [answers, setAnswers] = useState<Record<number, string>>({});
     const [completed, setCompleted] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [validationError, setValidationError] = useState<string | null>(null);
+
     
     const { user } = useAuthStore();
     const router = useRouter();
@@ -79,17 +81,31 @@ function PreformularioContent() {
         if (!user) return;
         
         const loadProgress = async () => {
+            const targetUserId = searchParams.get("userId") || searchParams.get("user_id");
+            const effectiveUserId = targetUserId || user.id;
+
             // Check if already completed first to lock the form
             try {
                 const { data: dbCompleted } = await supabase
                     .from("preformularios")
-                    .select("id")
-                    .eq("user_id", user.id)
-                    .eq("destination_country", selectedCountryCode)
-                    .eq("is_completed", true)
+                    .select("*")
+                    .eq("user_id", effectiveUserId)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
                     .maybeSingle();
 
-                if (dbCompleted || (typeof window !== "undefined" && localStorage.getItem(`preformulario_completed_user_id_${user.id}`) === "true")) {
+                if (dbCompleted?.answers) {
+                    setAnswers(dbCompleted.answers);
+                    if (dbCompleted.intake_visa_class) {
+                        setIntakeVisaClass(dbCompleted.intake_visa_class as any);
+                    }
+                    if (dbCompleted.is_completed) {
+                        setCompleted(true);
+                        return;
+                    }
+                }
+
+                if (!targetUserId && typeof window !== "undefined" && localStorage.getItem(`preformulario_completed_user_id_${user.id}`) === "true") {
                     setCompleted(true);
                     return;
                 }
@@ -106,9 +122,9 @@ function PreformularioContent() {
                 const { data: dbProgress, error } = await supabase
                     .from("preformularios")
                     .select("*")
-                    .eq("user_id", user.id)
-                    .eq("destination_country", selectedCountryCode)
-                    .eq("is_completed", false)
+                    .eq("user_id", effectiveUserId)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
                     .maybeSingle();
 
                 if (!error && dbProgress && dbProgress.answers) {
@@ -121,6 +137,7 @@ function PreformularioContent() {
             } catch (dbErr) {
                 console.error("Failed to load progress from preformularios table:", dbErr);
             }
+
 
             // 2. Fallback to localStorage if no DB entry found
             if (!hasSavedProgress) {
@@ -192,7 +209,9 @@ function PreformularioContent() {
         );
     }
 
-    if (!user.hasPaidAdvisor) {
+    const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
+    if (!isAdminOrStaff && !user.hasPaidAdvisor) {
+
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
@@ -270,7 +289,60 @@ function PreformularioContent() {
         }
     };
 
+    const validateCurrentStep = (): string | null => {
+
+
+        const q = questions[currentStep];
+        const val = (answers[currentStep] || "").trim();
+        const isRequired = q.required !== false;
+
+        if (isRequired && !val) {
+            return "Por favor ingresa o selecciona una respuesta antes de continuar.";
+        }
+
+        if (val) {
+            const lowerQ = q.question.toLowerCase();
+            const isPassportExpiry = lowerQ.includes("vencimiento") || lowerQ.includes("expiration") || (lowerQ.includes("pasaporte") && lowerQ.includes("vigencia"));
+            const isBirthDate = lowerQ.includes("nacimiento") || lowerQ.includes("birth");
+
+            if (isPassportExpiry) {
+                const selectedDate = new Date(val);
+                if (isNaN(selectedDate.getTime())) {
+                    return "Por favor ingresa una fecha válida.";
+                }
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const diffTime = selectedDate.getTime() - today.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if (diffDays < 180) {
+                    return "⚠️ El pasaporte debe contar con una vigencia mínima mayor a 180 días (6 meses). Si tu pasaporte vence pronto o está vencido, renuévalo antes de solicitar tu visa.";
+                }
+            }
+
+            if (isBirthDate) {
+                const selectedDate = new Date(val);
+                if (isNaN(selectedDate.getTime())) {
+                    return "Por favor ingresa una fecha válida.";
+                }
+                const today = new Date();
+                if (selectedDate > today) {
+                    return "La fecha de nacimiento no puede ser una fecha futura.";
+                }
+            }
+        }
+
+        return null;
+    };
+
     const handleNext = async () => {
+        const error = validateCurrentStep();
+        if (error) {
+            setValidationError(error);
+            return;
+        }
+        setValidationError(null);
+
         const nextStep = currentStep + 1;
         if (nextStep < questions.length) {
             saveEvaluationProgress(answers, nextStep);
@@ -331,6 +403,7 @@ function PreformularioContent() {
     };
 
     const handleBack = () => {
+        setValidationError(null);
         const prevStep = currentStep - 1;
         if (currentStep > 0) {
             saveEvaluationProgress(answers, prevStep);
@@ -339,6 +412,7 @@ function PreformularioContent() {
             setStarted(false);
         }
     };
+
 
     // Welcome Screen (Intake and Country Configuration combined)
     if (!started) {
@@ -521,7 +595,10 @@ function PreformularioContent() {
                             question.response.map((opt, i) => (
                                 <div
                                     key={i}
-                                    onClick={() => setAnswers({ ...answers, [currentStep]: opt })}
+                                    onClick={() => {
+                                        setValidationError(null);
+                                        setAnswers({ ...answers, [currentStep]: opt });
+                                    }}
                                     className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
                                             ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
                                             : 'border-border-light bg-white hover:border-brand-primary/40 hover:bg-background-hover/40'
@@ -544,21 +621,29 @@ function PreformularioContent() {
                                         : 'text'
                                 }
                                 value={answers[currentStep] || ''}
-                                onChange={(e) => setAnswers({ ...answers, [currentStep]: e.target.value })}
+                                onChange={(e) => {
+                                    setValidationError(null);
+                                    setAnswers({ ...answers, [currentStep]: e.target.value });
+                                }}
                                 placeholder="Escribe tu respuesta aquí..."
-                                className="w-full border border-border-light rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all shadow-sm"
+                                className={`w-full border ${validationError ? 'border-red-400 focus:ring-red-200' : 'border-border-light focus:ring-brand-primary/50'} rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 transition-all shadow-sm`}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
-                                        const isRequired = question.required !== false;
-                                        const hasAnswer = answers[currentStep] !== undefined && answers[currentStep] !== null && answers[currentStep].trim() !== '';
-                                        if (!isRequired || hasAnswer) {
-                                            handleNext();
-                                        }
+                                        handleNext();
                                     }
                                 }}
                             />
                         )}
                     </div>
+
+                    {/* Validation Error Banner */}
+                    {validationError && (
+                        <div className="mt-4 p-4 bg-red-50 border border-red-200 text-red-700 text-xs md:text-sm font-semibold rounded-xl flex items-start gap-3 animate-in fade-in duration-200 text-left">
+                            <span className="text-lg leading-none">⚠️</span>
+                            <span className="leading-relaxed">{validationError}</span>
+                        </div>
+                    )}
+
 
                     <div className="mt-10 pt-6 border-t border-border-light flex items-center justify-between">
                         <button

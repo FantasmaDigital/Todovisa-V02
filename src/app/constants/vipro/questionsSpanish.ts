@@ -11,7 +11,7 @@ export const questionsSpanish: VIPROQuestionsProps[] = [
     { "question": "Alguna vez ha sido deportado de Estados Unidos?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "DATOS PERSONALES" },
     { "question": "Alguna vez ha estado detenido?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "DATOS PERSONALES" },
     { "question": "Alguna vez le han cancelado una visa americana?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "DATOS PERSONALES" },
-    { "question": "Edad actual", "type_question": "abierta", "response": [""], "user_response": "", "category": "DATOS PERSONALES" },
+
     { "question": "Sus padres si tienen visa americana?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "ARRAIGOS FAMILIARES Y FINANCIEROS" },
     { "question": "Desea viajar a estados unidos por visita familiar?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "ARRAIGOS FAMILIARES Y FINANCIEROS" },
     { "question": "Desea viajar a estados unidos por turismo?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "ARRAIGOS FAMILIARES Y FINANCIEROS" },

@@ -173,121 +173,54 @@ export default function MiEquipoPage() {
         </div>
 
         <div className="mb-8 pb-4 border-b border-border-light text-left">
-          <h1 className="text-2xl font-bold text-text-primary">Mi Equipo de Asesores</h1>
-          <p className="text-xs text-text-secondary mt-1">Gestiona los asesores miembros de tu empresa e invita a nuevos agentes a unirse.</p>
+          <h1 className="text-2xl font-bold text-text-primary">Programa de Recomendaciones y Referidos</h1>
+          <p className="text-xs text-text-secondary mt-1">
+            La modalidad de adición de sub-agentes ha sido actualizada. Las agencias asociadas generan y comparten su **Link de Referidos** para recibir el **30% de comisión por cada compra**.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left items-start">
-          {/* Members List */}
-          <div className="lg:col-span-2 border border-border-light rounded-sm p-6 bg-white space-y-4">
+        {/* Notice Card */}
+        <div className="bg-amber-50 border border-amber-200 rounded-sm p-4 mb-8 text-left">
+          <div className="flex items-start gap-3">
+            <span className="text-xl">📢</span>
             <div>
-              <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Miembros del Equipo</h3>
-              <p className="text-xs text-text-secondary">Asesores autorizados bajo la acreditación de tu agencia.</p>
+              <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Actualización de Funcionalidad de Agencia</h3>
+              <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                Las agencias registradas en TodoVisa ya no agregan agentes directamente a su equipo. En su lugar, cada agencia cuenta con un <strong>enlace de referidos exclusivo</strong>. Al compartir este enlace con tus clientes finales, obtendrás el <strong>30% de la compra</strong> de cada proceso de visado realizado con TodoVisa (70% para TodoVisa).
+              </p>
             </div>
+          </div>
+        </div>
 
-            {isLoadingMembers ? (
-              <p className="text-xs text-text-muted">Cargando equipo...</p>
-            ) : agencyMembers.length === 0 ? (
-              <p className="text-xs text-text-muted italic">Aún no tienes consultores registrados.</p>
-            ) : (
-              <div className="space-y-3">
-                {agencyMembers.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between p-3.5 border border-border-light rounded-sm bg-background-main hover:border-brand-primary/20 transition-all duration-150">
-                    <div>
-                      <div className="text-xs font-bold text-text-primary">
-                        {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : "Asesor TodoVisa"}
-                      </div>
-                      <div className="text-[10px] text-text-secondary">{m.profile?.email || ""}</div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-brand-light border border-border-light text-brand-primary text-[9px] font-bold uppercase rounded-sm">
-                      {m.member_role === "supervisor" ? "Supervisor" : "Asesor"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Referral Link Generator Box */}
+        <div className="max-w-2xl border border-border-light rounded-sm p-6 bg-white space-y-4 text-left shadow-xs">
+          <div>
+            <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Tu Link de Referido de Agencia</h3>
+            <p className="text-xs text-text-secondary">Comparte este enlace con tus clientes para atribuir automáticamente la comisión del 30% a tu cuenta.</p>
           </div>
 
-          {/* Invitation block */}
-          <div className="lg:col-span-1 space-y-6">
-            <div className="border border-border-light rounded-sm p-6 bg-white space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Invitar Asesor</h3>
-                <p className="text-xs text-text-secondary">Genera invitaciones para que consultores se vinculen a tu agencia.</p>
-              </div>
-
-              <form onSubmit={handleInviteConsultant} className="space-y-3.5">
-                <div>
-                  <label className="block text-[10px] text-text-secondary font-bold uppercase tracking-wider mb-1.5">Correo del Consultor</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="consultor@example.com"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={isSendingInvite}
-                  className="w-full py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors shadow-sm cursor-pointer border-none"
-                >
-                  {isSendingInvite ? "Generando..." : "Enviar Invitación"}
-                </button>
-              </form>
-
-              {/* Pending Invitations list */}
-              <div className="pt-4 border-t border-border-light mt-4">
-                <h4 className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-3">Invitaciones Enviadas</h4>
-                {isLoadingInvitations ? (
-                  <p className="text-[10px] text-text-muted">Cargando invitaciones...</p>
-                ) : agencyInvitations.length === 0 ? (
-                  <p className="text-[10px] text-text-muted italic">No hay invitaciones registradas.</p>
-                ) : (
-                  <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                    {agencyInvitations.map((inv) => (
-                      <div key={inv.id} className="p-3 border border-border-light rounded-sm bg-background-main text-[10px] flex flex-col gap-2">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-text-primary truncate mr-1.5">{inv.email}</span>
-                          <span className={`px-1.5 py-0.5 rounded-sm text-[8px] font-bold ${
-                            inv.status === "accepted"
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                              : inv.status === "expired"
-                              ? "bg-red-50 text-red-700 border border-red-100"
-                              : "bg-amber-50 text-amber-700 border border-amber-100"
-                          }`}>
-                            {inv.status === "accepted" ? "Aceptado" : inv.status === "expired" ? "Expirado" : "Pendiente"}
-                          </span>
-                        </div>
-                        {inv.status === "pending" && (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              readOnly
-                              value={`${window.location.origin}/agents/join?token=${inv.token}`}
-                              className="flex-1 px-1.5 py-1 bg-white border border-border-light rounded-sm text-[8px] font-mono select-all focus:outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(`${window.location.origin}/agents/join?token=${inv.token}`);
-                                showToast("Enlace de invitación copiado", "success");
-                              }}
-                              className="px-2.5 py-1 bg-gray-800 text-white font-bold rounded-sm hover:bg-gray-900 transition-colors border-none text-[9px] cursor-pointer"
-                            >
-                              Copiar
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              type="text"
+              readOnly
+              value={`${typeof window !== "undefined" ? window.location.origin : "https://todovisa.com"}?ref=${user.id}`}
+              className="flex-1 px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
+            />
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
+                  showToast("¡Link de referido copiado al portapapeles!", "success");
+                }
+              }}
+              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer border-none flex items-center gap-1.5"
+            >
+              📋 Copiar Link
+            </button>
           </div>
         </div>
       </main>
+
 
       <Footer />
 
