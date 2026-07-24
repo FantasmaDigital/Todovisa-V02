@@ -5,8 +5,8 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { ROLES } from "../../constants/roles";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
 
 interface AgentCommission {
   id: string;
@@ -41,16 +41,12 @@ export default function ComisionesPage() {
     setIsMounted(true);
   }, []);
 
-  // Fetch agent commissions from Supabase
+  // Fetch agent commissions from API
   const loadCommissions = async () => {
     if (!user) return;
     setIsLoadingCommissions(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_commissions")
-        .select("*, profile:agent_id(first_name, last_name, email)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      const data = await ProfileClientService.getCommissions(user.id);
       setAgentCommissions(data || []);
     } catch (err) {
       console.error("Error fetching commissions:", err);
@@ -158,7 +154,11 @@ export default function ComisionesPage() {
           </div>
 
           {isLoadingCommissions ? (
-            <p className="text-xs text-text-muted">Cargando comisiones...</p>
+            <div className="space-y-3 py-4">
+              <div className="h-6 bg-gray-100 rounded animate-pulse w-full"></div>
+              <div className="h-6 bg-gray-100 rounded animate-pulse w-full"></div>
+              <div className="h-6 bg-gray-100 rounded animate-pulse w-full"></div>
+            </div>
           ) : agentCommissions.length === 0 ? (
             <div className="py-8 text-center text-text-muted italic border-t border-border-light text-xs">
               No se han encontrado registros de comisiones aprobadas para tu cuenta.

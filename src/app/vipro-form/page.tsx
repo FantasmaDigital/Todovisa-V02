@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
-import supabase from "../lib/supabase";
+import { AuthService } from "../service/AuthService";
 
 function ViproFormContent() {
     const headerRef = useRef(null);
@@ -33,18 +33,18 @@ function ViproFormContent() {
                 }
             }
 
-            // If not in local storage and logged in, check supabase user metadata
+            // If not in local storage and logged in, check user metadata
             if (!hasProgress && user) {
                 try {
-                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-                    const metadata = supabaseUser?.user_metadata || {};
+                    const userRes = await AuthService.getUser();
+                    const metadata = userRes.data?.user?.user_metadata || {};
                     if (metadata.vipro_progress_answers) {
                         if (Object.keys(metadata.vipro_progress_answers).length > 0) {
                             hasProgress = true;
                         }
                     }
                 } catch (err) {
-                    console.error("Error checking progress in Supabase:", err);
+                    console.error("Error checking progress in API:", err);
                 }
             }
 
@@ -136,7 +136,7 @@ function ViproFormContent() {
                                         Diagnostica tu Perfil Consular con VIPRO
                                     </h2>
                                     <p className="text-xs text-text-secondary leading-relaxed">
-                                        Evalúa tu lazo laboral, familiar e historial de viajes con nuestro sistema algorítmico de viabilidad antes de presentar tu solicitud oficial.
+                                        Sistema de diagnóstico especializado para <strong>Estados Unidos 🇺🇸, Canadá 🇨🇦, Australia 🇦🇺 y Reino Unido 🇬🇧</strong>. Evalúa tu solvencia, arraigo e historial para solicitudes por <strong>Primera Vez</strong> y <strong>Renovaciones (Exención de Entrevista Drop Box y Bajo Riesgo)</strong>.
                                     </p>
                                 </div>
 
@@ -271,10 +271,12 @@ function ViproFormContent() {
 export default function ViproFormPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen w-full flex items-center justify-center bg-background-main">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-text-secondary font-medium">Cargando evaluación...</span>
+            <div className="min-h-screen w-full bg-background-main p-8 animate-pulse flex justify-center items-center">
+                <div className="max-w-3xl w-full bg-white rounded-3xl p-10 border border-border-light space-y-6">
+                    <div className="h-8 bg-gray-200 rounded w-2/3"></div>
+                    <div className="h-4 bg-gray-100 rounded w-full"></div>
+                    <div className="h-4 bg-gray-100 rounded w-5/6"></div>
+                    <div className="h-40 bg-gray-100 rounded-2xl w-full"></div>
                 </div>
             </div>
         }>

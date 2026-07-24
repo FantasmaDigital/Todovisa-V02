@@ -3,12 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
+import { UserAvatar } from "../components/shared/UserAvatar";
 import { useAuthStore } from "../store/authStore";
 import { useRouter } from "next/navigation";
 import { countries } from "countries-list";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import agentsData from "../dummies/agents.json";
-import supabase from "../lib/supabase";
+import { AuthService } from "../service/AuthService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { AgentClientService } from "@/services/client/AgentClientService";
+import { StorageClientService } from "@/services/client/StorageClientService";
+import { FormClientService } from "@/services/client/FormClientService";
 import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
 
@@ -271,43 +276,9 @@ export default function PerfilUsuarioPage() {
     const fetchMyAgency = async () => {
       setIsLoadingAgencyInfo(true);
       try {
-        const { data: memberData, error: memberErr } = await supabase
-          .from("agency_members")
-          .select("agency_id")
-          .eq("member_id", user.id)
-          .maybeSingle();
-
-        if (memberErr) {
-          console.error("Error loading agency membership:", memberErr.message);
-          return;
-        }
-
-        if (memberData && memberData.agency_id) {
-          const { data: agencyProfile, error: agencyErr } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, email, photo_url, phone, bio, location, staff_size")
-            .eq("id", memberData.agency_id)
-            .maybeSingle();
-
-          if (agencyErr) {
-            if (agencyErr.message && (agencyErr.message.includes("column") || agencyErr.code === "P0002")) {
-              const { data: fallbackProfile, error: fallbackErr } = await supabase
-                .from("profiles")
-                .select("id, first_name, last_name, email")
-                .eq("id", memberData.agency_id)
-                .maybeSingle();
-
-              if (fallbackErr) {
-                console.error("Error loading agency details (fallback):", fallbackErr.message);
-              } else if (fallbackProfile) {
-                setMyAgency(fallbackProfile);
-              }
-            } else {
-              console.error("Error loading agency details:", agencyErr.message);
-            }
-          } else if (agencyProfile) {
-            setMyAgency(agencyProfile);
-          }
+        const resData = await ProfileClientService.getProfile(user.id);
+        if (resData?.memberInfo?.agencyProfile) {
+          setMyAgency(resData.memberInfo.agencyProfile);
         }
       } catch (err) {
         console.error("Unexpected error loading my agency info:", err);
@@ -327,42 +298,12 @@ export default function PerfilUsuarioPage() {
 
     const fetchRealInvitation = async () => {
       try {
-        let invitationData = null;
-        const { data, error } = await supabase
-          .from("agency_invitations")
-          .select("*, agency:profiles!agency_id(id, first_name, last_name, email, photo_url, phone, bio, location, staff_size)")
-          .eq("email", user.email.trim().toLowerCase())
-          .eq("status", "pending")
-          .gt("expires_at", new Date().toISOString())
-          .maybeSingle();
-
-        if (error) {
-          if (error.message && (error.message.includes("column") || error.code === "P0002")) {
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from("agency_invitations")
-              .select("*, agency:profiles!agency_id(id, first_name, last_name, email)")
-              .eq("email", user.email.trim().toLowerCase())
-              .eq("status", "pending")
-              .gt("expires_at", new Date().toISOString())
-              .maybeSingle();
-
-            if (fallbackError) {
-              console.error("Error loading B2B invitation (fallback):", fallbackError.message);
-            } else if (fallbackData) {
-              invitationData = fallbackData;
-            }
-          } else {
-            console.error("Error loading B2B invitation:", error.message);
-          }
-        } else if (data) {
-          invitationData = data;
-        }
-
-        if (invitationData) {
-          setRealInvitation(invitationData);
+        const resData = await ProfileClientService.getProfile(user.id);
+        if (resData?.invitation) {
+          setRealInvitation(resData.invitation);
         }
       } catch (err) {
-        console.error("Unexpected error loading invitation:", err);
+        console.error("Error checking invitations:", err);
       }
     };
 
@@ -447,14 +388,9 @@ export default function PerfilUsuarioPage() {
     const fetchPreformMetadata = async () => {
       try {
         const dest = user?.viproDestination || "US";
-        const { data, error } = await supabase
-          .from("preformularios")
-          .select("intake_type, interview_waiver_eligible")
-          .eq("user_id", user.id)
-          .eq("destination_country", dest)
-          .maybeSingle();
+        const data = await FormClientService.getPreformulario(user.id);
 
-        if (!error && data) {
+        if (data) {
           setPreformMetadata(data);
         } else {
           // Check if there is anything in localstorage as fallback
@@ -489,35 +425,13 @@ export default function PerfilUsuarioPage() {
       showToast("El archivo excede el tamaño máximo permitido (20MB).", "error");
       return;
     }
-
     const userId = user?.id || "guest";
-    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = `expedientes/${userId}/${docType}/${Date.now()}_${cleanFileName}`;
 
     try {
-      showToast(`Subiendo "${file.name}" a tu expediente en Supabase Storage...`, "info");
+      showToast(`Subiendo "${file.name}" a tu expediente...`, "info");
       
-      // Attempt upload to 'todovisa' bucket, fallback to client-documents/avatars if needed
-      let storageBucket = "todovisa";
-      let uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-
-      if (uploadResult.error) {
-        storageBucket = "client-documents";
-        uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-        if (uploadResult.error) {
-          storageBucket = "avatars";
-          uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-        }
-      }
-
-
-      let publicUrl = file.name;
-      if (!uploadResult.error) {
-        const { data: urlData } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
-        if (urlData?.publicUrl) {
-          publicUrl = urlData.publicUrl;
-        }
-      }
+      const uploadResult = await StorageClientService.uploadClientDocument(file, userId, docType);
+      const publicUrl = uploadResult.publicUrl || file.name;
 
       setClientDocs(prev => {
         const updated = { ...prev, [docType]: file.name, [`${docType}_url`]: publicUrl };
@@ -527,9 +441,9 @@ export default function PerfilUsuarioPage() {
         return updated;
       });
 
-      showToast(`✅ Archivo "${file.name}" guardado exitosamente en tu carpeta de Supabase Storage.`, "success");
+      showToast(`✅ Archivo "${file.name}" guardado exitosamente.`, "success");
     } catch (err: any) {
-      console.error("Error al subir archivo a Supabase Storage:", err);
+      console.error("Error al subir archivo via API Storage:", err);
       // Fallback local persistence
       setClientDocs(prev => ({ ...prev, [docType]: file.name }));
       showToast(`Archivo "${file.name}" cargado localmente.`, "success");
@@ -587,26 +501,29 @@ export default function PerfilUsuarioPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleCropAndUpload = async () => {
-    if (!canvasRef.current || !cropImageObj || !user?.id || !currentUploadFile) return;
-
+  const handleCropSave = async () => {
+    if (!cropImageObj || !user?.id) return;
     setIsUploadingAvatar(true);
 
     try {
-      const now = new Date();
-      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      let changesThisMonth = user?.avatarChangesThisMonth || 0;
-      const lastChangeMonth = user?.lastAvatarChangeMonth || "";
+      const canvas = document.createElement("canvas");
+      const size = 300;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-      if (lastChangeMonth === currentMonthStr) {
-        changesThisMonth += 1;
-      } else {
-        changesThisMonth = 1;
-      }
+      const imgWidth = cropImageObj.width;
+      const imgHeight = cropImageObj.height;
+      const baseScale = Math.max(size / imgWidth, size / imgHeight);
+      const drawWidth = imgWidth * baseScale * zoom;
+      const drawHeight = imgHeight * baseScale * zoom;
 
-      const canvas = canvasRef.current;
+      const drawX = (size - drawWidth) / 2 + panX;
+      const drawY = (size - drawHeight) / 2 + panY;
 
-      // Crop canvas into a blob and upload it (optimizing to JPEG at 85% quality)
+      ctx.drawImage(cropImageObj, drawX, drawY, drawWidth, drawHeight);
+
       canvas.toBlob(async (blob) => {
         if (!blob) {
           showToast("Error al procesar la imagen.", "error");
@@ -614,56 +531,39 @@ export default function PerfilUsuarioPage() {
           return;
         }
 
-        const fileExt = "jpg";
-        const filePath = `avatars/${user.id}-${Date.now()}.${fileExt}`;
+        const avatarFile = new File([blob], `avatar-${user.id}.jpg`, { type: "image/jpeg" });
 
-        // Upload cropped JPEG blob directly to 'todovisa' storage bucket
-        const { error: uploadError } = await supabase.storage
-          .from("todovisa")
-          .upload(filePath, blob, {
-            contentType: "image/jpeg",
-            cacheControl: "3600",
-            upsert: true,
-          });
+        try {
+          const uploadResult = await StorageClientService.uploadAvatar(avatarFile, user.id);
+          const publicUrl = uploadResult.publicUrl || "";
 
-        if (uploadError) {
-          console.error("Error uploading avatar to Supabase storage:", uploadError.message);
-          showToast("Error al subir la imagen al almacenamiento. Inténtalo de nuevo.", "error");
-          setIsUploadingAvatar(false);
-          return;
-        }
+          const now = new Date();
+          const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+          let changesThisMonth = (user?.lastAvatarChangeMonth === currentMonthStr) ? (user.avatarChangesThisMonth || 0) + 1 : 1;
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from("todovisa")
-          .getPublicUrl(filePath);
+          const updatedUser = {
+            ...user,
+            photoUrl: publicUrl,
+            avatarChangesThisMonth: changesThisMonth,
+            lastAvatarChangeMonth: currentMonthStr,
+          };
 
-        const updatedUser = {
-          ...user,
-          photoUrl: publicUrl,
-          avatarChangesThisMonth: changesThisMonth,
-          lastAvatarChangeMonth: currentMonthStr,
-        };
+          setUser(updatedUser);
 
-        setUser(updatedUser);
-
-        const { error } = await supabase.auth.updateUser({
-          data: {
+          await AuthService.updateUser({
             photo_url: publicUrl,
             avatar_changes_this_month: changesThisMonth,
             last_avatar_change_month: currentMonthStr,
-          }
-        });
+          });
 
-        setIsUploadingAvatar(false);
-        setIsCropModalOpen(false);
-        setCropImageObj(null);
-
-        if (error) {
-          console.warn("Could not save avatar URL to Supabase auth:", error.message);
-          showToast("Se subió el archivo pero no se pudo actualizar tu perfil en la sesión.", "error");
-        } else {
+          setIsUploadingAvatar(false);
+          setIsCropModalOpen(false);
+          setCropImageObj(null);
           showToast(`Foto de perfil actualizada. Cambios este mes: ${changesThisMonth}/3`, "success");
+        } catch (err: any) {
+          console.error("Error uploading avatar:", err);
+          showToast("Se subió la foto localmente.", "info");
+          setIsUploadingAvatar(false);
         }
       }, "image/jpeg", 0.85);
     } catch (err) {
@@ -713,33 +613,33 @@ export default function PerfilUsuarioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const assignedAgent = (agentsData as any[]).find(a => a.id === user?.assignedAgentId) || agentsData[0];
 
-  // Sync user profile state with Supabase Auth on page load
+  // Sync user profile state with API on page load
   useEffect(() => {
     let isSubscribed = true;
-    const syncWithSupabase = async () => {
+    const syncWithApi = async () => {
       try {
-        const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
-        if (error) {
-          console.warn("Could not fetch user from Supabase, operating in local/offline mode:", error.message);
-          return;
-        }
+        const userRes = await AuthService.getUser().catch(() => null);
+        if (!userRes || !userRes.data?.user) return;
+        const apiUser = userRes.data.user;
 
-        if (supabaseUser && isSubscribed) {
-          const { data: profileData } = await supabase
-            .from("profiles")
-            .select("role")
-            .eq("id", supabaseUser.id)
-            .maybeSingle();
+        if (apiUser && isSubscribed) {
+          let profileRole = ROLES.USER;
+          try {
+            const profRes = await ProfileClientService.getProfile(apiUser.id);
+            if (profRes?.profile?.role) {
+              profileRole = profRes.profile.role;
+            }
+          } catch (_) {}
 
-          const metadata = supabaseUser.user_metadata || {};
+          const metadata = apiUser.user_metadata || {};
 
           const googleFullName = metadata.full_name || metadata.name || '';
           const fallbackFirstName = googleFullName.split(' ')[0] || '';
           const fallbackLastName = googleFullName.split(' ').slice(1).join(' ') || '';
 
           const updatedUser = {
-            id: supabaseUser.id,
-            email: supabaseUser.email || '',
+            id: apiUser.id,
+            email: apiUser.email || '',
             firstName: metadata.first_name || fallbackFirstName,
             lastName: metadata.last_name || fallbackLastName,
             phone: metadata.phone || '',
@@ -750,7 +650,7 @@ export default function PerfilUsuarioPage() {
             hasPaidAdvisor: metadata.has_paid_advisor || false,
             assignedAgentId: metadata.assigned_agent_id || null,
             assignedAgencyName: metadata.assigned_agency_name || null,
-            photoUrl: metadata.photo_url || metadata.avatar_url || null,
+            photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
             ds160FullName: metadata.ds160_full_name || null,
@@ -760,7 +660,7 @@ export default function PerfilUsuarioPage() {
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
             expedienteStatus: metadata.expediente_status || 'draft',
-            role: (profileData?.role as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
+            role: (profileRole as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
           };
 
           if (
@@ -781,10 +681,9 @@ export default function PerfilUsuarioPage() {
             user.expedienteStatus !== updatedUser.expedienteStatus ||
             user.role !== updatedUser.role
           ) {
-            console.log("Syncing auth store state with Supabase Auth user metadata.");
+            console.log("Syncing auth store state with user metadata.");
             setTimeout(() => {
               setUser(updatedUser);
-              // Hydrate local DS-160 state from remote metadata
               setDs160Data({
                 fullName: updatedUser.ds160FullName || `${updatedUser.firstName} ${updatedUser.lastName}`.trim(),
                 passportNum: updatedUser.ds160PassportNum || '',
@@ -798,11 +697,11 @@ export default function PerfilUsuarioPage() {
           }
         }
       } catch (err) {
-        console.error("Failed to sync user session with Supabase:", err);
+        console.error("Failed to sync user session:", err);
       }
     };
 
-    syncWithSupabase();
+    syncWithApi();
     return () => {
       isSubscribed = false;
     };
@@ -816,58 +715,26 @@ export default function PerfilUsuarioPage() {
       setIsLoadingPartnerApp(true);
       try {
         let agencyId = null;
-        if (user.role === ROLES.AGENT) {
-          const { data: memberData } = await supabase
-            .from("agency_members")
-            .select("agency_id")
-            .eq("member_id", user.id)
-            .maybeSingle();
-          if (memberData) {
-            agencyId = memberData.agency_id;
+        if (user.role === "agent") {
+          const profileData = await ProfileClientService.getProfile(user.id);
+          const memberInfo = profileData?.memberInfo;
+          if (memberInfo?.memberData?.agency_id) {
+            agencyId = memberInfo.memberData.agency_id;
           }
         }
 
         const targetUserId = agencyId || user.id;
 
-        // Query partner application (by user_id first, then by email fallback if no agencyId)
-        let data = null;
-        const { data: idData, error: idError } = await supabase
-          .from("agent_applications")
-          .select("*")
-          .eq("user_id", targetUserId)
-          .maybeSingle();
-
-        if (idData) {
-          data = idData;
+        const portalRes = await AgentClientService.getPortalData(targetUserId);
+        if (portalRes.application) {
+          setPartnerApp(portalRes.application);
         }
 
-        if ((!data || idError) && !agencyId && user.email) {
-          const { data: emailData } = await supabase
-            .from("agent_applications")
-            .select("*")
-            .eq("email", user.email)
-            .maybeSingle();
-          if (emailData) {
-            data = emailData;
-          }
-        }
-
-        if (data) {
-          setPartnerApp(data);
-        }
-
-        // If current user is admin/moderator, fetch all applications
         const isAdmin = user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR;
         if (isAdmin) {
-          const { data: allData, error: allErr } = await supabase
-            .from("agent_applications")
-            .select("*")
-            .order("created_at", { ascending: false });
-
-          if (allData) {
-            setAllApplications(allData);
-          } else if (allErr) {
-            console.error("Error loading all agent applications:", allErr.message);
+          const requestsRes = await AgentClientService.getRequests();
+          if (requestsRes.applications) {
+            setAllApplications(requestsRes.applications);
           }
         }
       } catch (err) {
@@ -906,59 +773,43 @@ export default function PerfilUsuarioPage() {
     }
 
     try {
-      const { error } = await supabase
-        .from("agent_applications")
-        .update(updatePayload)
-        .eq("id", appId);
+      await AgentClientService.updateApplication({
+        id: appId,
+        updates: updatePayload
+      });
 
-      if (error) {
-        console.error("Error in admin action:", error.message);
-        showToast("Error al guardar los cambios en la base de datos.", "error");
-      } else {
-        showToast(
-          action === "approved"
-            ? "¡Solicitud aprobada con éxito!"
-            : action === "rejected"
-              ? "Solicitud rechazada/devuelta."
-              : "Comentarios guardados con éxito.",
-          "success"
-        );
+      showToast(
+        action === "approved"
+          ? "¡Solicitud aprobada con éxito!"
+          : action === "rejected"
+            ? "Solicitud rechazada/devuelta."
+            : "Comentarios guardados con éxito.",
+        "success"
+      );
 
-        // When approved, upgrade the applicant's role based on application type
-        if (action === "approved" && targetApp?.user_id) {
-          const applicantType = targetApp.application_type || "individual";
-          const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
-          await supabase
-            .from("profiles")
-            .update({ role: newRole })
-            .eq("id", targetApp.user_id);
-        }
+      if (action === "approved" && targetApp?.user_id) {
+        const applicantType = targetApp.application_type || "individual";
+        const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
+        await ProfileClientService.updateProfile(targetApp.user_id, { role: newRole });
+      }
 
-        // Update selected app locally
-        setSelectedApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
+      setSelectedApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
+        ...prev,
+        ...updatePayload,
+      }) : prev);
+
+      const requestsRes = await AgentClientService.getRequests();
+      if (requestsRes.applications) setAllApplications(requestsRes.applications);
+
+      if (partnerApp && partnerApp.id === appId) {
+        setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
           ...prev,
           ...updatePayload,
-        }) : prev);
-
-        // Refresh entire application list from DB to reflect latest state
-        const { data: refreshedApps } = await supabase
-          .from("agent_applications")
-          .select("*")
-          .order("created_at", { ascending: false });
-        if (refreshedApps) setAllApplications(refreshedApps);
-
-        // Update partnerApp if the admin is reviewing their own application
-        if (partnerApp && partnerApp.id === appId) {
-          setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
-            ...prev,
-            ...updatePayload,
-          }) : null);
-        }
-
+        }) : null);
       }
     } catch (err: any) {
       console.error("Failed to update partner application status:", err);
-      showToast("Error al conectar con la base de datos.", "error");
+      showToast("Error al guardar cambios.", "error");
     } finally {
       setIsSavingAdmin(false);
       setSecurityModalData(null);
@@ -980,16 +831,12 @@ export default function PerfilUsuarioPage() {
     }
   }, [user?.role]);
 
-  // Fetch agent commissions from Supabase
+  // Fetch agent commissions from API
   const loadCommissions = async () => {
     if (!user) return;
     setIsLoadingCommissions(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_commissions")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      const data = await ProfileClientService.getCommissions(user.id);
       setAgentCommissions(data || []);
     } catch (err) {
       console.error("Error fetching commissions:", err);
@@ -1003,12 +850,8 @@ export default function PerfilUsuarioPage() {
     if (!user || user.role !== ROLES.AGENCY) return;
     setIsLoadingMembers(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_members")
-        .select("*, profile:member_id(first_name, last_name, email)")
-        .eq("agency_id", user.id);
-      if (error) throw error;
-      setAgencyMembers(data || []);
+      const teamData = await ProfileClientService.getTeam(user.id);
+      setAgencyMembers(teamData.members || []);
     } catch (err) {
       console.error("Error fetching agency members:", err);
     } finally {
@@ -1021,13 +864,8 @@ export default function PerfilUsuarioPage() {
     if (!user || user.role !== ROLES.AGENCY) return;
     setIsLoadingInvitations(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_invitations")
-        .select("*")
-        .eq("agency_id", user.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setAgencyInvitations(data || []);
+      const teamData = await ProfileClientService.getTeam(user.id);
+      setAgencyInvitations(teamData.invitations || []);
     } catch (err) {
       console.error("Error fetching agency invitations:", err);
     } finally {
@@ -1041,21 +879,16 @@ export default function PerfilUsuarioPage() {
     if (!user || !inviteEmail.trim()) return;
     setIsSendingInvite(true);
     try {
-      // Generate a simple hex token of 32 characters
       const randomArr = new Uint8Array(16);
       crypto.getRandomValues(randomArr);
       const token = Array.from(randomArr).map(b => b.toString(16).padStart(2, '0')).join('');
 
-      const { error } = await supabase
-        .from("agency_invitations")
-        .insert({
-          agency_id: user.id,
-          email: inviteEmail.trim().toLowerCase(),
-          token,
-          status: "pending"
-        });
-
-      if (error) throw error;
+      await ProfileClientService.inviteTeamMember({
+        agency_id: user.id,
+        email: inviteEmail.trim().toLowerCase(),
+        token,
+        status: "pending"
+      });
 
       showToast(`Invitación generada para ${inviteEmail.trim()}`, "success");
       setInviteEmail("");
@@ -1074,14 +907,10 @@ export default function PerfilUsuarioPage() {
     if (!user) return;
     setIsLoadingPayout(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("payout_settings")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (error) throw error;
-      if (data?.payout_settings) {
-        const s = data.payout_settings as Record<string, string>;
+      const portalRes = await AgentClientService.getPortalData(user.id);
+      const app = portalRes.application;
+      if (app?.payout_settings) {
+        const s = app.payout_settings as Record<string, string>;
         if (s.method) setPayoutMethod(s.method as 'paypal' | 'ach');
         if (s.paypal_email) setPaypalEmail(s.paypal_email);
         if (s.bank_name) setBankName(s.bank_name);
@@ -1111,18 +940,10 @@ export default function PerfilUsuarioPage() {
       tax_id: payoutMethod === 'ach' ? taxId : "",
     };
     try {
-      const { data: appData, error: findError } = await supabase
-        .from("agent_applications")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (findError) throw findError;
-      if (!appData) throw new Error("No se encontró solicitud de agente activa vinculada a tu cuenta.");
-      const { error: updateError } = await supabase
-        .from("agent_applications")
-        .update({ payout_settings: updatedSettings })
-        .eq("id", appData.id);
-      if (updateError) throw updateError;
+      await AgentClientService.updateApplication({
+        userId: user.id,
+        updates: { payout_settings: updatedSettings }
+      });
       showToast("Configuración de pago guardada exitosamente.", "success");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1138,19 +959,13 @@ export default function PerfilUsuarioPage() {
     try {
       let targetUserId = user.id;
       if (user.role === ROLES.AGENT) {
-        const { data: memberData } = await supabase
-          .from("agency_members")
-          .select("agency_id")
-          .eq("member_id", user.id)
-          .maybeSingle();
-        if (memberData?.agency_id) targetUserId = memberData.agency_id;
+        const profileRes = await ProfileClientService.getProfile(user.id);
+        if (profileRes?.memberInfo?.memberData?.agency_id) {
+          targetUserId = profileRes.memberInfo.memberData.agency_id;
+        }
       }
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("user_id", targetUserId)
-        .maybeSingle();
-      if (error) throw error;
+      const portalRes = await AgentClientService.getPortalData(targetUserId);
+      const data = portalRes.application;
       setAgentApp(data || null);
       if (data?.signature_name) setSignatureName(data.signature_name);
     } catch (err) {
@@ -1170,11 +985,10 @@ export default function PerfilUsuarioPage() {
     setIsSigning(true);
     const nowString = new Date().toISOString();
     try {
-      const { error } = await supabase
-        .from("agent_applications")
-        .update({ status: "active", signature_name: signatureName.trim(), signed_at: nowString })
-        .eq("id", agentApp.id);
-      if (error) throw error;
+      await AgentClientService.updateApplication({
+        id: agentApp.id,
+        updates: { status: "active", signature_name: signatureName.trim(), signed_at: nowString }
+      });
       setAgentApp((prev) => prev ? { ...prev, status: "active", signature_name: signatureName.trim(), signed_at: nowString } : null);
       showToast("¡Contrato firmado con éxito! Tu acreditación se encuentra activa.", "success");
     } catch (err: unknown) {
@@ -1190,37 +1004,8 @@ export default function PerfilUsuarioPage() {
     if (!user || user.role !== ROLES.AGENT) return;
     setIsLoadingClients(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_client_requests")
-        .select("*")
-        .eq("assigned_member_id", user.id)
-        .eq("status", "assigned")
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        const clientIds = data.map(c => c.client_id);
-        const { data: profilesData } = await supabase
-          .from("profiles")
-          .select("id, first_name, last_name, photo_url, bio, phone, location")
-          .in("id", clientIds);
-
-        const mappedClients = data.map(client => {
-          const profile = profilesData?.find(p => p.id === client.client_id);
-          return {
-            ...client,
-            photo_url: profile?.photo_url || null,
-            bio: profile?.bio || null,
-            phone: profile?.phone || null,
-            location: profile?.location || null,
-            first_name: profile?.first_name || null,
-            last_name: profile?.last_name || null,
-          };
-        });
-        setAssignedClients(mappedClients);
-      } else {
-        setAssignedClients([]);
-      }
+      const agentRes = await AgentClientService.getAssignedClients(user.id);
+      setAssignedClients(agentRes.clients || []);
     } catch (err) {
       console.error("Error loading assigned clients:", err);
     } finally {
@@ -1301,29 +1086,27 @@ export default function PerfilUsuarioPage() {
   }, [activeTab, user?.id, user?.role]);
 
   // Real-time subscription for agent chat: listen for new messages on selected client
+  // Real-time polling for agent chat: listen for new messages on selected client
   useEffect(() => {
     if (!user || !selectedClient) return;
-    const channel = supabase
-      .channel(`agent_room:${selectedClient.client_id}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        (payload) => {
-          const newMsg = payload.new as any;
-          if (newMsg.user_id !== selectedClient.client_id) return;
-          setAgentChatMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, {
-              id: newMsg.id,
-              sender: newMsg.sender,
-              text: newMsg.text,
-              timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
-            }];
-          });
+    const interval = setInterval(async () => {
+      try {
+        const data = await MessageClientService.getMessages(selectedClient.client_id);
+        if (data && data.length > 0) {
+          setAgentChatMessages(
+            data.map((msg: ClientMessageData) => ({
+              id: msg.id || "",
+              sender: msg.sender,
+              text: msg.text,
+              timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+            }))
+          );
         }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      } catch (err) {
+        console.warn("Failed to poll agent chat messages:", err);
+      }
+    }, 4000);
+    return () => clearInterval(interval);
   }, [selectedClient?.client_id, user?.id]);
 
   // Auto-scroll agent chat to bottom when messages change
@@ -1363,7 +1146,7 @@ export default function PerfilUsuarioPage() {
 
   const [isDataLoading, setIsDataLoading] = useState(true);
 
-  // Fetch real physical purchases and VIPRO evaluations from SQL tables in parallel
+  // Fetch real physical purchases and VIPRO evaluations from API in parallel
   useEffect(() => {
     if (!user) {
       setIsDataLoading(false);
@@ -1372,71 +1155,40 @@ export default function PerfilUsuarioPage() {
     const fetchDbRecords = async () => {
       setIsDataLoading(true);
       try {
-        let evalQuery = supabase
-          .from("vipro_evaluations")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (user.role !== ROLES.ADMIN && user.role !== ROLES.MODERATOR) {
-          evalQuery = evalQuery.eq("user_id", user.id);
-        }
-
-        const [purchasesRes, profsRes, preformsRes, evalRes] = await Promise.allSettled([
-          supabase.from("user_purchases").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
-          supabase.from("profiles").select("*"),
-          supabase.from("preformularios").select("*").order("created_at", { ascending: false }),
-          evalQuery
+        const [profileRes, preformRes, viproRes] = await Promise.allSettled([
+          ProfileClientService.getProfile(user.id),
+          FormClientService.getPreformulario(user.id),
+          FormClientService.getViproEvaluation(user.id)
         ]);
 
-        let purchases: any[] = [];
-        if (purchasesRes.status === "fulfilled" && purchasesRes.value.data) {
-          purchases = purchasesRes.value.data;
-          setDbPurchases(purchases);
-          if (purchases.length > 0) {
-            const hasViproPaid = purchases.some(p => p.product_type === "vipro" && p.status === "completed");
-            const hasAdvisorPaid = purchases.some(p => p.product_type === "advisor" && p.status === "completed");
-            const activeAdvisor = purchases.find(p => p.product_type === "advisor" && p.status === "completed");
-
-            if (hasViproPaid !== user.hasPaidVipro || hasAdvisorPaid !== user.hasPaidAdvisor) {
-              setUser({
-                ...user,
-                hasPaidVipro: hasViproPaid || hasAdvisorPaid,
-                hasPaidAdvisor: hasAdvisorPaid,
-                assignedAgentId: activeAdvisor?.agent_id || user.assignedAgentId
-              });
+        if (profileRes.status === "fulfilled" && profileRes.value) {
+          const profData = profileRes.value.profile;
+          if (profData) {
+            const pMap: Record<string, { email: string; name: string }> = {};
+            const full = `${profData.first_name || ""} ${profData.last_name || ""}`.trim();
+            const entry = { email: profData.email || "", name: full || profData.email || "" };
+            if (profData.id) {
+              pMap[profData.id] = entry;
+              pMap[profData.id.toLowerCase()] = entry;
+              pMap[profData.id.substring(0, 8)] = entry;
             }
+            if (profData.email) pMap[profData.email.toLowerCase()] = entry;
+            setDbProfilesMap(pMap);
           }
         }
 
-        if (profsRes.status === "fulfilled" && profsRes.value.data && profsRes.value.data.length > 0) {
-          const profs = profsRes.value.data;
-          setAllProfilesList(profs);
-          const pMap: Record<string, { email: string; name: string }> = {};
-          profs.forEach((p: any) => {
-            if (p.id) {
-              const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
-              const entry = { email: p.email || "", name: full || p.email || "" };
-              pMap[p.id] = entry;
-              pMap[p.id.toLowerCase()] = entry;
-              pMap[p.id.substring(0, 8)] = entry;
-              if (p.email) pMap[p.email.toLowerCase()] = entry;
-            }
-          });
-          setDbProfilesMap(pMap);
+        if (preformRes.status === "fulfilled" && preformRes.value) {
+          const preform = preformRes.value;
+          if (preform) {
+            setAllPreformulariosList([preform]);
+          }
         }
 
-        if (preformsRes.status === "fulfilled" && preformsRes.value.data && preformsRes.value.data.length > 0) {
-          const preforms = preformsRes.value.data;
-          const clientPreforms = preforms.filter((p: any) => p.user_id !== user.id);
-          setAllPreformulariosList(clientPreforms);
-        }
-
-        if (evalRes.status === "fulfilled" && evalRes.value.data && evalRes.value.data.length > 0) {
-          const evaluations = evalRes.value.data;
-          setViproEvaluations(evaluations);
-          const myUserEvals = evaluations.filter((e: any) => e.user_id === user.id || (user.email && e.user_email?.toLowerCase() === user.email.toLowerCase()));
-          if (myUserEvals.length > 0 && !user.viproCompleted) {
-            setUser({ ...user, viproCompleted: true, viproScore: myUserEvals[0].score || user.viproScore });
+        if (viproRes.status === "fulfilled" && viproRes.value) {
+          const evalData = Array.isArray(viproRes.value) ? viproRes.value : [viproRes.value];
+          setViproEvaluations(evalData);
+          if (evalData.length > 0 && !user.viproCompleted) {
+            setUser({ ...user, viproCompleted: true, viproScore: evalData[0].score || user.viproScore });
           }
         } else if (user.viproCompleted || user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) {
           setViproEvaluations([
@@ -1452,7 +1204,7 @@ export default function PerfilUsuarioPage() {
           ]);
         }
       } catch (err) {
-        console.error("Failed to load user purchases / db records from DB:", err);
+        console.error("Failed to load user records from API:", err);
       } finally {
         setIsDataLoading(false);
       }
@@ -1460,11 +1212,10 @@ export default function PerfilUsuarioPage() {
     fetchDbRecords();
   }, [user?.id, activeTab]);
 
-  // Load messages from Supabase
+  // Load messages from API Service
   const [isSupabaseDbAvailable, setIsSupabaseDbAvailable] = useState<boolean | null>(null);
 
   const prepopulateMockMessages = () => {
-    // No-op: we only use real DB messages
     setMessages([]);
   };
 
@@ -1496,110 +1247,26 @@ export default function PerfilUsuarioPage() {
     };
 
     fetchMessages();
-
-    // Subscribe to real-time changes
-    const channel = supabase
-      .channel(`room:${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages"
-        },
-        (payload) => {
-          const newMsg = payload.new;
-          // Filter messages belonging to this user
-          if (newMsg.user_id !== user.id) return;
-
-          // Avoid duplicate messages
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [
-              ...prev,
-              {
-                id: newMsg.id,
-                sender: newMsg.sender,
-                text: newMsg.text,
-                timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
-              },
-            ];
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const interval = setInterval(fetchMessages, 5000);
+    return () => clearInterval(interval);
   }, [user?.id, user?.hasPaidAdvisor, user?.assignedAgentId]);
 
-  // Load assigned agency and agent profiles from DB for client view
+  // Load assigned agency and agent profiles from API for client view
   useEffect(() => {
     if (!user) return;
     
     const loadAssignedProfiles = async () => {
       try {
-        const { data: activeRequest, error: reqError } = await supabase
-          .from("agency_client_requests")
-          .select("*")
-          .eq("client_id", user.id)
-          .eq("status", "assigned")
-          .maybeSingle();
-
-        if (reqError) throw reqError;
-
-        let finalAgencyId = null;
-        let finalAgentId = user.assignedAgentId;
-
-        if (activeRequest) {
-          finalAgencyId = activeRequest.agency_id;
-          if (activeRequest.assigned_member_id) {
-            finalAgentId = activeRequest.assigned_member_id;
-          }
-        }
-
-        if (!finalAgencyId && finalAgentId) {
-          const { data: memberData } = await supabase
-            .from("agency_members")
-            .select("agency_id")
-            .eq("member_id", finalAgentId)
-            .maybeSingle();
-          if (memberData) {
-            finalAgencyId = memberData.agency_id;
-          }
-        }
-
-        if (finalAgencyId) {
-          const { data: agencyData } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, photo_url, bio, location, staff_size, phone")
-            .eq("id", finalAgencyId)
-            .maybeSingle();
-          if (agencyData) {
-            setAssignedAgencyProfile(agencyData);
-          }
-        }
-
-        if (finalAgentId) {
-          const { data: agentData } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, photo_url, bio, location, phone")
-            .eq("id", finalAgentId)
-            .maybeSingle();
-          if (agentData) {
-            setAssignedAgentProfile(agentData);
-          }
+        const profileRes = await ProfileClientService.getProfile(user.id);
+        if (profileRes?.profile) {
+          setAssignedAgentProfile(profileRes.profile);
         }
       } catch (err) {
-        console.error("Error loading assigned profiles:", err);
+        console.error("Error loading assigned profiles via API:", err);
       }
     };
-
-    if (user.hasPaidAdvisor || user.assignedAgentId) {
-      loadAssignedProfiles();
-    }
-  }, [user?.id, user?.hasPaidAdvisor, user?.assignedAgentId]);
+    loadAssignedProfiles();
+  }, [user?.id, user?.assignedAgentId]);
 
   // Auto-scroll to bottom of chat container only (avoiding page viewport scrolling)
   const scrollToBottom = () => {
@@ -1720,54 +1387,20 @@ export default function PerfilUsuarioPage() {
   const handleDeclineInvitation = async () => {
     if (!realInvitation) return;
     try {
-      const { error } = await supabase
-        .from("agency_invitations")
-        .update({ status: "expired" })
-        .eq("id", realInvitation.id);
-
-      if (error) throw error;
-
+      await ProfileClientService.respondInvitation(realInvitation.id, "decline");
       setRealInvitation(null);
       showToast("Invitación rechazada.", "info");
     } catch (err: any) {
       console.error("Error declining invitation:", err);
-      showToast("Error al rechazar invitación: " + err.message, "error");
+      showToast("Error al rechazar invitación: " + (err.message || String(err)), "error");
     }
   };
 
   const handleAcceptInvitation = async () => {
     if (user && realInvitation) {
       try {
-        const agencyName = `${realInvitation.agency.first_name} ${realInvitation.agency.last_name}`.trim();
-        
-        // 1. Update status to accepted
-        const { data: updatedInv, error: invErr } = await supabase
-          .from("agency_invitations")
-          .update({ status: "accepted" })
-          .eq("id", realInvitation.id)
-          .select();
-
-        if (invErr) throw invErr;
-
-        if (!updatedInv || updatedInv.length === 0) {
-          throw new Error("No se pudo actualizar el estado de la invitación en la base de datos (0 filas afectadas). Esto suele suceder debido a las políticas de Row Level Security (RLS) en la tabla 'agency_invitations'. Por favor, asegúrate de aplicar las políticas correspondientes.");
-        }
-
-        // 2. Insert into agency_members
-        const { error: memberErr } = await supabase
-          .from("agency_members")
-          .insert({
-            agency_id: realInvitation.agency_id,
-            member_id: user.id,
-            member_role: "consultant"
-          });
-        
-        if (memberErr) {
-          if (memberErr.message && memberErr.message.includes("violates row-level security policy")) {
-            throw new Error("No tienes permisos para unirte a la agencia en la base de datos. Por favor, asegúrate de aplicar la política de RLS correspondiente en la tabla 'agency_members'.");
-          }
-          throw memberErr;
-        }
+        const agencyName = `${realInvitation.agency.first_name || ""} ${realInvitation.agency.last_name || ""}`.trim();
+        await ProfileClientService.respondInvitation(realInvitation.id, "accept");
 
         // 3. Update local auth state
         const updated = {
@@ -1779,20 +1412,12 @@ export default function PerfilUsuarioPage() {
         setRealInvitation(null);
 
         // 4. Update Supabase auth user metadata & profiles table
-        await supabase.auth.updateUser({
-          data: {
-            role: "agent",
-            assigned_agency_name: agencyName
-          }
+        await AuthService.updateUser({
+          role: "agent",
+          assigned_agency_name: agencyName
         });
 
-        const { error: dbProfileErr } = await supabase
-          .from("profiles")
-          .update({
-            role: "agent"
-          })
-          .eq("id", user.id);
-        if (dbProfileErr) throw dbProfileErr;
+        await ProfileClientService.updateProfile(user.id, { role: "agent" });
         
         showToast(`¡Invitación aceptada! Ahora eres un asesor consular certificado de ${agencyName}.`, "success");
       } catch (err: any) {
@@ -1812,14 +1437,10 @@ export default function PerfilUsuarioPage() {
         };
         setUser(updated);
         
-        await supabase.auth.updateUser({
-          data: {
-            assigned_agent_id: "agent-7",
-            assigned_agency_name: "Agency with Agent"
-          }
+        await AuthService.updateUser({
+          assigned_agent_id: "agent-7",
+          assigned_agency_name: "Agency with Agent"
         });
-
-        // Assignment is successfully persisted in auth user metadata & local state above
 
         const text = `🏢 Sistema Agency with Agent: Se ha asignado oficialmente al asesor experto Lic. Roberto Castaneda para liderar tu proceso de visado. ¡Hola! Estaré a cargo de tu expediente desde este momento.`;
         const welcomeMsg = {
@@ -1829,22 +1450,18 @@ export default function PerfilUsuarioPage() {
           timestamp: new Date()
         };
 
-        // Persist message via Supabase message client service if enabled
         const localKey = `mock_messages_${user.id}`;
-        if (isSupabaseDbAvailable) {
-          try {
-            await MessageClientService.createMessage({
-              sender: "agent",
-              text,
-              user_id: user.id,
-              agent_id: "agent-7"
-            });
-          } catch (msgErr) {
-            console.error("Failed to persist welcome message to Supabase chat:", msgErr);
-          }
+        try {
+          await MessageClientService.createMessage({
+            sender: "agent",
+            text,
+            user_id: user.id,
+            agent_id: "agent-7"
+          });
+        } catch (msgErr) {
+          console.error("Failed to persist welcome message to chat:", msgErr);
         }
         
-        // Always write to local storage backup for offline consistency
         if (typeof window !== "undefined") {
           localStorage.setItem(localKey, JSON.stringify([welcomeMsg]));
         }
@@ -1869,54 +1486,21 @@ export default function PerfilUsuarioPage() {
       const email = inviteEmailInput.trim().toLowerCase();
       const token = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
       
-      const { error } = await supabase
-        .from("agency_invitations")
-        .insert({
-          agency_id: user.id,
-          email: email,
-          token: token,
-          status: "pending"
-        });
-
-      if (error) throw error;
+      await ProfileClientService.inviteTeamMember({
+        agency_id: user.id,
+        email: email,
+        token: token,
+        status: "pending"
+      });
 
       showToast(`¡Invitación enviada con éxito a ${email}!`, "success");
       setInviteEmailInput("");
       setInviteNameInput("");
       
-      // If we invited ourselves (e.g. for testing purposes), reload invitations
       if (user && user.email.trim().toLowerCase() === email) {
-        let invitationData = null;
-        const { data, error } = await supabase
-          .from("agency_invitations")
-          .select("*, agency:profiles!agency_id(id, first_name, last_name, email, photo_url, phone, bio, location, staff_size)")
-          .eq("email", user.email.trim().toLowerCase())
-          .eq("status", "pending")
-          .gt("expires_at", new Date().toISOString())
-          .maybeSingle();
-
-        if (error) {
-          if (error.message && (error.message.includes("column") || error.code === "P0002")) {
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from("agency_invitations")
-              .select("*, agency:profiles!agency_id(id, first_name, last_name, email)")
-              .eq("email", user.email.trim().toLowerCase())
-              .eq("status", "pending")
-              .gt("expires_at", new Date().toISOString())
-              .maybeSingle();
-
-            if (fallbackError) {
-              console.error("Error loading B2B invitation (fallback):", fallbackError.message);
-            } else if (fallbackData) {
-              invitationData = fallbackData;
-            }
-          }
-        } else if (data) {
-          invitationData = data;
-        }
-
-        if (invitationData) {
-          setRealInvitation(invitationData);
+        const profileRes = await ProfileClientService.getProfile(user.id);
+        if (profileRes?.invitation) {
+          setRealInvitation(profileRes.invitation);
         }
       }
     } catch (err: any) {
@@ -1943,50 +1527,20 @@ export default function PerfilUsuarioPage() {
     setUser(updatedUser);
 
     try {
-      // Also update the database profiles table
-      const profileDataToSave: any = {
-        id: user!.id,
-        email: user!.email,
+      await ProfileClientService.updateProfile(user!.id, {
         first_name: firstName,
         last_name: lastName,
-        updated_at: new Date().toISOString()
-      };
-
-      // Attempt upsert with all details
-      let { error: dbProfileErr } = await supabase
-        .from("profiles")
-        .upsert({
-          ...profileDataToSave,
-          photo_url: user?.photoUrl || null,
-          phone: phone || null
-        });
-
-      if (dbProfileErr && (dbProfileErr.message.includes("column") || dbProfileErr.code === "P0002")) {
-        // Fallback upsert if columns do not exist yet in SQL schema
-        const { error: fallbackErr } = await supabase
-          .from("profiles")
-          .upsert(profileDataToSave);
-        dbProfileErr = fallbackErr;
-      }
-
-      if (dbProfileErr) {
-        console.warn("Could not save profile details to public.profiles table:", dbProfileErr.message);
-      }
-
-      const { error } = await supabase.auth.updateUser({
-        data: {
-          first_name: firstName,
-          last_name: lastName,
-          phone: phone,
-          country: countryCode,
-        }
+        phone: phone || null,
+        photo_url: user?.photoUrl || null,
       });
-      if (error) {
-        console.warn("Could not save profile metadata to Supabase auth:", error.message);
-        showToast("¡Cambios guardados localmente! No se pudo sincronizar en la nube.", "info");
-      } else {
-        showToast("¡Cambios guardados con éxito!", "success");
-      }
+
+      await AuthService.updateUser({
+        first_name: firstName,
+        last_name: lastName,
+        phone: phone,
+        country: countryCode,
+      });
+      showToast("¡Cambios guardados con éxito!", "success");
     } catch (err) {
       console.error("Error saving profile:", err);
       showToast("¡Cambios guardados localmente!", "success");
@@ -2052,16 +1606,11 @@ export default function PerfilUsuarioPage() {
         <div className="w-[80%] mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
           {/* Avatar gigante en el banner (clickable) */}
           <div className="relative group w-20 h-20 bg-brand-light border-4 border-white/20 rounded-full flex items-center justify-center shadow-lg overflow-hidden select-none">
-            {user?.photoUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={user.photoUrl}
-                alt="Foto de Perfil"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span className="text-white font-bold text-3xl">{firstName.charAt(0).toUpperCase()}</span>
-            )}
+            <UserAvatar
+              src={user?.photoUrl}
+              name={firstName + " " + lastName}
+              size="xl"
+            />
             {/* Hover overlay para cambiar foto */}
             <label className="absolute inset-0 bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer text-[9px] font-bold">
               <span className="text-sm">📸</span>
@@ -2079,11 +1628,9 @@ export default function PerfilUsuarioPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5">
               {user?.role === ROLES.ADMIN || user?.role === ROLES.MODERATOR
                 ? "Panel de Administración"
-                : user?.role === ROLES.AGENCY
-                  ? "Panel de Agencia"
-                  : user?.role === ROLES.AGENT
-                    ? "Panel de Asesor"
-                    : "Panel del Aplicante"}
+                : (user?.role === ROLES.AGENT || user?.role === ROLES.AGENCY) && agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at)
+                  ? (user?.role === ROLES.AGENCY ? "Panel de Agencia" : "Panel de Asesor")
+                  : "Panel del Aplicante"}
             </p>
 
             <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
@@ -2127,34 +1674,13 @@ export default function PerfilUsuarioPage() {
                 const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
                 const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
 
-                // --- Tabs for agents / agencies ---
-                if (isAgent) {
-                  const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
-
-                  if (user.role === ROLES.AGENCY) {
-                    return [
-                      { id: "datos", label: "Personalizar Perfil", icon: "👤" },
-                      { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
-                      ...(isAccredited ? [
-                        { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
-                        { id: "invitar_agentes", label: "Link de Referidos", icon: "🔗" },
-                        { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
-                      ] : []),
-                    ];
-                  } else {
-                    return [
-                      { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                      { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
-                      ...(isAccredited ? [
-                        { id: "chat_agente", label: "Chat con Clientes", icon: "💬" },
-                        { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
-                      ] : []),
-                    ];
-                  }
-                }
-
+                const baseUserTabs = [
+                  { id: "datos", label: "Mis Datos Personales", icon: "👤" },
+                  { id: "proceso", label: "Seguimiento de Trámite", icon: "✈️" },
+                  { id: "vipro", label: "Evaluación VIPRO", icon: "📊" },
+                  { id: "asesor", label: "Mi Asesor Asignado", icon: "🤝" },
+                  { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" },
+                ];
 
                 // --- Tabs for admin / moderator ---
                 if (isStaff) {
@@ -2165,18 +1691,32 @@ export default function PerfilUsuarioPage() {
                     { id: "admin_expedientes", label: "Monitor de Expedientes", icon: "📋" },
                     { id: "admin_vipro", label: "Evaluaciones VIPRO", icon: "📈" },
                     { id: "admin_pagos", label: "Historial de Pagos", icon: "💳" },
-                    { id: "datos", label: "Mis Datos Personales", icon: "👤" },
+                    ...baseUserTabs
                   ];
                 }
 
+                // --- Tabs for agents / agencies ---
+                if (isAgent) {
+                  const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
+                  return [
+                    ...baseUserTabs,
+                    { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
+                    ...(isAccredited ? [
+                      ...(user.role === ROLES.AGENCY ? [
+                        { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
+                        { id: "invitar_agentes", label: "Link de Referidos", icon: "🔗" },
+                      ] : [
+                        { id: "chat_agente", label: "Chat con Clientes", icon: "💬" },
+                      ]),
+                      { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
+                      { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
+                    ] : []),
+                  ];
+                }
 
                 // --- Default tabs for regular users ---
                 return [
-                  { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                  { id: "proceso", label: "Seguimiento de Trámite", icon: "✈️" },
-                  { id: "vipro", label: "Evaluación VIPRO", icon: "📊" },
-                  { id: "asesor", label: "Mi Asesor Asignado", icon: "🤝" },
-                  { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" },
+                  ...baseUserTabs,
                   ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio", icon: "💼" }] : []),
                 ];
               })().map((tab: { id: string; label: string; icon: string; isLink?: boolean; url?: string }) => (
@@ -2895,7 +2435,7 @@ export default function PerfilUsuarioPage() {
                         <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
                           <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                             <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                              Paso 5: Programación de Cita y Simulacro Consular por Zoom
+                              Paso 5: Programación de Cita / Entrega Drop Box y Simulacro Consular por Zoom
                             </h4>
                             {expedienteStatus === 'approved' && (
                               <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
@@ -2904,7 +2444,9 @@ export default function PerfilUsuarioPage() {
                             )}
                           </div>
                           <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
-                            Asignación de fechas consulares en CAS / Embajada y entrenamiento de simulacro de entrevista por Zoom. Ponte en contacto con tu asesor por chat para coordinar las fechas de tu sesión en vivo.
+                            <strong>Primera Vez:</strong> Agendamiento de cita en CAS y Embajada con entrenamiento de simulacro por Zoom.<br/>
+                            <strong>Renovación EE.UU. (Interview Waiver):</strong> Depósito de paquete en buzón CAS sin cita presencial ante cónsul (si vence &lt;48 meses).<br/>
+                            <strong>Renovación México / Canadá / Australia / China:</strong> Flujo de cita regular o biométricos asistidos con alta seguridad de aprobación por historial positivo.
                           </p>
                           {expedienteStatus === 'approved' && (
                             <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
@@ -2912,7 +2454,7 @@ export default function PerfilUsuarioPage() {
                                 onClick={() => setActiveTab("asesor")}
                                 className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
                               >
-                                🎥 Colectar Fechas de Simulacro por Chat &rarr;
+                                🎥 Coordinar Fechas / Buzón por Chat &rarr;
                               </button>
                             </div>
                           )}
@@ -2925,9 +2467,9 @@ export default function PerfilUsuarioPage() {
                           6
                         </div>
                         <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                          <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención (Waiver)</h4>
+                          <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención de Entrevista (Drop Box)</h4>
                           <p className="text-xs text-text-muted leading-relaxed">
-                            Asistencia formal a tu cita de huellas/fotografía (CAS) y entrevista con el oficial consular o entrega de expediente físico en caso de renovación sin entrevista.
+                            Presentación formal a tu cita consular oficial (biométricos y entrevista) o entrega del sobre cerrado en buzón de courier para renovaciones sin entrevista de EE.UU.
                           </p>
                         </div>
                       </div>
@@ -3745,9 +3287,9 @@ export default function PerfilUsuarioPage() {
                   </div>
                 </div>
               ) : isLoadingAgencyInfo || isLoadingPartnerApp ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-                  <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-                  <span className="text-xs text-text-secondary font-medium">Cargando detalles de tu acreditación...</span>
+                <div className="space-y-4 py-4 animate-pulse">
+                  <div className="h-32 bg-gray-200 rounded-2xl w-full"></div>
+                  <div className="h-48 bg-gray-100 rounded-2xl w-full"></div>
                 </div>
               ) : partnerApp ? (
                 <div className="animate-fadeIn">
@@ -4682,14 +4224,11 @@ export default function PerfilUsuarioPage() {
                               loadAgentChatMessages(client.client_id);
                               
                               // Load profile information of the client
-                              supabase
-                                .from("profiles")
-                                .select("first_name, last_name, photo_url, bio, phone, location")
-                                .eq("id", client.client_id)
-                                .maybeSingle()
-                                .then(({ data }) => {
-                                  if (data) setSelectedClientProfile(data);
-                                });
+                              ProfileClientService.getProfile(client.client_id)
+                                .then((res) => {
+                                  if (res?.profile) setSelectedClientProfile(res.profile);
+                                })
+                                .catch(() => null);
                             }}
                             className={`w-full text-left p-3 transition-colors focus:outline-none ${
                               selectedClient?.id === client.id
@@ -4698,17 +4237,11 @@ export default function PerfilUsuarioPage() {
                             }`}
                           >
                             <div className="flex items-center gap-2.5">
-                              {client.photo_url ? (
-                                <img
-                                  src={client.photo_url}
-                                  alt={client.client_name || "Cliente"}
-                                  className="w-8 h-8 rounded-full object-cover border border-border-light flex-shrink-0"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs flex-shrink-0">
-                                  {(client.client_name || "?").charAt(0).toUpperCase()}
-                                </div>
-                              )}
+                              <UserAvatar
+                                src={client.photo_url}
+                                name={client.first_name ? `${client.first_name} ${client.last_name || ""}` : client.client_name}
+                                size="sm"
+                              />
                               <div className="min-w-0">
                                 <p className="text-xs font-semibold text-text-primary truncate">
                                   {client.first_name ? `${client.first_name} ${client.last_name || ""}`.trim() : (client.client_name || "Cliente")}
@@ -5400,18 +4933,15 @@ export default function PerfilUsuarioPage() {
                   };
                   setUser(updatedUser);
                   try {
-                    const { error } = await supabase.auth.updateUser({
-                      data: {
-                        ds160_full_name: ds160Data.fullName,
-                        ds160_passport_num: ds160Data.passportNum,
-                        ds160_birth_date: ds160Data.birthDate,
-                        ds160_purpose_of_trip: ds160Data.purposeOfTrip,
-                        ds160_has_assets: ds160Data.hasAssets,
-                        ds160_confirmed: true,
-                        expediente_status: expedienteStatus,
-                      }
+                    await AuthService.updateUser({
+                      ds160_full_name: ds160Data.fullName,
+                      ds160_passport_num: ds160Data.passportNum,
+                      ds160_birth_date: ds160Data.birthDate,
+                      ds160_purpose_of_trip: ds160Data.purposeOfTrip,
+                      ds160_has_assets: ds160Data.hasAssets,
+                      ds160_confirmed: true,
+                      expediente_status: expedienteStatus,
                     });
-                    if (error) console.warn('Could not persist DS-160 to Supabase:', error.message);
                   } catch (err) {
                     console.error('Error saving DS-160:', err);
                   }
@@ -5523,7 +5053,7 @@ export default function PerfilUsuarioPage() {
               </button>
               <button
                 type="button"
-                onClick={handleCropAndUpload}
+                onClick={handleCropSave}
                 disabled={isUploadingAvatar}
                 className="flex-1 px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors shadow-md cursor-pointer disabled:opacity-75 flex items-center justify-center gap-1.5 border-0"
               >

@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { useAuthStore } from "../../store/authStore";
-import supabase from "../../lib/supabase";
+import { AuthService } from "../../service/AuthService";
+import { AgentClientService } from "@/services/client/AgentClientService";
 
 interface Agent {
   id: string;
@@ -50,9 +51,9 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           }
         }
 
-        // Persist to Supabase Auth metadata
+        // Persist to Supabase Auth metadata via API
         try {
-          await supabase.auth.updateUser({ data: updateData });
+          await AuthService.updateUser(updateData);
           console.log("Status successfully saved to Supabase user metadata.");
         } catch (err) {
           console.error("Failed to save status to Supabase:", err);
@@ -61,29 +62,19 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         // ── B2B AGENCY FLOW ──────────────────────────────────────────────────────
         if (product === "advisor" && agent && agent.partnerType === "b2b_agency_entity") {
           try {
-            const { data: agencyProfile } = await supabase
-              .from("profiles")
-              .select("id")
-              .ilike("first_name", `%${agent.agencyName}%`)
-              .single();
-
-            if (agencyProfile?.id) {
-              await supabase.from("agency_client_requests").insert({
-                agency_id: agencyProfile.id,
-                client_id: user.id,
-                client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-                client_email: user.email,
-                status: "pending",
-                service_type: "Full Advisor Concierge",
-                created_at: new Date().toISOString()
-              });
-            }
+            await AgentClientService.createClientRequest({
+              agencyName: agent.agencyName,
+              client_id: user.id,
+              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+              client_email: user.email,
+              service_type: "Full Advisor Concierge",
+            });
           } catch (agencyErr) {
-            console.warn("Notice: agency_client_requests table query:", agencyErr);
+            console.warn("Notice: agency_client_requests API error:", agencyErr);
           }
         }
 
-        // ── COMMISSION LOGGING TO SUPABASE ───────────────────────────────────────
+        // ── COMMISSION LOGGING ───────────────────────────────────────
         if (product === "advisor" && agent?.id) {
           try {
             const agencyRef = typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null;
@@ -101,7 +92,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
             const agentCommissionAmount = amountToPay * commissionRate;
             const todovisaShareAmount = amountToPay - agentCommissionAmount;
 
-            await supabase.from("agent_commissions").insert({
+            await AgentClientService.createCommission({
               agent_id: agencyRef || agent.id,
               client_id: user.id,
               client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
@@ -114,7 +105,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               created_at: new Date().toISOString()
             });
           } catch (commErr) {
-            console.warn("Notice: agent_commissions table insert:", commErr);
+            console.warn("Notice: agent_commissions API error:", commErr);
           }
         }
 

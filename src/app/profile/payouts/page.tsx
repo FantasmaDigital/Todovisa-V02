@@ -5,8 +5,8 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { ROLES } from "../../constants/roles";
+import { AgentClientService } from "@/services/client/AgentClientService";
 
 export default function MetodosCobroPage() {
   const headerRef = useRef(null);
@@ -39,20 +39,15 @@ export default function MetodosCobroPage() {
     setIsMounted(true);
   }, []);
 
-  // Fetch agent application payout settings from Supabase
+  // Fetch agent application payout settings from API
   const loadPayoutSettings = async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("payout_settings")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (data?.payout_settings) {
-        const settings = data.payout_settings as any;
+      const portalRes = await AgentClientService.getPortalData(user.id);
+      const app = portalRes.application;
+      if (app?.payout_settings) {
+        const settings = app.payout_settings as any;
         if (settings.method) setPayoutMethod(settings.method);
         if (settings.paypal_email) setPaypalEmail(settings.paypal_email);
         if (settings.bank_name) setBankName(settings.bank_name);
@@ -95,24 +90,10 @@ export default function MetodosCobroPage() {
     };
 
     try {
-      // Find agent application first to update
-      const { data: appData, error: findError } = await supabase
-        .from("agent_applications")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (findError) throw findError;
-      if (!appData) {
-        throw new Error("No se encontró solicitud de agente activa vinculada a tu cuenta.");
-      }
-
-      const { error: updateError } = await supabase
-        .from("agent_applications")
-        .update({ payout_settings: updatedSettings })
-        .eq("id", appData.id);
-
-      if (updateError) throw updateError;
+      await AgentClientService.updateApplication({
+        userId: user.id,
+        updates: { payout_settings: updatedSettings }
+      });
       showToast("Configuración de pago guardada exitosamente.", "success");
     } catch (err: unknown) {
       console.error("Error saving payout settings:", err);
@@ -163,7 +144,11 @@ export default function MetodosCobroPage() {
           </div>
 
           {loading ? (
-            <p className="text-xs text-text-muted">Cargando configuración de pago...</p>
+            <div className="space-y-4 py-4 animate-pulse">
+              <div className="h-10 bg-gray-200 rounded w-full"></div>
+              <div className="h-10 bg-gray-200 rounded w-full"></div>
+              <div className="h-10 bg-gray-200 rounded w-3/4"></div>
+            </div>
           ) : (
             <form onSubmit={handleSavePayoutSettings} className="space-y-6">
               <div className="space-y-2">

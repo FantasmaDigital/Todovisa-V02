@@ -6,30 +6,15 @@ import { countries } from 'countries-list';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
-import supabase from '../../lib/supabase';
+import { AuthService } from '../../service/AuthService';
 
 // Helper function to handle API call for Google OAuth redirect. 
 const handleGoogleSignUpApi = async (redirectTo: string) => {
     try {
         console.log("Initiating Google Sign-Up flow...");
-        // Reuse the standard google sign-in endpoint as it handles both login and signup contexts in Supabase
-        const response = await fetch('/api/auth/google', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ redirectTo }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Error al intentar registrarse con Google.');
-        }
-
-        const result = await response.json();
+        const result = await AuthService.googleSignIn(redirectTo);
         console.log("Respuesta de la API de Google:", result);
 
-        // CORRECCIÓN DE REDIRECCIÓN: Igual que en el Login
         const urlToRedirect = result.data?.url || result.url;
 
         if (urlToRedirect) {
@@ -101,22 +86,14 @@ export default function SignUpForm() {
         };
 
         try {
-            // NOTE: This assumes an API route handler at /api/auth/signup exists 
-            // to handle manual credential sign-up with Supabase.
-            const response = await fetch('/api/auth/signup', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload),
+            const result = await AuthService.signUp({
+                email: data.Email || '',
+                password: data.Password || '',
+                first_name: data.Nombre || '',
+                last_name: data.Apellido || '',
+                phone: data.Telefono || '',
+                country: data.Pais || '',
             });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Error al registrarse con credenciales.');
-            }
-
-            const result = await response.json();
 
 
             if (result.data?.user) {

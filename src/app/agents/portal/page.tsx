@@ -4,8 +4,10 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useSearchParams, useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
+import { AgentClientService } from "@/services/client/AgentClientService";
+import { MessageClientService } from "@/app/service/MessageClientService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
 
 interface AgentApplication {
   id: string;
@@ -238,18 +240,11 @@ function AgentPortalContent() {
         return;
       }
 
-      const { data, error: fetchErr } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("application_id", cleanId)
-        .single();
+      const portalData = await AgentClientService.getPortalData();
+      const data = portalData.application || portalData.fallbackData;
 
-      if (fetchErr) {
-        throw new Error(
-          fetchErr.code === "PGRST116"
-            ? "No se encontró ninguna postulación con el Folio provisto. Por favor verifique el código."
-            : fetchErr.message
-        );
+      if (!data) {
+        throw new Error("No se encontró ninguna postulación con el Folio provisto. Por favor verifique el código.");
       }
 
       setAgent(data);
@@ -288,22 +283,8 @@ function AgentPortalContent() {
     setLoading(true);
     setError(null);
     try {
-      // 1. Try fetching by user_id
-      let { data } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      // 2. Fallback to email lookup if not found by user_id
-      if (!data && user.email) {
-        const { data: fallbackData } = await supabase
-          .from("agent_applications")
-          .select("*")
-          .eq("email", user.email.toLowerCase())
-          .maybeSingle();
-        data = fallbackData;
-      }
+      const portalRes = await AgentClientService.getPortalData(user.id);
+      let data = portalRes.application || portalRes.fallbackData;
 
       if (data) {
         setAgent(data);
@@ -311,50 +292,35 @@ function AgentPortalContent() {
           setSignatureName(data.full_name);
         }
       } else {
-        // Check if the user is an agent affiliated with a B2B agency
         if (user.role === "agent") {
-          const { data: memberData } = await supabase
-            .from("agency_members")
-            .select("agency_id")
-            .eq("member_id", user.id)
-            .maybeSingle();
-
-          if (memberData && memberData.agency_id) {
-            // Fetch the agency's application
-            const { data: agencyApp } = await supabase
-              .from("agent_applications")
-              .select("*")
-              .eq("user_id", memberData.agency_id)
-              .maybeSingle();
-
-            // Set the agent state, ensuring it is identified as a B2B agent
-            setAgent({
-              ...(agencyApp || {}),
-              id: user.id,
-              user_id: user.id,
-              application_id: agencyApp?.application_id 
-                ? agencyApp.application_id.replace("B2B-", "B2B-AGENT-") 
-                : "B2B-AGENT-" + user.id.slice(0, 8).toUpperCase(),
-              full_name: `${user.firstName} ${user.lastName}`,
-              email: user.email,
-              phone: user.phone || "",
-              country_residence: user.country || "",
-              experience_years: agencyApp?.experience_years || "1",
-              status: "active",
-              created_at: agencyApp?.created_at || new Date().toISOString(),
-              documents: agencyApp?.documents || {},
-              specialties: agencyApp?.specialties || ["Asesoría General"],
-              languages: agencyApp?.languages || ["Español"],
-              target_countries: agencyApp?.target_countries || ["Estados Unidos"],
-              biography: agencyApp?.biography || "Asesor certificado en la red TodoVisa.",
-              signature_name: agencyApp?.signature_name || `${user.firstName} ${user.lastName}`,
-              signed_at: agencyApp?.signed_at || agencyApp?.created_at || new Date().toISOString()
-            });
-            setSignatureName(`${user.firstName} ${user.lastName}`);
-            setLoading(false);
-            return;
-          }
+          const agencyApp = portalRes.agencyApp;
+          setAgent({
+            ...(agencyApp || {}),
+            id: user.id,
+            user_id: user.id,
+            application_id: agencyApp?.application_id 
+              ? agencyApp.application_id.replace("B2B-", "B2B-AGENT-") 
+              : "B2B-AGENT-" + user.id.slice(0, 8).toUpperCase(),
+            full_name: `${user.firstName} ${user.lastName}`,
+            email: user.email,
+            phone: user.phone || "",
+            country_residence: user.country || "",
+            experience_years: agencyApp?.experience_years || "1",
+            status: "active",
+            created_at: agencyApp?.created_at || new Date().toISOString(),
+            documents: agencyApp?.documents || {},
+            specialties: agencyApp?.specialties || ["Asesoría General"],
+            languages: agencyApp?.languages || ["Español"],
+            target_countries: agencyApp?.target_countries || ["Estados Unidos"],
+            biography: agencyApp?.biography || "Asesor certificado en la red TodoVisa.",
+            signature_name: agencyApp?.signature_name || `${user.firstName} ${user.lastName}`,
+            signed_at: agencyApp?.signed_at || agencyApp?.created_at || new Date().toISOString()
+          });
+          setSignatureName(`${user.firstName} ${user.lastName}`);
+          setLoading(false);
+          return;
         }
+      }
 
         // Look up mock data from localstorage as fallback
         const localDataStr = localStorage.getItem(`agent_app_${user.email?.toUpperCase()}`);
@@ -365,7 +331,6 @@ function AgentPortalContent() {
             setSignatureName(localData.full_name);
           }
         }
-      }
     } catch (err) {
       console.error("Error loading agent application by user:", err);
     } finally {
@@ -399,38 +364,25 @@ function AgentPortalContent() {
 
       setLoadingAdvisors(true);
       try {
-        const { data: members, error } = await supabase
-          .from("agency_members")
-          .select("*, profile:member_id(first_name, last_name, email)")
-          .eq("agency_id", targetUserId);
+        const teamData = await ProfileClientService.getTeam(targetUserId);
+        const members = teamData.members || [];
+        const invitations = teamData.invitations || [];
 
-        const { data: invitations } = await supabase
-          .from("agency_invitations")
-          .select("*")
-          .eq("agency_id", targetUserId);
+        setInvitedCount(members.length + invitations.length);
+        setRealMembers(members);
+        setRealInvitations(invitations);
 
-        const membersLength = members ? members.length : 0;
-        const invitationsLength = invitations ? invitations.length : 0;
-
-        setInvitedCount(membersLength + invitationsLength);
-        setRealMembers(members || []);
-        setRealInvitations(invitations || []);
-
-        if (members && members.length > 0) {
-          const memberIds = members.map(m => m.member_id);
-          const { data: commissions } = await supabase
-            .from("agent_commissions")
-            .select("agent_id")
-            .in("agent_id", memberIds);
-
+        if (members.length > 0) {
           const counts: Record<string, number> = {};
-          commissions?.forEach(c => {
-            counts[c.agent_id] = (counts[c.agent_id] || 0) + 1;
-          });
+          for (const m of members) {
+            try {
+              const comms = await ProfileClientService.getCommissions(m.member_id);
+              counts[m.member_id] = comms?.length || 0;
+            } catch (_) {}
+          }
           setMemberCases(counts);
         }
 
-        // Agencies work via referral links now and do not require adding members
         setHasNoAdvisors(false);
 
       } catch (err) {
@@ -453,12 +405,8 @@ function AgentPortalContent() {
 
     const loadClientRequests = async () => {
       try {
-        const { data } = await supabase
-          .from("agency_client_requests")
-          .select("*")
-          .eq("agency_id", agencyUserId)
-          .order("created_at", { ascending: false });
-        setClientRequests(data || []);
+        const portalData = await AgentClientService.getPortalData(agencyUserId);
+        setClientRequests(portalData.clientRequests || []);
       } catch (err) {
         console.error("Error loading client requests:", err);
       }
@@ -474,53 +422,26 @@ function AgentPortalContent() {
     }
     setAssigningRequestId(request.id);
     try {
-      // 1. Update the request row
-      const { error: updErr } = await supabase
-        .from("agency_client_requests")
-        .update({ assigned_member_id: memberId, status: "assigned" })
-        .eq("id", request.id);
-      if (updErr) throw updErr;
-
-      // 2. Get assigned member profile to pass name to client
-      const { data: memberProfile } = await supabase
-        .from("profiles")
-        .select("first_name, last_name, email")
-        .eq("id", memberId)
-        .maybeSingle();
-
-      const memberName = memberProfile
-        ? `${memberProfile.first_name} ${memberProfile.last_name}`.trim()
-        : "Tu asesor asignado";
-
-      // 3. Update the client's auth metadata so the chat gets unlocked
-      //    We use a service-role-capable edge function or RPC here.
-      //    Since we only have anon key on client, we write to a
-      //    temporary flag column via the client's own session is not possible.
-      //    Workaround: store the assignment in client profile row so
-      //    next time they load, they detect it.
-      await supabase
-        .from("profiles")
-        .update({
-          role: "user"   // keep role unchanged — just triggers re-read
-        })
-        .eq("id", request.client_id);
-
-      // 4. Store assignment in a dedicated lookup so the client profile page
-      //    can pick it up without needing a JWT refresh.
-      //    We reuse the profiles table additional fields pattern.
-      //    Write assigned_agent_id into a separate small lookup table
-      //    OR simply write into the client's profile (safest with RLS = agency can't update client's profile directly).
-      //    Best approach: insert a message from the assigned agent to the client.
+      // 1. Get assigned member profile to pass name to client
+      let memberName = "Tu asesor asignado";
       try {
-        await supabase.from("messages").insert({
+        const profileData = await ProfileClientService.getProfile(memberId);
+        if (profileData?.profile) {
+          memberName = `${profileData.profile.first_name || ""} ${profileData.profile.last_name || ""}`.trim();
+        }
+      } catch (_) {}
+
+      // 2. Insert message for client
+      try {
+        await MessageClientService.createMessage({
           user_id: request.client_id,
           agent_id: memberId,
           sender: "agent",
-          text: `¡Hola! Soy ${memberName} de ${request.agency_name}. A partir de ahora estaré a cargo de tu expediente. ¿Por dónde te gustaría comenzar?`
+          text: `¡Hola! Soy ${memberName} de ${request.agency_name || "TodoVisa"}. A partir de ahora estaré a cargo de tu expediente. ¿Por dónde te gustaría comenzar?`
         });
-      } catch (_) { /* messages table might not exist, non-blocking */ }
+      } catch (_) {}
 
-      // 5. Update local state
+      // 3. Update local state
       setClientRequests(prev =>
         prev.map(r => r.id === request.id
           ? { ...r, status: "assigned", assigned_member_id: memberId, assigned_member_name: memberName }
@@ -545,29 +466,23 @@ function AgentPortalContent() {
       if (!targetUserId) return;
       try {
         let agentIds = [targetUserId];
-        
-        // If it's B2B agency, fetch all agency members
         if (agent.application_id?.startsWith("B2B-") && !agent.application_id?.includes("B2B-AGENT-")) {
-          const { data: members } = await supabase
-            .from("agency_members")
-            .select("member_id")
-            .eq("agency_id", targetUserId);
-          if (members && members.length > 0) {
-            agentIds = members.map(m => m.member_id);
+          const teamData = await ProfileClientService.getTeam(targetUserId);
+          if (teamData.members && teamData.members.length > 0) {
+            agentIds = teamData.members.map((m: any) => m.member_id);
           }
         }
 
-        const { data: commissions } = await supabase
-          .from("agent_commissions")
-          .select("service_type")
-          .in("agent_id", agentIds);
-
-        if (commissions) {
-          const tourist = commissions.filter(c => c.service_type === "visa_us" || c.service_type === "visa_uk" || c.service_type === "full_service").length;
-          const student = commissions.filter(c => c.service_type === "vipro").length;
-          setRealTouristCases(tourist);
-          setRealStudentCases(student);
+        let allComms: any[] = [];
+        for (const id of agentIds) {
+          const comms = await ProfileClientService.getCommissions(id);
+          allComms = allComms.concat(comms || []);
         }
+
+        const tourist = allComms.filter(c => c.service_type === "visa_us" || c.service_type === "visa_uk" || c.service_type === "full_service").length;
+        const student = allComms.filter(c => c.service_type === "vipro").length;
+        setRealTouristCases(tourist);
+        setRealStudentCases(student);
       } catch (err) {
         console.error("Error loading commissions stats:", err);
       }
@@ -592,12 +507,10 @@ function AgentPortalContent() {
         setAgent(updated);
         showToast("¡Perfil Aprobado (Local)! Ahora puedes revisar y firmar el contrato legal.", "success");
       } else {
-        const { error: updateErr } = await supabase
-          .from("agent_applications")
-          .update({ status: "approved" })
-          .eq("application_id", agent.application_id);
-
-        if (updateErr) throw new Error(updateErr.message);
+        await AgentClientService.updateApplication({
+          id: agent.id,
+          updates: { status: "approved" },
+        });
 
         setAgent((prev) => (prev ? { ...prev, status: "approved" } : null));
         showToast("¡Perfil Aprobado! Ahora puedes revisar y firmar el contrato legal.", "success");
@@ -637,16 +550,14 @@ function AgentPortalContent() {
         setAgent(updated);
         showToast("¡Contrato Firmado con éxito (Local)! Bienvenido(a) oficialmente a la Red TodoVisa.", "success");
       } else {
-        const { error: updateErr } = await supabase
-          .from("agent_applications")
-          .update({
+        await AgentClientService.updateApplication({
+          id: agent.id,
+          updates: {
             status: "active",
             signature_name: signatureName,
             signed_at: nowString,
-          })
-          .eq("application_id", agent.application_id);
-
-        if (updateErr) throw new Error(updateErr.message);
+          },
+        });
 
         setAgent((prev) =>
           prev
@@ -712,12 +623,10 @@ function AgentPortalContent() {
         setOnboardingSteps(prev => ({ ...prev, payment: true }));
         showToast("¡Método de pago guardado localmente con éxito!", "success");
       } else {
-        const { error: updateErr } = await supabase
-          .from("agent_applications")
-          .update({ payout_settings: updatedSettings })
-          .eq("application_id", agent.application_id);
-
-        if (updateErr) throw new Error(updateErr.message);
+        await AgentClientService.updateApplication({
+          id: agent.id,
+          updates: { payout_settings: updatedSettings },
+        });
 
         setAgent((prev) =>
           prev
@@ -796,9 +705,15 @@ function AgentPortalContent() {
 
         {/* LOADING STATE */}
         {loading && (
-          <div className="py-20 flex flex-col items-center justify-center text-center gap-4">
-            <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-sm text-text-secondary font-medium">Buscando expediente en la base de datos...</span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-pulse">
+            <div className="md:col-span-2 space-y-6">
+              <div className="h-40 bg-gray-200 rounded-xl w-full"></div>
+              <div className="h-64 bg-gray-200 rounded-xl w-full"></div>
+            </div>
+            <div className="md:col-span-1 space-y-6">
+              <div className="h-48 bg-gray-200 rounded-xl w-full"></div>
+              <div className="h-48 bg-gray-200 rounded-xl w-full"></div>
+            </div>
           </div>
         )}
 
@@ -1742,10 +1657,11 @@ function AgentPortalContent() {
 export default function AgentPortalPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen w-full flex items-center justify-center bg-background-main">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-text-secondary font-medium">Cargando portal de contratos...</span>
+      <div className="min-h-screen w-full bg-background-main p-8 animate-pulse space-y-6">
+        <div className="h-32 bg-gray-200 rounded-2xl w-full"></div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 h-96 bg-gray-200 rounded-2xl"></div>
+          <div className="md:col-span-1 h-96 bg-gray-200 rounded-2xl"></div>
         </div>
       </div>
     }>

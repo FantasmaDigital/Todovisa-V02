@@ -5,7 +5,7 @@ import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
-import supabase from "../lib/supabase";
+import { FormClientService } from "@/services/client/FormClientService";
 import { VIPROQuestionsUSA, VIPROInfoUSA } from "../constants/vipro/usa.vipro";
 import { VIPROQuestionsUK, VIPROInfoUK } from "../constants/vipro/uk.vipro";
 
@@ -43,6 +43,7 @@ function PreformularioContent() {
     const [headerHeight, setHeaderHeight] = useState<number | null>(null);
     const [started, setStarted] = useState(false);
     const [selectedCountryCode, setSelectedCountryCode] = useState<string>("US");
+    const [intakeType, setIntakeType] = useState<"first" | "renewal">("first");
     const [intakeVisaClass, setIntakeVisaClass] = useState<"turismo" | "estudios" | "trabajo" | "transito" | "">("");
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -76,7 +77,7 @@ function PreformularioContent() {
         }
     }, [searchParams]);
 
-    // Load active progress from localStorage or Supabase
+    // Load active progress from localStorage or API
     useEffect(() => {
         if (!user) return;
         
@@ -84,16 +85,8 @@ function PreformularioContent() {
             const targetUserId = searchParams.get("userId") || searchParams.get("user_id");
             const effectiveUserId = targetUserId || user.id;
 
-            // Check if already completed first to lock the form
             try {
-                const { data: dbCompleted } = await supabase
-                    .from("preformularios")
-                    .select("*")
-                    .eq("user_id", effectiveUserId)
-                    .order("created_at", { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
+                const dbCompleted = await FormClientService.getPreformulario(effectiveUserId);
                 if (dbCompleted?.answers) {
                     setAnswers(dbCompleted.answers);
                     if (dbCompleted.intake_visa_class) {
@@ -117,17 +110,9 @@ function PreformularioContent() {
             let savedStep = 0;
             let hasSavedProgress = false;
 
-            // 1. Try to load from Supabase 'preformularios' table first
             try {
-                const { data: dbProgress, error } = await supabase
-                    .from("preformularios")
-                    .select("*")
-                    .eq("user_id", effectiveUserId)
-                    .order("created_at", { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                if (!error && dbProgress && dbProgress.answers) {
+                const dbProgress = await FormClientService.getPreformulario(effectiveUserId);
+                if (dbProgress && dbProgress.answers) {
                     savedAnswers = dbProgress.answers;
                     savedStep = dbProgress.current_step || 0;
                     hasSavedProgress = true;
@@ -247,45 +232,20 @@ function PreformularioContent() {
         if (intakeVisaClass) localStorage.setItem(`preform_progress_intake_visa_${selectedCountryCode}_${user.id}`, intakeVisaClass);
 
         try {
-            // Save draft progress to Supabase
-            const { data: existing } = await supabase
-                .from("preformularios")
-                .select("id")
-                .eq("user_id", user.id)
-                .eq("destination_country", selectedCountryCode)
-                .eq("is_completed", false)
-                .maybeSingle();
-
-            if (existing) {
-                await supabase
-                    .from("preformularios")
-                    .update({
-                        answers: newAnswers,
-                        current_step: step,
-                        is_completed: false,
-                        intake_type: "first",
-                        intake_visa_class: intakeVisaClass || 'turismo',
-                        interview_waiver_eligible: false
-                    })
-                    .eq("id", existing.id);
-            } else {
-                await supabase
-                    .from("preformularios")
-                    .insert([
-                        {
-                            user_id: user.id,
-                            destination_country: selectedCountryCode,
-                            answers: newAnswers,
-                            current_step: step,
-                            is_completed: false,
-                            intake_type: "first",
-                            intake_visa_class: intakeVisaClass || 'turismo',
-                            interview_waiver_eligible: false
-                        }
-                    ]);
-            }
+            await FormClientService.savePreformulario({
+                userId: user.id,
+                formData: {
+                    answers: newAnswers,
+                    destination_country: selectedCountryCode,
+                    intake_type: "first",
+                    intake_visa_class: intakeVisaClass || 'turismo',
+                    interview_waiver_eligible: false
+                },
+                currentStep: step,
+                isCompleted: false
+            });
         } catch (err) {
-            console.error("Error auto-saving progress to Supabase preformularios:", err);
+            console.error("Error auto-saving progress to preformularios:", err);
         }
     };
 
@@ -357,41 +317,18 @@ function PreformularioContent() {
                 localStorage.removeItem(`preform_progress_answers_${selectedCountryCode}_${user.id}`);
                 localStorage.removeItem(`preform_progress_step_${selectedCountryCode}_${user.id}`);
                 
-                // Save completed form status to Supabase
-                const { data: existing } = await supabase
-                    .from("preformularios")
-                    .select("id")
-                    .eq("user_id", user.id)
-                    .eq("destination_country", selectedCountryCode)
-                    .eq("is_completed", false)
-                    .maybeSingle();
-
-                if (existing) {
-                    await supabase
-                        .from("preformularios")
-                        .update({
-                            answers: answers,
-                            is_completed: true,
-                            intake_type: "first",
-                            intake_visa_class: intakeVisaClass || 'turismo',
-                            interview_waiver_eligible: false
-                        })
-                        .eq("id", existing.id);
-                } else {
-                    await supabase
-                        .from("preformularios")
-                        .insert([
-                            {
-                                user_id: user.id,
-                                destination_country: selectedCountryCode,
-                                answers: answers,
-                                is_completed: true,
-                                intake_type: "first",
-                                intake_visa_class: intakeVisaClass || 'turismo',
-                                interview_waiver_eligible: false
-                            }
-                        ]);
-                }
+                await FormClientService.savePreformulario({
+                    userId: user.id,
+                    formData: {
+                        answers: answers,
+                        destination_country: selectedCountryCode,
+                        intake_type: "first",
+                        intake_visa_class: intakeVisaClass || 'turismo',
+                        interview_waiver_eligible: false
+                    },
+                    currentStep: currentStep,
+                    isCompleted: true
+                });
 
                 setCompleted(true);
             } catch (err) {
@@ -448,6 +385,44 @@ function PreformularioContent() {
                             </div>
                         </div>
 
+                        {/* Modalidad de Trámite Selector */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">Modalidad del Trámite</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setIntakeType("first")}
+                                    className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                        intakeType === "first"
+                                            ? "border-brand-primary bg-brand-light/30 ring-1 ring-brand-primary font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/30"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🌟</span>
+                                        <p className="text-sm font-bold text-text-primary">Primera Vez (Solicitud Inicial)</p>
+                                    </div>
+                                    <p className="text-[10px] text-text-secondary leading-relaxed mt-1">Nunca has tenido una visa emitida previamente para este país.</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setIntakeType("renewal")}
+                                    className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                        intakeType === "renewal"
+                                            ? "border-brand-primary bg-brand-light/30 ring-1 ring-brand-primary font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/30"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🔄</span>
+                                        <p className="text-sm font-bold text-text-primary">Renovación de Visa</p>
+                                    </div>
+                                    <p className="text-[10px] text-text-secondary leading-relaxed mt-1">Posees o has poseído anteriormente una visa de esta categoría para este país.</p>
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Visa Class Selector directly on Welcome Screen */}
                         <div className="space-y-3">
                             <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">Tipo de Visado Objetivo</label>
@@ -475,16 +450,42 @@ function PreformularioContent() {
                             </div>
                         </div>
 
-                        {/* Informative Box for Renewal */}
-                        <div className="bg-blue-50/40 border border-blue-200/50 rounded-2xl p-6 text-left flex items-start gap-4 shadow-sm">
-                            <span className="text-2xl mt-0.5">💡</span>
-                            <div className="flex flex-col gap-1">
-                                <span className="text-base font-serif font-semibold text-blue-900 italic">¿Trámite de Renovación?</span>
-                                <p className="text-xs text-text-secondary leading-relaxed">
-                                    Si ya posees o has tenido una visa anteriormente para este país y deseas realizar una renovación, <strong>no necesitas contratar planes ni completar este preformulario</strong>. Las renovaciones de visa son directas. Por favor, comunícate con nuestro equipo de asistencia para guiarte en tu renovación.
-                                </p>
+                        {/* Informative Expert Consular Guidance for Renewal */}
+                        {intakeType === "renewal" && (
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6 text-left flex items-start gap-4 shadow-sm animate-in fade-in duration-300">
+                                <span className="text-3xl">🏛️</span>
+                                <div className="flex flex-col gap-1.5">
+                                    <span className="text-sm font-bold text-blue-950 uppercase tracking-wide">
+                                        Orientación Consular Experta — Renovación {countryEmoji} {countryName}
+                                    </span>
+                                    {selectedCountryCode === "US" ? (
+                                        <p className="text-xs text-blue-900 leading-relaxed">
+                                            <strong>Programa de Exención de Entrevista (Interview Waiver - Drop Box):</strong> Si tu visa B1/B2 anterior expiró dentro de los últimos <strong>48 meses</strong> (o sigue vigente) y fue emitida después de cumplir 14 años, calificas preliminarmente para renovar <strong>sin entrevista consular presencial</strong>. Solo requerirás entregar tu pasaporte y fotos en el Centro de Atención a Solicitantes (CAS). En caso contrario o por inspección aleatoria, agendaremos tu cita presencial regular.
+                                        </p>
+                                    ) : selectedCountryCode === "MX" ? (
+                                        <p className="text-xs text-blue-900 leading-relaxed">
+                                            <strong>Proceso de Renovación México:</strong> La renovación requiere completar la solicitud y acudir a la cita consular presencial al igual que la primera vez. Sin embargo, contar con un pasaporte con visas mexicanas previas respetadas brinda un <strong>perfil de muy alta confianza consular</strong>, garantizando una evaluación prioritaria y máxima probabilidad de aprobación.
+                                        </p>
+                                    ) : selectedCountryCode === "CA" ? (
+                                        <p className="text-xs text-blue-900 leading-relaxed">
+                                            <strong>Proceso de Renovación Canadá (TRV / eTA):</strong> Se tramita digitalmente en el Portal IRCC. Poseer un historial previo de cumplimiento en Canadá demuestra una solvencia sólida y apego a tu país de origen, lo cual agiliza la revisión y emisión de tu nueva visa de residencia temporal.
+                                        </p>
+                                    ) : selectedCountryCode === "AU" ? (
+                                        <p className="text-xs text-blue-900 leading-relaxed">
+                                            <strong>Proceso de Renovación Australia (Subclass 600):</strong> Tramitación digital vía ImmiAccount. Tu historial de viaje previo sitúa tu expediente en la categoría de <strong>Bajo Riesgo Migratorio (Low-Risk Profile)</strong>, acelerando el otorgamiento de tu visa electrónica.
+                                        </p>
+                                    ) : selectedCountryCode === "CN" ? (
+                                        <p className="text-xs text-blue-900 leading-relaxed">
+                                            <strong>Proceso de Renovación China (L/M):</strong> Requiere formulario COVA y entrega de pasaporte. Al poseer visados chinos anteriores en tu pasaporte, la verificación consular es fluida y altamente confiable.
+                                        </p>
+                                    ) : (
+                                        <p className="text-xs text-blue-900 leading-relaxed">
+                                            Tu historial previo de viaje y cumplimiento consular a {countryName} acelera el cotejo de datos y garantiza un acompañamiento experto personalizado.
+                                        </p>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div className="bg-background-main p-6 rounded-2xl border border-border-light flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div className="text-left">
@@ -494,14 +495,14 @@ function PreformularioContent() {
                             <button 
                                 disabled={!intakeVisaClass}
                                 onClick={() => {
-                                    localStorage.setItem(`preform_progress_intake_type_${selectedCountryCode}_${user.id}`, "first");
-                                    localStorage.setItem(`preform_progress_intake_visa_${selectedCountryCode}_${user.id}`, intakeVisaClass);
+                                    localStorage.setItem(`preform_progress_intake_type_${selectedCountryCode}_${user?.id || 'guest'}`, intakeType);
+                                    localStorage.setItem(`preform_progress_intake_visa_${selectedCountryCode}_${user?.id || 'guest'}`, intakeVisaClass);
                                     saveEvaluationProgress(answers, currentStep);
                                     setStarted(true);
                                 }}
                                 className="w-full sm:w-auto bg-brand-primary disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-8 py-4 rounded-xl hover:bg-brand-hover transition-colors shadow-md text-lg cursor-pointer"
                             >
-                                Empezar Preformulario →
+                                Empezar Preformulario ({intakeType === 'renewal' ? 'Renovación' : 'Primera Vez'}) →
                             </button>
                         </div>
                     </div>
@@ -670,10 +671,12 @@ function PreformularioContent() {
 export default function PreformularioPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen w-full flex items-center justify-center bg-background-main">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-text-secondary font-medium">Cargando preformulario...</span>
+            <div className="min-h-screen w-full bg-background-main p-8 animate-pulse flex justify-center items-center">
+                <div className="max-w-3xl w-full bg-white rounded-3xl p-10 border border-border-light space-y-6">
+                    <div className="h-8 bg-gray-200 rounded w-2/3"></div>
+                    <div className="h-4 bg-gray-100 rounded w-full"></div>
+                    <div className="h-4 bg-gray-100 rounded w-5/6"></div>
+                    <div className="h-40 bg-gray-100 rounded-2xl w-full"></div>
                 </div>
             </div>
         }>

@@ -35,24 +35,30 @@ export default function Home() {
           <div className="w-full h-full grid grid-cols-1 md:grid-cols-3 gap-6">
 
             <HeroCard
-              eyebrow="FORMULARIO VIPRO"
-              title="¿Listo para tu visa?"
-              description="Conoce tu preparación actual. Te guiaremos en cada paso y al completar la evaluación, recibirás un 25% de descuento en tu asesoría."
+              eyebrow="DIAGNÓSTICO CONSULAR VIPRO"
+              title="Scoring de Viabilidad ($19.99 USD)"
+              description="Evalúa tu solvencia y lazos de arraigo (EE.UU., Canadá, Australia, UK) por primera vez o renovación. Obtén un 25% de descuento directo en tu asesoría integral."
               imageSrc="/images/viproform.webp"
+              linkUrl="/vipro-form"
+              buttonText="Diagnóstico VIPRO ($19.99) →"
             />
 
             <HeroCard
-              eyebrow="ESTADOS UNIDOS"
-              title="Tu destino soñado"
-              description="Haz realidad tu viaje. Gestionamos tu visado americano de turismo, estudio o trabajo con la asesoría de los mejores expertos."
+              eyebrow="PRIMERA VEZ Y RENOVACIONES"
+              title="Trámites de Visado Asistidos"
+              description="Gestionamos tu visa para Estados Unidos (Drop Box Waiver), México, Canadá, Australia y el Reino Unido con rigor documental y máxima efectividad."
               imageSrc="/images/estadosunidos.webp"
+              linkUrl="/preformulario"
+              buttonText="Iniciar Trámite de Visa →"
             />
 
             <HeroCard
-              eyebrow="SOPORTE CONTINUO"
-              title="Asesoría en todo momento"
-              description="Tu trámite en manos seguras. Elige a tu agente ideal y cuenta con su respaldo directo para resolver cualquier duda hasta el día de tu entrevista."
+              eyebrow="RED DE ASESORES CERTIFICADOS"
+              title="Acompañamiento 1-a-1 Experto"
+              description="Selecciona a tu agente especializado para la elaboración de tu DS-160, auditoría de expediente y simulacros intensivos de entrevista presencial por Zoom."
               imageSrc="/images/virtual-agent.webp"
+              linkUrl="/agents"
+              buttonText="Conocer Red de Asesores →"
             />
 
           </div>
@@ -71,23 +77,29 @@ export default function Home() {
         <AgentNetwork />
 
         {/* tu tranquilidad */}
-        <section className="w-full bg-brand-light py-20">
-          <div className="flex flex-col items-center justify-center text-center text-text-primary p-4 max-w-4xl mx-auto">
-            <h2 className="text-4xl md:text-5xl lg:text-[5vw] font-serif italic font-medium mb-6 text-brand-primary">
-              Tu tranquilidad es nuestro compromiso
+        <section className="w-full bg-gradient-to-r from-brand-light/60 via-white to-brand-light/60 py-20 border-y border-border-light/40">
+          <div className="flex flex-col items-center justify-center text-center text-text-primary p-4 max-w-4xl mx-auto space-y-4">
+            <span className="text-xs font-bold uppercase tracking-widest text-brand-primary bg-brand-light px-3.5 py-1 rounded-full border border-brand-primary/20">
+              Compromiso TodoVisa
+            </span>
+            <h2 className="text-4xl md:text-5xl lg:text-[4vw] font-serif italic font-semibold text-brand-primary leading-tight">
+              Tu tranquilidad es nuestro compromiso.
             </h2>
-            <h3 className="text-xl md:text-2xl font-semibold mb-2">
-              Detrás de cada visa aprobada hay una historia de éxito.
+            <h3 className="text-lg md:text-xl font-medium text-text-primary">
+              Detrás de cada visa aprobada hay un expediente preparado con rigor.
             </h3>
-            <p className="text-base md:text-lg text-text-secondary max-w-2xl mb-8">
+            <p className="text-sm md:text-base text-text-secondary max-w-2xl leading-relaxed">
               Nuestros expertos transforman procesos complejos en pasos claros para que tú solo te preocupes por hacer las maletas.
             </p>
-            <button className="group flex items-center justify-center gap-2 bg-white border border-brand-primary text-brand-primary font-semibold px-8 py-3 rounded-sm hover:bg-brand-primary hover:text-white transition-all duration-300 text-sm uppercase tracking-wider shadow-sm focus:outline-none">
-              <span>Agenda una cita</span>
-              <span className="transition-transform duration-300 group-hover:translate-x-1 font-bold flex justify-center items-center">
-                &rarr;
-              </span>
-            </button>
+            <div className="pt-2">
+              <a
+                href="/citas"
+                className="inline-flex items-center gap-3 bg-brand-primary hover:bg-brand-hover text-white font-bold px-8 py-3.5 rounded-lg transition-all duration-300 text-sm shadow-md cursor-pointer border-none"
+              >
+                <span>Agenda una Cita Consular</span>
+                <span className="text-base">→</span>
+              </a>
+            </div>
           </div>
         </section>
 

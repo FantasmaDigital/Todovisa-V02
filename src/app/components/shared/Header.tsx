@@ -2,9 +2,11 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { UserAvatar } from "./UserAvatar"
 import { useState, useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
-import supabase from "@/app/lib/supabase"
+import { AuthService } from "@/app/service/AuthService"
+import { ProfileClientService } from "@/services/client/ProfileClientService"
 import { ROLES } from "@/app/constants/roles"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
@@ -33,13 +35,16 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
         const syncSession = async () => {
             if (!user) {
                 try {
-                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+                    const userRes = await AuthService.getUser().catch(() => null);
+                    const supabaseUser = userRes?.data?.user;
                     if (supabaseUser) {
-                        const { data: profileData } = await supabase
-                            .from("profiles")
-                            .select("role")
-                            .eq("id", supabaseUser.id)
-                            .maybeSingle();
+                        let profileRole = null;
+                        try {
+                            const profileRes = await ProfileClientService.getProfile(supabaseUser.id);
+                            profileRole = profileRes?.profile?.role;
+                        } catch (pErr) {
+                            console.warn("Could not fetch profile role:", pErr);
+                        }
 
                         const metadata = supabaseUser.user_metadata || {};
                         const updatedUser = {
@@ -54,7 +59,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                             viproDestination: metadata.vipro_destination || null,
                             hasPaidAdvisor: metadata.has_paid_advisor || false,
                             assignedAgentId: metadata.assigned_agent_id || null,
-                            photoUrl: metadata.photo_url || metadata.avatar_url || null,
+                            photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
                             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
                             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
                             ds160FullName: metadata.ds160_full_name || null,
@@ -64,7 +69,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                             ds160HasAssets: metadata.ds160_has_assets ?? true,
                             ds160Confirmed: metadata.ds160_confirmed || false,
                             expedienteStatus: metadata.expediente_status || 'draft',
-                            role: (profileData?.role as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
+                            role: (profileRole as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
                         };
                         useAuthStore.getState().setUser(updatedUser);
                     }
@@ -86,7 +91,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                 <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-main transition-opacity duration-300 ${isMounted ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                 </div>
             )}
-            <header ref={headerRef} className="w-full bg-background-main sticky top-0 z-50 flex flex-col justify-center border-b border-border-light/50">
+            <header ref={headerRef} className="w-full bg-background-main sticky top-0 z-50 flex flex-col justify-center">
                 {/* Promo Banner */}
                 <div className="bg-brand-primary w-full p-2.5 flex justify-center font-bold text-white text-xs md:text-sm text-center">
                     {userData?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))) ? (
@@ -230,18 +235,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-brand-dark font-bold text-sm">{userData.firstName + " " + userData.lastName}</span>
                                                 <span className="text-brand-primary font-semibold text-xs">{userData.email}</span>
                                             </div>
-                                            <div className="w-11 h-11 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/10 group-hover:border-brand-primary/30 transition-colors overflow-hidden">
-                                                {userData.photoUrl ? (
-                                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                                    <img
-                                                        src={userData.photoUrl}
-                                                        alt="Avatar"
-                                                        className="w-full h-full object-cover"
-                                                    />
-                                                ) : (
-                                                    <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
-                                                )}
-                                            </div>
+                                            <UserAvatar
+                                                src={userData.photoUrl}
+                                                name={userData.firstName + " " + userData.lastName}
+                                                size="md"
+                                            />
                                         </button>
 
                                         {/* User Dropdown */}
@@ -259,7 +257,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             </Link>
                                             <button
                                                 onClick={async () => {
-                                                    await supabase.auth.signOut();
+                                                    await AuthService.signOut();
                                                     useAuthStore.getState().clearUser();
                                                     window.location.href = "/";
                                                 }}
@@ -380,7 +378,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                         <button
                                             onClick={async () => {
                                                 setIsMenuOpen(false);
-                                                await supabase.auth.signOut();
+                                                await AuthService.signOut();
                                                 useAuthStore.getState().clearUser();
                                                 window.location.href = "/";
                                             }}

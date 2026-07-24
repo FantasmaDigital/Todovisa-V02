@@ -44,6 +44,10 @@
    RESETEO BASE
    ========================================= */
 @layer base {
+  *, ::before, ::after {
+    border-color: var(--color-border-light);
+  }
+
   body {
     background-color: var(--color-background-main);
     color: var(--color-text-primary);
@@ -54,9 +58,10 @@
     padding: 0;
   }
 
-  /* Eliminar outlines por defecto y usar el borde de focus personalizado sin volumen */
-  input:focus, button:focus, textarea:focus, select:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--color-background-main), 0 0 0 4px var(--color-border-focus);
+  /* Eliminar líneas azules / outlines al hacer clic en todo el sitio */
+  input:focus, button:focus, textarea:focus, select:focus, a:focus,
+  input:focus-visible, button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
   }
 }

@@ -5,8 +5,8 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { ROLES } from "../../constants/roles";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
 
 interface AgencyMember {
   id: string;
@@ -59,38 +59,19 @@ export default function MiEquipoPage() {
     setIsMounted(true);
   }, []);
 
-  // Fetch agency team members
-  const loadAgencyMembers = async () => {
+  // Fetch agency team members & invitations
+  const loadAgencyTeamData = async () => {
     if (!user || user.role !== ROLES.AGENCY) return;
     setIsLoadingMembers(true);
-    try {
-      const { data, error } = await supabase
-        .from("agency_members")
-        .select("*, profile:member_id(first_name, last_name, email)")
-        .eq("agency_id", user.id);
-      if (error) throw error;
-      setAgencyMembers(data || []);
-    } catch (err) {
-      console.error("Error fetching agency members:", err);
-    } finally {
-      setIsLoadingMembers(false);
-    }
-  };
-
-  // Fetch agency invitations
-  const loadAgencyInvitations = async () => {
-    if (!user || user.role !== ROLES.AGENCY) return;
     setIsLoadingInvitations(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_invitations")
-        .select("*")
-        .eq("agency_id", user.id);
-      if (error) throw error;
-      setAgencyInvitations(data || []);
+      const teamData = await ProfileClientService.getTeam(user.id);
+      setAgencyMembers(teamData.members || []);
+      setAgencyInvitations(teamData.invitations || []);
     } catch (err) {
-      console.error("Error fetching agency invitations:", err);
+      console.error("Error fetching agency team data:", err);
     } finally {
+      setIsLoadingMembers(false);
       setIsLoadingInvitations(false);
     }
   };
@@ -101,8 +82,7 @@ export default function MiEquipoPage() {
         router.push("/profile");
         return;
       }
-      loadAgencyMembers();
-      loadAgencyInvitations();
+      loadAgencyTeamData();
     }
   }, [isMounted, user?.id]);
 
@@ -121,21 +101,17 @@ export default function MiEquipoPage() {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7); // 7 days validity
 
-      const { error } = await supabase
-        .from("agency_invitations")
-        .insert({
-          agency_id: user.id,
-          email: inviteEmail.trim().toLowerCase(),
-          token,
-          expires_at: expiresAt.toISOString(),
-          status: "pending"
-        });
-
-      if (error) throw error;
+      await ProfileClientService.inviteTeamMember({
+        agency_id: user.id,
+        email: inviteEmail.trim().toLowerCase(),
+        token,
+        expires_at: expiresAt.toISOString(),
+        status: "pending"
+      });
 
       showToast(`Invitación generada para ${inviteEmail.trim()}`, "success");
       setInviteEmail("");
-      loadAgencyInvitations();
+      loadAgencyTeamData();
     } catch (err: unknown) {
       console.error("Error inviting consultant:", err);
       const msg = err instanceof Error ? err.message : String(err);

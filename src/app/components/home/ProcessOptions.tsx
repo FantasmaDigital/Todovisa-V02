@@ -89,10 +89,10 @@ export const ProcessSection = () => {
             <button 
               key={key}
               onClick={() => setActive(key)}
-              className={`flex items-center px-8 py-3.5 rounded-full text-lg font-medium transition-all duration-200 ${
+              className={`flex items-center px-8 py-3.5 rounded-full text-base md:text-lg font-bold transition-all duration-300 cursor-pointer border-none ${
                 isActive 
-                  ? 'bg-[#e1f0ff] text-gray-900 shadow-sm' 
-                  : 'bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                  ? 'bg-brand-primary text-white shadow-lg scale-105' 
+                  : 'bg-white text-gray-600 hover:text-gray-900 hover:bg-brand-light/50 border border-border-light'
               }`}
             >
               {processOptions[key as keyof typeof processOptions].icon}
@@ -105,23 +105,27 @@ export const ProcessSection = () => {
       <div className="relative max-w-6xl mx-auto mt-12">
         
         {/* Línea punteada de fondo */}
-        <div className="absolute top-[6px] left-[16.6%] right-[16.6%] h-[2px] border-t-[2px] border-dashed border-gray-300 -z-10 hidden md:block"></div>
+        <div className="absolute top-[6px] left-[16.6%] right-[16.6%] h-[2px] border-t-[2px] border-dashed border-brand-primary/20 -z-10 hidden md:block"></div>
         
         <div className="flex flex-col md:flex-row justify-between relative z-10 gap-12 md:gap-8">
           {processOptions[active as keyof typeof processOptions].steps.map((step, index) => (
-            <div key={index} className="flex flex-col items-center w-full md:w-1/3 px-4">
+            <div
+              key={`${active}-step-${index}`}
+              className="flex flex-col items-center w-full md:w-1/3 px-4 animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
+              style={{ animationDelay: `${index * 120}ms`, animationFillMode: 'both' }}
+            >
               
-              <div className="w-3.5 h-3.5 bg-gray-300 rounded-full mb-10 hidden md:block ring-[6px] ring-white"></div>
+              <div className="w-4 h-4 bg-brand-primary rounded-full mb-10 hidden md:block ring-[6px] ring-white shadow-xs"></div>
               
-              <h3 className="text-2xl font-bold text-gray-900 mb-8">
+              <h3 className="text-2xl font-bold text-gray-900 mb-6 font-serif">
                 {timeLabels[index]}
               </h3>
               
-              <div className="bg-[#e1f0ff] px-8 py-10 rounded-2xl w-full max-w-[360px] min-h-[180px] flex flex-col items-center justify-center text-center shadow-sm transition-all">
+              <div className="bg-[#EFF6FF] border border-brand-primary/10 px-8 py-10 rounded-2xl w-full max-w-[360px] min-h-[200px] flex flex-col items-center justify-center text-center shadow-xs hover:shadow-md hover:-translate-y-1.5 transition-all duration-300">
                 <h4 className="text-[19px] font-bold text-gray-900 mb-3 leading-snug">
                   {step.title}
                 </h4>
-                <p className="text-base font-medium text-gray-700 leading-relaxed">
+                <p className="text-sm font-medium text-gray-600 leading-relaxed">
                   {step.description}
                 </p>
               </div>
@@ -132,12 +136,15 @@ export const ProcessSection = () => {
       </div>
 
       {/* Plan Details Card */}
-      <div className="max-w-3xl mx-auto mt-20 bg-white border border-border-light rounded-3xl p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-center gap-8 animate-fadeIn">
+      <div
+        key={`${active}-plan-details`}
+        className="max-w-3xl mx-auto mt-20 bg-white border border-border-light rounded-3xl p-8 md:p-12 shadow-sm flex flex-col md:flex-row items-center gap-8 animate-in fade-in-0 slide-in-from-bottom-3 duration-500"
+      >
         <div className="flex-1 space-y-4 text-center md:text-left">
-          <span className="inline-block text-xs font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+          <span className="inline-block text-xs font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3.5 py-1 rounded-full border border-brand-primary/20">
             {planInfo[active as keyof typeof planInfo].promo}
           </span>
-          <h4 className="text-2xl font-bold text-gray-900 font-serif italic">
+          <h4 className="text-2xl md:text-3xl font-bold text-gray-900 font-serif italic">
             {processOptions[active as keyof typeof processOptions].title}
           </h4>
           <p className="text-sm text-gray-600 leading-relaxed max-w-md">
@@ -146,14 +153,14 @@ export const ProcessSection = () => {
         </div>
         <div className="flex flex-col items-center md:items-end justify-center gap-4 flex-shrink-0 w-full md:w-auto">
           <div className="text-center md:text-right">
-            <p className="text-3xl font-black text-gray-900">
+            <p className="text-3xl font-black text-brand-primary font-mono">
               {planInfo[active as keyof typeof planInfo].price}
             </p>
-            <p className="text-xs text-gray-400">Pago único y seguro</p>
+            <p className="text-xs text-gray-400 font-medium">Pago único y transparente</p>
           </div>
           <button
             onClick={planInfo[active as keyof typeof planInfo].action}
-            className="w-full md:w-auto px-8 py-3.5 bg-brand-primary text-white font-bold text-sm rounded-xl hover:bg-brand-hover shadow-md hover:shadow-lg transition-all focus:outline-none cursor-pointer text-center"
+            className="w-full md:w-auto px-8 py-3.5 bg-brand-primary text-white font-bold text-sm rounded-xl hover:bg-brand-hover shadow-md hover:shadow-lg transition-all focus:outline-none cursor-pointer text-center border-none"
           >
             {planInfo[active as keyof typeof planInfo].buttonText}
           </button>

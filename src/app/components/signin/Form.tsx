@@ -3,41 +3,22 @@
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-// Removed AuthService dependency as logic is moved to API routes
+import { AuthService } from '../../service/AuthService';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
-import supabase from '../../lib/supabase';
 
 // Helper function to handle API call for Google OAuth redirect. 
 // It redirects the user by calling a dedicated /api/auth/google endpoint.
 const handleGoogleSignInApi = async (redirectTo: string) => {
     try {
         console.log("Initiating Google Sign-In flow...");
-        // Call the dedicated API route that handles Supabase OAuth flow
-        const response = await fetch('/api/auth/google', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ redirectTo }),
-        });
-
-        if (!response.ok) {
-            // Read and throw error from the API route handler
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Error al intentar iniciar sesión con Google.');
-        }
-
-        const result = await response.json();
+        const result = await AuthService.googleSignIn(redirectTo);
         console.log("Respuesta de la API de Google:", result);
 
-        // CORRECCIÓN DE REDIRECCIÓN:
-        // Tu API devuelve { data: { url: "..." } }. Extraemos la URL.
         const urlToRedirect = result.data?.url || result.url;
 
         if (urlToRedirect) {
             console.log("Redirigiendo a:", urlToRedirect);
-            // Usar window.location.assign es más robusto y seguro para URLs externas en Next.js
             window.location.assign(urlToRedirect);
         } else {
             throw new Error('La API no devolvió una URL válida de redirección.');
@@ -67,22 +48,7 @@ export function SignInForm() {
         setAuthError(null);
         
         try {
-            // NOTE: This assumes an API route handler at /api/auth/signin exists 
-            // to handle standard credential exchange with Supabase.
-            const response = await fetch('/api/auth/signin', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data),
-            });
-
-            if (!response.ok) {
-                 const errorData = await response.json();
-                 throw new Error(errorData.error || 'Error al intentar iniciar sesión con credenciales.');
-            }
-            
-            const result = await response.json();
+            const result = await AuthService.signIn(data.Email || '', data.Password || '');
 
             // Check if the user data was successfully retrieved and set in the store
             if (result.data?.user) {
@@ -108,17 +74,15 @@ export function SignInForm() {
                         viproDestination = localDestination;
 
                         try {
-                            // Update user metadata in Supabase Auth
-                            await supabase.auth.updateUser({
-                                data: {
-                                    vipro_score: localScore,
-                                    vipro_completed: true,
-                                    vipro_destination: localDestination
-                                }
+                            // Update user metadata via API route
+                            await AuthService.updateUser({
+                                vipro_score: localScore,
+                                vipro_completed: true,
+                                vipro_destination: localDestination
                             });
-                            console.log("Synced local guest VIPRO to Supabase on Sign-in.");
+                            console.log("Synced local guest VIPRO on Sign-in.");
                         } catch (err) {
-                            console.error("Failed to sync local VIPRO to Supabase on sign-in:", err);
+                            console.error("Failed to sync local VIPRO on sign-in:", err);
                         }
                     }
                 }

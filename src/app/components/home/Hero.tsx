@@ -106,14 +106,21 @@ export const Hero = ({ headerHeight }: { headerHeight: number | null }) => {
 
       {/* Content layer — overflow visible so dropdown is never clipped */}
       <section
-        className="absolute inset-0 flex flex-col justify-end items-center text-center px-6 pb-24 w-full max-w-4xl mx-auto"
+        className="absolute inset-0 flex flex-col justify-end items-center text-center px-6 pb-20 w-full max-w-4xl mx-auto"
         style={{ zIndex: 10, overflow: "visible" }}
       >
-        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 leading-tight tracking-tight">
-          Tu visa sin estrés, guiada por expertos y tecnología.
+        <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md border border-white/25 px-4 py-1.5 rounded-full text-xs font-semibold text-white mb-4 shadow-sm">
+          <span className="flex items-center gap-1 text-amber-300">
+            ★ ★ ★ ★ ★
+          </span>
+          <span className="font-medium">4.9/5 por +15,000 trámites evaluados</span>
+        </div>
+
+        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 leading-tight tracking-tight font-serif">
+          Consigue tu visa con seguridad, inteligencia consular y acompañamiento experto.
         </h1>
-        <p className="text-base md:text-lg text-white/80 mb-10 max-w-2xl font-medium">
-          Completa nuestra evaluación en minutos y te conectaremos con el asesor ideal para tu viaje.
+        <p className="text-base md:text-lg text-white/90 mb-8 max-w-2xl font-medium">
+          Diagnostica tu viabilidad consular con VIPRO o conéctate con un asesor certificado para garantizar una solicitud sólida y libre de errores.
         </p>
 
         {/* Search wrapper — absolutely positioned above everything */}
@@ -230,6 +237,28 @@ export const Hero = ({ headerHeight }: { headerHeight: number | null }) => {
               )}
             </div>
           )}
+        </div>
+
+        {/* Popular Destination Pills */}
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-4">
+          <span className="text-xs text-white/75 font-semibold mr-1">Populares:</span>
+          {[
+            { code: "US", flag: "🇺🇸", name: "EE.UU." },
+            { code: "CA", flag: "🇨🇦", name: "Canadá" },
+            { code: "AU", flag: "🇦🇺", name: "Australia" },
+            { code: "UK", flag: "🇬🇧", name: "Reino Unido" },
+            { code: "MX", flag: "🇲🇽", name: "México" },
+          ].map((item) => (
+            <button
+              key={item.code}
+              type="button"
+              onClick={() => router.push(`/vipro-form?country=${item.code}`)}
+              className="bg-white/15 hover:bg-white/30 text-white border border-white/25 text-xs font-semibold px-3.5 py-1 rounded-full transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-xs"
+            >
+              <span>{item.flag}</span>
+              <span>{item.name}</span>
+            </button>
+          ))}
         </div>
       </section>
     </div>

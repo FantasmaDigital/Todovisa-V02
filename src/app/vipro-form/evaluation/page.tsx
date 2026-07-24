@@ -5,7 +5,9 @@ import { Footer } from "../../components/shared/Footer";
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../../store/authStore";
-import supabase from "../../lib/supabase";
+import { FormClientService } from "@/services/client/FormClientService";
+import { AuthService } from "@/app/service/AuthService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
 import { questionsSpanish } from "../../constants/vipro/questionsSpanish";
 
 function ViproEvaluationContent() {
@@ -43,6 +45,8 @@ function ViproEvaluationContent() {
         destination_analysis: string;
     } | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
+    const [viproCountry, setViproCountry] = useState<"US" | "CA" | "AU" | "UK">("US");
+    const [viproModality, setViproModality] = useState<"first" | "renewal">("first");
 
     const questions = questionsSpanish;
     const question = questions[currentStep];
@@ -85,43 +89,18 @@ function ViproEvaluationContent() {
 
                 if (targetEvalId || effectiveUserId || user?.email) {
                     try {
-                        if (targetEvalId && targetEvalId !== "vipro-sample-1") {
-                            const { data: evalRecordById } = await supabase
-                                .from("vipro_evaluations")
-                                .select("*")
-                                .eq("id", targetEvalId)
-                                .maybeSingle();
-                            if (evalRecordById) {
-                                loadedEvalRecord = evalRecordById;
-                            }
-                        }
-
-                        if (!loadedEvalRecord && (effectiveUserId || user?.email)) {
-                            let fallbackQuery = supabase.from("vipro_evaluations").select("*");
-                            if (effectiveUserId) {
-                                fallbackQuery = fallbackQuery.eq("user_id", effectiveUserId);
-                            } else if (user?.email) {
-                                fallbackQuery = fallbackQuery.eq("user_email", user.email);
-                            }
-
-                            const { data: evalRecordByUser } = await fallbackQuery
-                                .order("created_at", { ascending: false })
-                                .limit(1)
-                                .maybeSingle();
-
-                            if (evalRecordByUser) {
-                                loadedEvalRecord = evalRecordByUser;
-                            }
+                        if (effectiveUserId) {
+                            loadedEvalRecord = await FormClientService.getViproEvaluation(effectiveUserId, targetEvalId || undefined);
                         }
 
                         const queryUserId = loadedEvalRecord?.user_id || effectiveUserId;
 
                         if (queryUserId) {
-                            const { data: prof } = await supabase
-                                .from("profiles")
-                                .select("*")
-                                .eq("id", queryUserId)
-                                .maybeSingle();
+                            let prof = null;
+                            try {
+                                const profileRes = await ProfileClientService.getProfile(queryUserId);
+                                prof = profileRes?.profile;
+                            } catch (_) {}
 
                             const fullName = prof ? `${prof.first_name || ""} ${prof.last_name || ""}`.trim() : null;
                             const email = prof?.email || loadedEvalRecord?.user_email || (targetUserId ? `usuario_${queryUserId?.substring(0, 6)}@todovisa.com` : user?.email);
@@ -240,20 +219,17 @@ function ViproEvaluationContent() {
                         setTimeout(() => setUser(updatedUser), 0);
 
                         try {
-                            await supabase.auth.updateUser({
-                                data: {
-                                    vipro_score: finalScore,
-                                    vipro_completed: true,
-                                    vipro_destination: "US",
-                                    vipro_recommendations: recommendations,
-                                    vipro_progress_answers: null,
-                                    vipro_progress_step: null,
-                                    vipro_progress_destination: null
-                                }
+                            await AuthService.updateUser({
+                                vipro_score: finalScore,
+                                vipro_completed: true,
+                                vipro_destination: "US",
+                                vipro_recommendations: recommendations,
+                                vipro_progress_answers: null,
+                                vipro_progress_step: null,
+                                vipro_progress_destination: null
                             });
 
-                            // Persist to PostgreSQL database table vipro_evaluations
-                            await supabase.from("vipro_evaluations").upsert({
+                            await FormClientService.saveViproEvaluation({
                                 user_id: user.id,
                                 score: finalScore,
                                 answers: answers,
@@ -263,9 +239,9 @@ function ViproEvaluationContent() {
                                 created_at: new Date().toISOString()
                             });
 
-                            console.log("VIPRO results successfully persisted in Supabase Auth user metadata and vipro_evaluations DB table.");
+                            console.log("VIPRO results successfully persisted.");
                         } catch (err) {
-                            console.error("Failed to persist VIPRO results to Supabase:", err);
+                            console.error("Failed to persist VIPRO results:", err);
                         }
                     }
                 } catch (err) {
@@ -302,19 +278,17 @@ function ViproEvaluationContent() {
                         setTimeout(() => setUser(updatedUser), 0);
 
                         try {
-                            await supabase.auth.updateUser({
-                                data: {
-                                    vipro_score: finalScore,
-                                    vipro_completed: true,
-                                    vipro_destination: "US",
-                                    vipro_recommendations: fallbackRecs,
-                                    vipro_progress_answers: null,
-                                    vipro_progress_step: null,
-                                    vipro_progress_destination: null
-                                }
+                            await AuthService.updateUser({
+                                vipro_score: finalScore,
+                                vipro_completed: true,
+                                vipro_destination: "US",
+                                vipro_recommendations: fallbackRecs,
+                                vipro_progress_answers: null,
+                                vipro_progress_step: null,
+                                vipro_progress_destination: null
                             });
 
-                            await supabase.from("vipro_evaluations").upsert({
+                            await FormClientService.saveViproEvaluation({
                                 user_id: user.id,
                                 score: finalScore,
                                 answers: answers,
@@ -346,48 +320,23 @@ function ViproEvaluationContent() {
             const saveProgressToSupabase = async () => {
                 if (user) {
                     try {
-                        // 1. Update Auth User Metadata
-                        await supabase.auth.updateUser({
-                            data: {
-                                vipro_progress_answers: answers,
-                                vipro_progress_step: currentStep,
-                                vipro_progress_destination: "US"
-                            }
+                        await AuthService.updateUser({
+                            vipro_progress_answers: answers,
+                            vipro_progress_step: currentStep,
+                            vipro_progress_destination: "US"
                         });
 
-                        // 2. Step-by-Step Save to PostgreSQL Database Table 'vipro_evaluations'
-                        const { data: existingEval } = await supabase
-                            .from("vipro_evaluations")
-                            .select("id")
-                            .eq("user_id", user.id)
-                            .eq("destination_country", "US")
-                            .maybeSingle();
-
-                        if (existingEval?.id) {
-                            await supabase
-                                .from("vipro_evaluations")
-                                .update({
-                                    answers: answers,
-                                    current_step: currentStep,
-                                    is_completed: false,
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq("id", existingEval.id);
-                        } else {
-                            await supabase
-                                .from("vipro_evaluations")
-                                .insert([{
-                                    user_id: user.id,
-                                    destination_country: "US",
-                                    answers: answers,
-                                    current_step: currentStep,
-                                    is_completed: false,
-                                    created_at: new Date().toISOString()
-                                }]);
-                        }
+                        await FormClientService.saveViproEvaluation({
+                            user_id: user.id,
+                            destination_country: "US",
+                            answers: answers,
+                            current_step: currentStep,
+                            is_completed: false,
+                            updated_at: new Date().toISOString()
+                        });
                         console.log(`Step ${currentStep + 1} saved to vipro_evaluations table.`);
                     } catch (err) {
-                        console.error("Error auto-saving progress to Supabase:", err);
+                        console.error("Error auto-saving progress:", err);
                     }
                 }
             };
@@ -406,13 +355,7 @@ function ViproEvaluationContent() {
 
             if (user) {
                 try {
-                    // Try DB table vipro_evaluations first
-                    const { data: dbProgress } = await supabase
-                        .from("vipro_evaluations")
-                        .select("*")
-                        .eq("user_id", user.id)
-                        .eq("destination_country", "US")
-                        .maybeSingle();
+                    const dbProgress = await FormClientService.getViproEvaluation(user.id);
 
                     if (dbProgress && dbProgress.answers) {
                         savedAnswers = dbProgress.answers;
@@ -426,21 +369,21 @@ function ViproEvaluationContent() {
                                 destination_analysis: "Análisis de viabilidad consular previamente registrado."
                             });
                         }
-                        console.log("Restored VIPRO progress from vipro_evaluations DB table.");
+                        console.log("Restored VIPRO progress from DB table.");
                     }
 
                     if (!hasSavedProgress) {
-                        const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-                        const metadata = supabaseUser?.user_metadata || {};
+                        const userRes = await AuthService.getUser();
+                        const metadata = userRes.data?.user?.user_metadata || {};
                         if (metadata.vipro_progress_answers) {
                             savedAnswers = metadata.vipro_progress_answers;
                             savedStep = metadata.vipro_progress_step || 0;
                             hasSavedProgress = true;
-                            console.log("Restored VIPRO progress from Supabase Auth user metadata.");
+                            console.log("Restored VIPRO progress from user metadata.");
                         }
                     }
                 } catch (err) {
-                    console.error("Error fetching progress from Supabase:", err);
+                    console.error("Error fetching progress:", err);
                 }
             }
 
@@ -594,40 +537,136 @@ function ViproEvaluationContent() {
     // Welcome Screen
     if (!started) {
         return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main font-sans">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-3xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-8">
+                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-16 flex flex-col justify-center flex-1">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-12 shadow-lg border border-border-light flex flex-col gap-8 text-left">
                         <div className="flex items-center gap-4 border-b border-border-light pb-6">
                             <span className="text-5xl">📊</span>
-                            <div className="text-left">
-                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Cuestionario de Viabilidad</span>
+                            <div>
+                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Diagnóstico Consular Oficial</span>
                                 <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">Evaluación VIPRO</h1>
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-5">
-                           <h2 className="text-xl font-bold text-text-primary text-left">Instrucciones de la Evaluación:</h2>
-                           <div className="flex flex-col gap-4 text-text-secondary leading-relaxed text-left">
-                               <p className="bg-brand-light/30 border-l-4 border-brand-primary p-4 rounded-r-xl text-base text-left">
-                                   Bienvenido a la Evaluación de Viabilidad VIPRO. Este cuestionario automatizado de {questions.length} preguntas analizará tu perfil consular para determinar tu nivel de preparación y probabilidad de éxito para tu solicitud de visa.
-                               </p>
-                               <p className="text-sm text-left">
-                                   Por favor responde con honestidad todas las preguntas sobre tu situación laboral, familiar, financiera y tu historial de viajes. Al finalizar, nuestro sistema generará un reporte detallado con tu puntaje de viabilidad y recomendaciones de mejora personalizadas.
-                               </p>
-                           </div>
+                        {/* Country Selection for VIPRO (US, CA, AU, UK) */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider">
+                                1. Selecciona el País Destino del Visado
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {[
+                                    { id: "US", flag: "🇺🇸", name: "Estados Unidos", desc: "Visa B1/B2, F1, C1/D" },
+                                    { id: "CA", flag: "🇨🇦", name: "Canadá", desc: "Visa TRV / eTA IRCC" },
+                                    { id: "AU", flag: "🇦🇺", name: "Australia", desc: "Visa Subclass 600" },
+                                    { id: "UK", flag: "🇬🇧", name: "Reino Unido", desc: "Standard Visitor UKVI" }
+                                ].map((country) => (
+                                    <button
+                                        key={country.id}
+                                        type="button"
+                                        onClick={() => setViproCountry(country.id as "US" | "CA" | "AU" | "UK")}
+                                        className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all ${
+                                            viproCountry === country.id
+                                                ? "border-brand-primary bg-brand-light/40 ring-2 ring-brand-primary/20 font-bold"
+                                                : "border-border-light bg-white hover:bg-background-hover/40"
+                                        }`}
+                                    >
+                                        <span className="text-2xl block mb-1">{country.flag}</span>
+                                        <p className="text-xs font-bold text-text-primary">{country.name}</p>
+                                        <p className="text-[10px] text-text-secondary leading-tight mt-0.5">{country.desc}</p>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Modality Selection (First Time vs Renewal) */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider">
+                                2. Modalidad de la Solicitud
+                            </label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setViproModality("first")}
+                                    className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                        viproModality === "first"
+                                            ? "border-brand-primary bg-brand-light/40 ring-2 ring-brand-primary/20 font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/40"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🌟</span>
+                                        <p className="text-sm font-bold text-text-primary">Primera Vez (Solicitud Inicial)</p>
+                                    </div>
+                                    <p className="text-[10px] text-text-secondary leading-relaxed mt-1">Evaluación completa de vínculos de solvencia y arraigo en tu país de origen.</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setViproModality("renewal")}
+                                    className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                        viproModality === "renewal"
+                                            ? "border-brand-primary bg-brand-light/40 ring-2 ring-brand-primary/20 font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/40"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🔄</span>
+                                        <p className="text-sm font-bold text-text-primary">Renovación de Visa</p>
+                                    </div>
+                                    <p className="text-[10px] text-text-secondary leading-relaxed mt-1">Análisis considerando tu historial positivo previo e integridad migratoria.</p>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Dynamic Informative Consular Banner */}
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-left flex items-start gap-4 shadow-sm">
+                            <span className="text-3xl">🏛️</span>
+                            <div className="flex flex-col gap-1 text-xs text-blue-900 leading-relaxed">
+                                <span className="font-bold uppercase tracking-wider text-blue-950">
+                                    Diagnóstico Especializado — VIPRO {viproCountry === 'US' ? 'EE.UU. 🇺🇸' : viproCountry === 'CA' ? 'Canadá 🇨🇦' : viproCountry === 'AU' ? 'Australia 🇦🇺' : 'Reino Unido 🇬🇧'} ({viproModality === 'renewal' ? 'Renovación' : 'Primera Vez'})
+                                </span>
+                                {viproCountry === "US" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación de Visa EE.UU. Analizaremos si calificas al programa de <strong>Exención de Entrevista (Interview Waiver / Drop Box)</strong> si expiró hace &lt;48 meses, otorgándote una estimación de aprobación de hasta el 98%.</p>
+                                )}
+                                {viproCountry === "US" && viproModality === "first" && (
+                                    <p>Evaluación para Visa EE.UU. B1/B2 por primera vez. Analizaremos tu solvencia y arraigo bajo la norma de la Sección 214(b) de la Ley de Inmigración de EE.UU.</p>
+                                )}
+                                {viproCountry === "CA" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación Canadá (TRV / eTA). Tu visa previa otorga un historial de cumplimiento comprobado en el Portal IRCC Canadá.</p>
+                                )}
+                                {viproCountry === "CA" && viproModality === "first" && (
+                                    <p>Evaluación para Visa Canadá por primera vez. Diagnóstico de fondos demostrables e intención de retorno temporal.</p>
+                                )}
+                                {viproCountry === "AU" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación Australia (Subclass 600). Tu historial migratorio previo califica tu solicitud en la categoría de <strong>Bajo Riesgo (Low-Risk Profile)</strong> en ImmiAccount.</p>
+                                )}
+                                {viproCountry === "AU" && viproModality === "first" && (
+                                    <p>Evaluación para Visa Australia de visitante por primera vez. Medición de estabilidad laboral y capacidad financiera.</p>
+                                )}
+                                {viproCountry === "UK" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación Reino Unido (UKVI). Tu visa previa valida tus lazos y acelera la aprobación del visado de visitante.</p>
+                                )}
+                                {viproCountry === "UK" && viproModality === "first" && (
+                                    <p>Evaluación para Visa Reino Unido por primera vez. Análisis de origen de fondos y apego según las regulaciones UKVI.</p>
+                                )}
+                            </div>
                         </div>
 
                         <div className="bg-background-main p-6 rounded-2xl border border-border-light flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div className="text-left">
-                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura de la Evaluación</span>
-                                <p className="text-text-primary font-bold text-lg">{questions.length} preguntas en total</p>
+                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura de la Evaluación VIPRO</span>
+                                <p className="text-text-primary font-bold text-lg">{questions.length} preguntas de diagnóstico</p>
                             </div>
                             <button 
-                                onClick={() => setStarted(true)}
+                                onClick={() => {
+                                    localStorage.setItem("vipro_selected_country", viproCountry);
+                                    localStorage.setItem("vipro_selected_modality", viproModality);
+                                    setStarted(true);
+                                }}
                                 className="w-full sm:w-auto bg-brand-primary text-white font-semibold px-8 py-4 rounded-xl hover:bg-brand-hover transition-colors shadow-md text-lg cursor-pointer"
                             >
-                                Empezar Evaluación →
+                                Empezar Diagnóstico VIPRO →
                             </button>
                         </div>
                     </div>
@@ -1018,10 +1057,11 @@ function ViproEvaluationContent() {
 export default function ViproEvaluationPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen w-full flex items-center justify-center bg-background-main">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-text-secondary font-medium">Cargando evaluación...</span>
+            <div className="min-h-screen w-full bg-background-main p-8 animate-pulse flex justify-center items-center">
+                <div className="max-w-4xl w-full bg-white rounded-3xl p-10 border border-border-light space-y-6">
+                    <div className="h-10 bg-gray-200 rounded w-1/2"></div>
+                    <div className="h-6 bg-gray-100 rounded w-3/4"></div>
+                    <div className="h-64 bg-gray-100 rounded-2xl w-full"></div>
                 </div>
             </div>
         }>

@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
+import { UserAvatar } from "../components/shared/UserAvatar";
 import { useAuthStore } from "../store/authStore";
-import supabase from "../lib/supabase";
+import { AgentClientService } from "@/services/client/AgentClientService";
 import { useRouter } from "next/navigation";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 
@@ -67,105 +68,66 @@ export default function AgentesPage() {
       const list: Agent[] = [];
 
       try {
-        // ── 1. AGENCIES (role = 'agency') ─────────────────────────────────
-        // Fetch all agency profiles joined with their agent_application (for bio, specialties, etc.)
-        const { data: agencyProfiles } = await supabase
-          .from("profiles")
-          .select("id, first_name, last_name, email, photo_url, phone, bio, location")
-          .eq("role", "agency");
+        const data = await AgentClientService.getAgents();
+        const agencyProfiles = data.agencyProfiles || [];
+        const agencyAppsMap = data.agencyAppsMap || {};
+        const activeApps = data.activeApps || [];
+        const agencyMemberIds = new Set(data.agencyMemberIds || []);
 
-        if (agencyProfiles && agencyProfiles.length > 0) {
-          // Fetch their agent_applications in one query
-          const agencyIds = agencyProfiles.map(p => p.id);
-          const { data: agencyApps } = await supabase
-            .from("agent_applications")
-            .select("user_id, specialties, target_countries, languages, experience_years, biography, status, signature_name")
-            .in("user_id", agencyIds)
-            .eq("status", "active");
+        // 1. Agencies
+        agencyProfiles.forEach((profile: any) => {
+          const app = agencyAppsMap[profile.id];
+          const name = `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || profile.email;
+          const phone = profile.phone?.replace(/\D/g, "") || "50370200976";
 
-          const appByUserId: Record<string, any> = {};
-          agencyApps?.forEach(a => { appByUserId[a.user_id] = a; });
-
-          agencyProfiles.forEach(profile => {
-            const app = appByUserId[profile.id];
-            const name = `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || profile.email;
-            const phone = profile.phone?.replace(/\D/g, "") || "50370200976";
-
-            list.push({
-              id: `agency-${profile.id}`,
-              userId: profile.id,
-              name,
-              title: "Agencia de Viajes y Asesoría Consular",
-              photo: profile.photo_url ||
-                `https://unavatar.io/${encodeURIComponent(profile.email?.trim().toLowerCase() || "")}` +
-                `?fallback=https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1a56db&color=fff`,
-              rating: 5.0,
-              reviewsCount: 0,
-              languages: app?.languages || ["Español"],
-              countries: app?.target_countries || ["Estados Unidos"],
-              specialties: app?.specialties || ["Asesoría General"],
-              experience: app?.experience_years ? `${app.experience_years} años` : "—",
-              availability: "Inmediata",
-              bio: profile.bio || app?.biography ||
-                `Agencia Registrada. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
-
-              whatsapp: `https://wa.me/${phone}?text=Hola%20${encodeURIComponent(name)},%20me%20gustar%C3%ADa%20contratar%20sus%20servicios.`,
-              featured: true,
-              partnerType: "b2b_agency_entity",
-              agencyName: name,
-            });
+          list.push({
+            id: `agency-${profile.id}`,
+            userId: profile.id,
+            name,
+            title: "Agencia de Viajes y Asesoría Consular",
+            photo: profile.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=300",
+            rating: 5.0,
+            reviewsCount: 0,
+            languages: app?.languages || ["Español"],
+            countries: app?.target_countries || ["Estados Unidos"],
+            specialties: app?.specialties || ["Asesoría General"],
+            experience: app?.experience_years ? `${app.experience_years} años` : "—",
+            availability: "Inmediata",
+            bio: profile.bio || app?.biography ||
+              `Agencia Registrada. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
+            whatsapp: `https://wa.me/${phone}?text=Hola%20${encodeURIComponent(name)},%20me%20gustar%C3%ADa%20contratar%20sus%20servicios.`,
+            featured: true,
+            partnerType: "b2b_agency_entity",
+            agencyName: name,
           });
-        }
+        });
 
-        // ── 2. INDEPENDENT ACTIVE AGENTS (role = 'agent', not in agency_members) ──
-        const { data: activeApps } = await supabase
-          .from("agent_applications")
-          .select("user_id, full_name, email, phone, specialties, target_countries, languages, experience_years, biography, status, application_id")
-          .eq("status", "active");
+        // 2. Independent agents
+        const agencyUserIds = new Set(agencyProfiles.map((p: any) => p.id));
+        activeApps.forEach((app: any) => {
+          if (agencyMemberIds.has(app.user_id) || agencyUserIds.has(app.user_id)) return;
+          if (app.application_id?.startsWith("B2B-")) return;
 
-        if (activeApps && activeApps.length > 0) {
-          // Get IDs of agents who belong to an agency (exclude them)
-          const appUserIds = activeApps.map(a => a.user_id).filter(Boolean);
-          let agencyMemberIds = new Set<string>();
-
-          if (appUserIds.length > 0) {
-            const { data: members } = await supabase
-              .from("agency_members")
-              .select("member_id")
-              .in("member_id", appUserIds);
-            members?.forEach(m => agencyMemberIds.add(m.member_id));
-          }
-
-          // Also exclude agency user_ids from step 1
-          const agencyUserIds = new Set((agencyProfiles || []).map(p => p.id));
-
-          activeApps.forEach(app => {
-            // Skip if they belong to an agency OR are themselves an agency
-            if (agencyMemberIds.has(app.user_id) || agencyUserIds.has(app.user_id)) return;
-            // Skip B2B agency applications
-            if (app.application_id?.startsWith("B2B-")) return;
-
-            const phone = app.phone?.replace(/\D/g, "") || "50370200976";
-            list.push({
-              id: `agent-${app.user_id || app.application_id}`,
-              userId: app.user_id,
-              name: app.full_name || app.email || "Asesor TodoVisa",
-              title: `Asesor Independiente · ${(app.specialties || ["General"])[0]}`,
-              photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(app.full_name || "Asesor")}&background=0d9488&color=fff&size=200`,
-              rating: 4.8,
-              reviewsCount: 0,
-              languages: app.languages || ["Español"],
-              countries: app.target_countries || ["Estados Unidos"],
-              specialties: app.specialties || ["Asesoría General"],
-              experience: app.experience_years ? `${app.experience_years} años` : "—",
-              availability: "Inmediata",
-              bio: app.biography || "Asesor consular certificado en la red TodoVisa.",
-              whatsapp: `https://wa.me/${phone}?text=Hola,%20me%20gustar%C3%ADa%20recibir%20asesor%C3%ADa.`,
-              featured: false,
-              partnerType: "outsourced_agent",
-            });
+          const phone = app.phone?.replace(/\D/g, "") || "50370200976";
+          list.push({
+            id: `agent-${app.user_id || app.application_id}`,
+            userId: app.user_id,
+            name: app.full_name || app.email || "Asesor TodoVisa",
+            title: `Asesor Independiente · ${(app.specialties || ["General"])[0]}`,
+            photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(app.full_name || "Asesor")}&background=0d9488&color=fff&size=200`,
+            rating: 4.8,
+            reviewsCount: 0,
+            languages: app.languages || ["Español"],
+            countries: app.target_countries || ["Estados Unidos"],
+            specialties: app.specialties || ["Asesoría General"],
+            experience: app.experience_years ? `${app.experience_years} años` : "—",
+            availability: "Inmediata",
+            bio: app.biography || "Asesor consular certificado en la red TodoVisa.",
+            whatsapp: `https://wa.me/${phone}?text=Hola,%20me%20gustar%C3%ADa%20recibir%20asesor%C3%ADa.`,
+            featured: false,
+            partnerType: "outsourced_agent",
           });
-        }
+        });
       } catch (err) {
         console.error("Error fetching agents from DB:", err);
       }
@@ -457,10 +419,11 @@ export default function AgentesPage() {
                   <div className="p-6 pb-4 flex items-start gap-4">
                     {/* Contenedor Foto de Perfil */}
                     <div className="relative flex-shrink-0">
-                      <img
+                      <UserAvatar
                         src={agent.photo}
-                        alt={`Foto de ${agent.name}`}
-                        className="w-16 h-16 rounded-full object-cover border border-border-light"
+                        name={agent.name}
+                        size="lg"
+                        partnerType={agent.partnerType}
                       />
                       {agent.availability === "Inmediata" && (
                         <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-status-success border-2 border-white rounded-full" title="Disponible Hoy"></span>

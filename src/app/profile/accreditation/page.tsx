@@ -5,8 +5,11 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { ROLES } from "../../constants/roles";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { AgentClientService } from "@/services/client/AgentClientService";
+import { AuthClientService } from "@/services/client/AuthClientService";
+import { Skeleton, CardSkeleton } from "@/app/components/shared/Skeleton";
 
 interface AgentApplication {
   id: string;
@@ -64,39 +67,19 @@ export default function AcreditacionPage() {
     try {
       let agencyId = null;
       if (user.role === "agent") {
-        const { data: memberData, error: memberErr } = await supabase
-          .from("agency_members")
-          .select("agency_id")
-          .eq("member_id", user.id)
-          .maybeSingle();
-
-        if (memberErr) {
-          console.error("Error loading agency membership:", memberErr.message);
-        } else if (memberData && memberData.agency_id) {
-          agencyId = memberData.agency_id;
-          const { data: agencyProfile, error: agencyErr } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, email, photo_url, phone, bio, location, staff_size")
-            .eq("id", agencyId)
-            .maybeSingle();
-
-          if (agencyProfile) {
-            setMyAgency({ ...agencyProfile, joined_at: null });
+        const profileData = await ProfileClientService.getProfile(user.id);
+        const memberInfo = profileData?.memberInfo;
+        if (memberInfo?.memberData?.agency_id) {
+          agencyId = memberInfo.memberData.agency_id;
+          if (memberInfo.agencyProfile) {
+            setMyAgency({ ...memberInfo.agencyProfile, joined_at: null });
           }
         }
       }
 
       const targetUserId = agencyId || user.id;
-
-      // Fetch agent application (direct or agency's)
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("user_id", targetUserId)
-        .maybeSingle();
-
-      if (error) throw error;
-      setAgent(data || null);
+      const portalRes = await AgentClientService.getPortalData(targetUserId);
+      setAgent(portalRes.application || null);
     } catch (err) {
       console.error("Error loading agent application or agency info:", err);
     } finally {
@@ -126,19 +109,17 @@ export default function AcreditacionPage() {
     setSigning(true);
     const nowString = new Date().toISOString();
     try {
-      const { error: updateErr } = await supabase
-        .from("agent_applications")
-        .update({
+      await AgentClientService.updateApplication({
+        id: agent.id,
+        updates: {
           status: "active",
           signature_name: signatureName.trim(),
           signed_at: nowString
-        })
-        .eq("id", agent.id);
-
-      if (updateErr) throw updateErr;
+        }
+      });
 
       // Update user role if needed
-      await supabase.auth.refreshSession();
+      await AuthClientService.getUser().catch(() => null);
 
       setAgent((prev) =>
         prev
@@ -193,8 +174,16 @@ export default function AcreditacionPage() {
         </div>
 
         {loading ? (
-          <p className="text-xs text-text-muted">Cargando acreditación...</p>
-                ) : !agent ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-4">
+              <CardSkeleton rows={4} />
+              <CardSkeleton rows={3} />
+            </div>
+            <div className="lg:col-span-1">
+              <CardSkeleton rows={5} />
+            </div>
+          </div>
+        ) : !agent ? (
           <div className="border border-border-light rounded-sm p-8 bg-white text-center">
             <p className="text-sm text-text-secondary italic">No se ha encontrado ninguna solicitud de acreditación vinculada a esta cuenta.</p>
           </div>
