@@ -40,4 +40,15 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# local database / setup scripts (never commit)
 supabase_schema.sql
+/db_scripts/
+/scripts/
+
+# security / local environment
+.env*
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
