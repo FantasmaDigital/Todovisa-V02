@@ -4,17 +4,15 @@ import supabase from "@/app/lib/supabase";
 
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-    if (token) {
-      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
-    }
+
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
+    const all = searchParams.get("all");
 
-    if (!userId) {
-      return NextResponse.json({ error: "userId parameter is required" }, { status: 400 });
+    if (all === "true" || !userId) {
+      const profiles = await ProfileRepository.getAllProfiles();
+      return NextResponse.json({ data: profiles }, { status: 200 });
     }
 
     const profile = await ProfileRepository.getProfileById(userId);
@@ -29,11 +27,7 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-    if (token) {
-      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
-    }
+
 
     const { userId, updates } = await request.json();
 

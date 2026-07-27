@@ -6,9 +6,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
     const evalId = searchParams.get("evalId") || undefined;
+    const all = searchParams.get("all");
 
-    if (!userId) {
-      return NextResponse.json({ error: "userId parameter is required" }, { status: 400 });
+    if (all === "true" || !userId) {
+      const data = await FormRepository.getAllViproEvaluations();
+      return NextResponse.json({ data }, { status: 200 });
     }
 
     const data = await FormRepository.getViproEvaluation(userId, evalId);

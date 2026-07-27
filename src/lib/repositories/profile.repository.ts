@@ -12,6 +12,16 @@ export class ProfileRepository {
     return data;
   }
 
+  static async getAllProfiles() {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
   static async updateProfile(userId: string, updates: Record<string, any>) {
     const { data, error } = await supabase
       .from("profiles")

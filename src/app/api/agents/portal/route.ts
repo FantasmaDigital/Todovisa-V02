@@ -5,11 +5,7 @@ import supabase from "@/app/lib/supabase";
 
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-    if (token) {
-      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
-    }
+
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId") || undefined;
@@ -24,11 +20,7 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-    if (token) {
-      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
-    }
+
 
     const { id, userId, updates } = await request.json();
 

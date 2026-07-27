@@ -5,9 +5,11 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
+    const all = searchParams.get("all");
 
-    if (!userId) {
-      return NextResponse.json({ error: "userId parameter is required" }, { status: 400 });
+    if (all === "true" || !userId) {
+      const data = await FormRepository.getAllPreformularios();
+      return NextResponse.json({ data }, { status: 200 });
     }
 
     const data = await FormRepository.getPreformularioProgress(userId);

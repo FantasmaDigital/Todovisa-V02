@@ -171,4 +171,24 @@ export class AgentRepository {
   static async createAgentCommission(commissionData: Record<string, any>) {
     return await supabase.from("agent_commissions").insert(commissionData);
   }
+
+  static async getAllApplications() {
+    const { data, error } = await supabase
+      .from("agent_applications")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
+  static async getAgencyClientRequests(agentId?: string) {
+    let query = supabase.from("agency_client_requests").select("*");
+    if (agentId) {
+      query = query.eq("agency_id", agentId);
+    }
+    const { data, error } = await query.order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
 }

@@ -7,14 +7,11 @@ export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-    if (token) {
-      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
-    }
 
-    const { data, error } = await AuthRepository.getUser();
+    const { data, error } = await AuthRepository.getUser(token);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
+    if (error || !data?.user) {
+      return NextResponse.json({ error: error?.message || "Auth session missing" }, { status: 401 });
     }
 
     console.log("ℹ️ [Server Auth] Sesión de usuario verificada/iniciada:", {

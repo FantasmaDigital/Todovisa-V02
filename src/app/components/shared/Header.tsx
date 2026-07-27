@@ -45,21 +45,25 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                             headers = new Headers();
                         }
                         
-                        let sessionStr = null;
+                        let sessionToken: string | null = null;
                         for (let i = 0; i < localStorage.length; i++) {
                             const key = localStorage.key(i);
-                            if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
-                                sessionStr = localStorage.getItem(key);
-                                break;
+                            if (key && (key.includes("auth-token") || key.startsWith("sb-"))) {
+                                const sessionStr = localStorage.getItem(key);
+                                if (sessionStr) {
+                                    try {
+                                        const parsed = JSON.parse(sessionStr);
+                                        const tok = parsed?.access_token || parsed?.currentSession?.access_token;
+                                        if (tok) {
+                                            sessionToken = tok;
+                                            break;
+                                        }
+                                    } catch (e) {}
+                                }
                             }
                         }
-                        if (sessionStr) {
-                            try {
-                                const parsed = JSON.parse(sessionStr);
-                                if (parsed?.access_token && !headers.has("Authorization")) {
-                                    headers.set("Authorization", `Bearer ${parsed.access_token}`);
-                                }
-                            } catch (e) {}
+                        if (sessionToken && !headers.has("Authorization")) {
+                            headers.set("Authorization", `Bearer ${sessionToken}`);
                         }
                         
                         init.headers = headers;
@@ -200,7 +204,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                         width={72}
                                         height={72}
                                         className="object-contain"
-                                        style={{ height: "auto" }}
+                                        style={{ width: "auto", height: "auto" }}
                                     />
                                 </Link>
                             </div>

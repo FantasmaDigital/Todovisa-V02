@@ -1,4 +1,4 @@
-import supabase from "@/app/lib/supabase";
+import supabase, { getScopedSupabaseClient } from "@/app/lib/supabase";
 
 export class AuthRepository {
   static async signIn(email: string, password: string) {
@@ -42,11 +42,15 @@ export class AuthRepository {
     return await supabase.auth.resetPasswordForEmail(email);
   }
 
-  static async getUser() {
+  static async getUser(token?: string | null) {
+    if (token) {
+      return await supabase.auth.getUser(token);
+    }
     return await supabase.auth.getUser();
   }
 
-  static async updateUserMetadata(attributes: Record<string, any>) {
-    return await supabase.auth.updateUser({ data: attributes });
+  static async updateUserMetadata(attributes: Record<string, any>, token?: string | null) {
+    const client = getScopedSupabaseClient(token);
+    return await client.auth.updateUser({ data: attributes });
   }
 }

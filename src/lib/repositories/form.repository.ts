@@ -44,6 +44,26 @@ export class FormRepository {
     }
   }
 
+  static async getAllPreformularios() {
+    const { data, error } = await supabase
+      .from("preformularios")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    if (error) return [];
+    return data || [];
+  }
+
+  static async getAllViproEvaluations() {
+    const { data, error } = await supabase
+      .from("vipro_evaluations")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) return [];
+    return data || [];
+  }
+
   // ── VIPRO EVALUATION ──────────────────────────────────────────────────────
   static async getViproEvaluation(userId: string, evalId?: string) {
     if (evalId) {
