@@ -1,13 +1,27 @@
 import { AuthRepository } from "@/lib/repositories/auth.repository";
 import { NextResponse } from "next/server";
 
+import supabase from "@/app/lib/supabase";
+
 export async function GET(request: Request) {
   try {
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+    if (token) {
+      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
+    }
+
     const { data, error } = await AuthRepository.getUser();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 401 });
     }
+
+    console.log("ℹ️ [Server Auth] Sesión de usuario verificada/iniciada:", {
+      id: data?.user?.id,
+      email: data?.user?.email,
+      metadata: data?.user?.user_metadata,
+    });
 
     return NextResponse.json({ data }, { status: 200 });
   } catch (err: any) {

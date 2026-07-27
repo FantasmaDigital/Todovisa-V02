@@ -10,6 +10,7 @@ import { ProfileClientService } from "@/services/client/ProfileClientService";
 import { AgentClientService } from "@/services/client/AgentClientService";
 import { AuthClientService } from "@/services/client/AuthClientService";
 import { Skeleton, CardSkeleton } from "@/app/components/shared/Skeleton";
+import supabase from "@/app/lib/supabase";
 
 interface AgentApplication {
   id: string;
@@ -56,6 +57,32 @@ export default function AcreditacionPage() {
     }, 4500);
   };
 
+  const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
+    e.preventDefault();
+    if (!docUrl) return;
+
+    const isSupabaseStorage = docUrl.includes("/storage/v1/object/public/todovisa/");
+    if (isSupabaseStorage) {
+      try {
+        const filePath = docUrl.split("/storage/v1/object/public/todovisa/")[1];
+        if (filePath) {
+          const { data, error } = await supabase.storage
+            .from("todovisa")
+            .createSignedUrl(filePath, 60);
+
+          if (error) throw error;
+          if (data?.signedUrl) {
+            window.open(data.signedUrl, "_blank");
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error generating signed URL, falling back to public URL:", err);
+      }
+    }
+    window.open(docUrl, "_blank");
+  };
+
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -65,9 +92,16 @@ export default function AcreditacionPage() {
     if (!user) return;
     setLoading(true);
     try {
+      // Validate role with the API
+      const profileData = await ProfileClientService.getProfile(user.id);
+      const apiRole = profileData?.profile?.role;
+      if (apiRole !== ROLES.AGENT && apiRole !== ROLES.AGENCY) {
+        router.push("/profile");
+        return;
+      }
+
       let agencyId = null;
-      if (user.role === "agent") {
-        const profileData = await ProfileClientService.getProfile(user.id);
+      if (apiRole === "agent") {
         const memberInfo = profileData?.memberInfo;
         if (memberInfo?.memberData?.agency_id) {
           agencyId = memberInfo.memberData.agency_id;
@@ -82,6 +116,7 @@ export default function AcreditacionPage() {
       setAgent(portalRes.application || null);
     } catch (err) {
       console.error("Error loading agent application or agency info:", err);
+      router.push("/profile");
     } finally {
       setLoading(false);
     }
@@ -89,13 +124,9 @@ export default function AcreditacionPage() {
 
   useEffect(() => {
     if (isMounted && user) {
-      if (user.role !== ROLES.AGENT && user.role !== ROLES.AGENCY) {
-        router.push("/profile");
-        return;
-      }
       loadAgentApplication();
     }
-  }, [isMounted, user?.id, user?.role]);
+  }, [isMounted, user?.id]);
 
   // Handle commercial agreement digital signature
   const handleSignAgreement = async (e: React.FormEvent) => {
@@ -370,16 +401,39 @@ export default function AcreditacionPage() {
                   </div>
 
                   <div className="space-y-3.5 text-xs text-text-primary">
-                    {agent.documents && Object.entries(agent.documents).map(([key, val]) => (
-                      <div key={key} className="flex justify-between items-center border-b border-border-light pb-2">
-                        <span className="font-semibold uppercase text-[10px] text-text-secondary">{key}</span>
-                        {val ? (
-                          <span className="text-[10px] text-emerald-600 font-bold">Cargado ✓</span>
-                        ) : (
-                          <span className="text-[10px] text-text-muted">No presentado</span>
-                        )}
-                      </div>
-                    ))}
+                    {agent.documents && Object.entries(agent.documents).map(([key, val]) => {
+                      const docUrl = typeof val === 'string' ? val : (val as any)?.url;
+                      const hasDoc = !!docUrl;
+                      const isValidUrl = hasDoc && (docUrl.startsWith("http://") || docUrl.startsWith("https://") || docUrl.startsWith("/"));
+                      const displayLabel = key === "dui" ? "Documento Identidad (DUI)"
+                        : key === "certificacion" ? "Certificación Profesional"
+                          : key === "antecedentes" ? "Antecedentes Penales"
+                            : key === "domicilio" ? "Comprobante de Domicilio"
+                              : key === "titulo" ? "Título Profesional / Brochure"
+                                : key === "cv" ? "Currículum Vitae (CV)"
+                                  : key.toUpperCase();
+                      
+                      return (
+                        <div key={key} className="flex justify-between items-center border-b border-border-light pb-2">
+                          <span className="font-semibold text-text-secondary">{displayLabel}</span>
+                          {hasDoc ? (
+                            isValidUrl ? (
+                              <a
+                                href={docUrl}
+                                onClick={(e) => handleViewDocument(e, docUrl)}
+                                className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline cursor-pointer"
+                              >
+                                Ver Documento ✓
+                              </a>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 font-bold">Cargado ✓</span>
+                            )
+                          ) : (
+                            <span className="text-[10px] text-text-muted">No presentado</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

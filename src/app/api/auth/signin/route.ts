@@ -15,6 +15,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 401 });
     }
 
+    console.log("ℹ️ [Server Auth] Usuario inició sesión exitosamente (Email/Password):", {
+      id: data?.user?.id,
+      email: data?.user?.email,
+      metadata: data?.user?.user_metadata,
+    });
+
     return NextResponse.json({ data }, { status: 200 });
   } catch (err: any) {
     console.error("SignIn catch error:", err);

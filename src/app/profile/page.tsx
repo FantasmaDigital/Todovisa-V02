@@ -16,6 +16,7 @@ import { StorageClientService } from "@/services/client/StorageClientService";
 import { FormClientService } from "@/services/client/FormClientService";
 import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
+import supabase from "@/app/lib/supabase";
 
 // Convert countries list to sorted array
 const countriesArray = Object.entries(countries)
@@ -111,6 +112,32 @@ export default function PerfilUsuarioPage() {
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
+
+  const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
+    e.preventDefault();
+    if (!docUrl) return;
+
+    const isSupabaseStorage = docUrl.includes("/storage/v1/object/public/todovisa/");
+    if (isSupabaseStorage) {
+      try {
+        const filePath = docUrl.split("/storage/v1/object/public/todovisa/")[1];
+        if (filePath) {
+          const { data, error } = await supabase.storage
+            .from("todovisa")
+            .createSignedUrl(filePath, 60);
+
+          if (error) throw error;
+          if (data?.signedUrl) {
+            window.open(data.signedUrl, "_blank");
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error generating signed URL, falling back to public URL:", err);
+      }
+    }
+    window.open(docUrl, "_blank");
+  };
 
   // Partner / Agent application states
   const [partnerApp, setPartnerApp] = useState<AgentApplicationData | null>(null);
@@ -660,7 +687,7 @@ export default function PerfilUsuarioPage() {
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
             expedienteStatus: metadata.expediente_status || 'draft',
-            role: (profileRole as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
+            role: (profileRole as typeof ROLES[keyof typeof ROLES]) || ROLES.USER,
           };
 
           if (
@@ -1700,7 +1727,7 @@ export default function PerfilUsuarioPage() {
                   const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
                   return [
                     ...baseUserTabs,
-                    { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
+                    { id: "mi_acreditacion", label: "Mi Acreditación 🏅", icon: "🏅" },
                     ...(isAccredited ? [
                       ...(user.role === ROLES.AGENCY ? [
                         { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
@@ -1748,24 +1775,7 @@ export default function PerfilUsuarioPage() {
         <section className="w-full lg:w-3/4">
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
 
-            {/* UNACCREDITED AGENT / AGENCY ALERT BANNER */}
-            {user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (!agentApp || (agentApp.status !== "active" && agentApp.status !== "approved") || !agentApp.signed_at) && (
-              <div className="bg-amber-50 border border-amber-300 rounded-md p-4 mb-6 text-left shadow-xs flex items-start gap-3">
-                <span className="text-2xl">⚠️</span>
-                <div className="flex-1">
-                  <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Areditación Requerida para Operar</h3>
-                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                    Para habilitar todas tus funciones como <strong>{user.role === ROLES.AGENCY ? "Agencia" : "Asesor"}</strong> (enlaces de referidos, comisiones y panel comercial), debes contar con tu <strong>acreditación aprobada y firma de contrato digital completada</strong>.
-                  </p>
-                  <button
-                    onClick={() => setActiveTab("mi_acreditacion")}
-                    className="mt-3 px-4 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded transition-colors cursor-pointer border-none"
-                  >
-                    Completar Mi Acreditación →
-                  </button>
-                </div>
-              </div>
-            )}
+
 
 
             {/* TAB: DATOS PERSONALES */}
@@ -3362,7 +3372,7 @@ export default function PerfilUsuarioPage() {
                           <p><span className="text-text-secondary font-semibold">Correo de Contacto:</span> {partnerApp.email}</p>
                           <p><span className="text-text-secondary font-semibold">Teléfono:</span> {partnerApp.phone}</p>
                           <p><span className="text-text-secondary font-semibold">País de Residencia:</span> {partnerApp.country_residence}</p>
-                          <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {partnerApp.experience_years} años</p>
+                          <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {/^\d+$/.test(String(partnerApp.experience_years).trim()) ? `${partnerApp.experience_years} años` : partnerApp.experience_years}</p>
                         </div>
                       </div>
 
@@ -3579,7 +3589,7 @@ export default function PerfilUsuarioPage() {
                             <p><span className="text-text-secondary font-semibold">Correo:</span> {selectedApp.email}</p>
                             <p><span className="text-text-secondary font-semibold">Teléfono:</span> {selectedApp.phone}</p>
                             <p><span className="text-text-secondary font-semibold">País Residencia:</span> {selectedApp.country_residence}</p>
-                            <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {selectedApp.experience_years} años</p>
+                            <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {/^\d+$/.test(String(selectedApp.experience_years).trim()) ? `${selectedApp.experience_years} años` : selectedApp.experience_years}</p>
                             <p><span className="text-text-secondary font-semibold">Enlace Profesional/Sitio:</span> {selectedApp.linkedin ? <a href={selectedApp.linkedin} target="_blank" rel="noopener noreferrer" className="text-brand-primary hover:underline">{selectedApp.linkedin}</a> : "No provisto"}</p>
                           </div>
 
@@ -3622,7 +3632,7 @@ export default function PerfilUsuarioPage() {
                                 <div key={key} className="flex flex-col gap-1 py-2 border-b border-gray-100 last:border-0">
                                   <span className="font-bold text-text-secondary text-[10px] uppercase tracking-wider">{displayLabel}:</span>
                                   {url ? (
-                                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-bold hover:underline flex items-center gap-1 mt-0.5">
+                                    <a href={url} onClick={(e) => handleViewDocument(e, url)} className="text-brand-primary font-bold hover:underline flex items-center gap-1 mt-0.5 cursor-pointer">
                                       <span>📎</span>
                                       <span>Ver documento adjunto</span>
                                     </a>
@@ -4457,33 +4467,106 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
+                    {/* Documentos Presentados */}
+                    <div className="border border-border-light rounded-sm p-6 bg-white space-y-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Documentos Presentados</h3>
+                        <p className="text-xs text-text-secondary">Expediente de acreditación adjunto al folio.</p>
+                      </div>
+
+                      <div className="space-y-3.5 text-xs text-text-primary">
+                        {agentApp.documents && Object.entries(agentApp.documents).map(([key, val]) => {
+                          const docUrl = typeof val === 'string' ? val : (val as any)?.url;
+                          const hasDoc = !!docUrl;
+                          const isValidUrl = hasDoc && (docUrl.startsWith("http://") || docUrl.startsWith("https://") || docUrl.startsWith("/"));
+                          const displayLabel = key === "dui" ? "Documento Identidad (DUI)"
+                            : key === "certificacion" ? "Certificación Profesional"
+                              : key === "antecedentes" ? "Antecedentes Penales"
+                                : key === "domicilio" ? "Comprobante de Domicilio"
+                                  : key === "titulo" ? "Título Profesional / Brochure"
+                                    : key === "cv" ? "Currículum Vitae (CV)"
+                                      : key.toUpperCase();
+                          
+                          return (
+                            <div key={key} className="flex justify-between items-center border-b border-border-light pb-2 last:border-0 last:pb-0">
+                              <span className="font-semibold text-text-secondary">{displayLabel}</span>
+                              {hasDoc ? (
+                                isValidUrl ? (
+                                  <a
+                                    href={docUrl}
+                                    onClick={(e) => handleViewDocument(e, docUrl)}
+                                    className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline cursor-pointer"
+                                  >
+                                    Ver Documento ✓
+                                  </a>
+                                ) : (
+                                  <span className="text-[10px] text-emerald-600 font-bold">Cargado ✓</span>
+                                )
+                              ) : (
+                                <span className="text-[10px] text-text-muted">No presentado</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     {/* Firma / Commercial agreement */}
-                    {agentApp.status === "approved" && !agentApp.signed_at && (
-                      <div className="border border-amber-200 rounded-sm p-6 bg-amber-50 space-y-4">
+                    {(agentApp.status === "approved" || agentApp.status === "pending") && !agentApp.signed_at && (
+                      <div className={`border rounded-sm p-6 space-y-4 bg-white ${
+                        agentApp.status === "approved" 
+                          ? "border-amber-200" 
+                          : "border-border-light"
+                      }`}>
                         <div>
-                          <h3 className="text-sm font-bold text-amber-900">⚠️ Firma de Acuerdo Comercial Pendiente</h3>
-                          <p className="text-xs text-amber-700 mt-1">Tu postulación ha sido aprobada. Para activar tu cuenta y comenzar a gestionar casos, debes firmar el acuerdo de adhesión comercial.</p>
+                          <h3 className={`text-sm font-bold ${
+                            agentApp.status === "approved" ? "text-amber-900" : "text-text-primary"
+                          }`}>
+                            {agentApp.status === "approved" 
+                              ? "Firma de Acuerdo Comercial Pendiente" 
+                              : "Contrato de Adhesión Comercial"}
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-1">
+                            {agentApp.status === "approved"
+                              ? "Tu postulación ha sido aprobada. Para activar tu cuenta y comenzar a gestionar casos, debes firmar el acuerdo de adhesión comercial."
+                              : "El acuerdo de adhesión comercial estará disponible para revisión y firma digital una vez que tu expediente de postulación sea aprobado por la administración de TodoVisa."}
+                          </p>
                         </div>
                         <form onSubmit={handleSignAgreementInline} className="space-y-3">
-                          <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-800 mb-1">
-                              Firma con tu nombre completo (tal como aparece en el folio)
+                          <div className={agentApp.status === "pending" ? "opacity-60" : ""}>
+                            <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${
+                              agentApp.status === "approved" ? "text-amber-800" : "text-text-secondary"
+                            }`}>
+                              Firma Digital (Nombre Completo)
                             </label>
                             <input
                               type="text"
-                              required
+                              required={agentApp.status === "approved"}
+                              disabled={agentApp.status === "pending"}
                               value={signatureName}
                               onChange={(e) => setSignatureName(e.target.value)}
-                              placeholder="Escribe tu nombre completo para firmar"
-                              className="w-full px-3 py-2 bg-white border border-amber-300 rounded-sm text-sm focus:border-amber-500 focus:outline-none transition-all text-text-primary"
+                              placeholder={
+                                agentApp.status === "pending"
+                                  ? "Disponible al aprobarse la postulación"
+                                  : "Escribe tu nombre completo para firmar"
+                              }
+                              className={`w-full px-3 py-2 border rounded-sm text-sm focus:outline-none transition-all text-text-primary ${
+                                agentApp.status === "approved" 
+                                  ? "bg-white border-amber-300 focus:border-amber-500" 
+                                  : "bg-background-main border-border-light cursor-not-allowed text-text-muted"
+                              }`}
                             />
                           </div>
                           <button
                             type="submit"
-                            disabled={isSigning}
-                            className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center gap-2"
+                            disabled={isSigning || agentApp.status === "pending"}
+                            className={`px-5 py-2 text-white text-xs font-bold rounded-sm transition-all border-none flex items-center gap-2 ${
+                              agentApp.status === "approved"
+                                ? "bg-amber-600 hover:bg-amber-700 cursor-pointer"
+                                : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                            }`}
                           >
-                            {isSigning ? "Firmando..." : "✍️ Firmar Acuerdo Comercial"}
+                            {isSigning ? "Firmando..." : agentApp.status === "pending" ? "Pendiente de Aprobación" : "Firmar Acuerdo Comercial"}
                           </button>
                         </form>
                       </div>

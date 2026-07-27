@@ -7,6 +7,7 @@ import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
 import { ROLES } from "../../constants/roles";
 import { AgentClientService } from "@/services/client/AgentClientService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
 
 export default function MetodosCobroPage() {
   const headerRef = useRef(null);
@@ -44,6 +45,14 @@ export default function MetodosCobroPage() {
     if (!user) return;
     setLoading(true);
     try {
+      // Validate role with the API
+      const profileRes = await ProfileClientService.getProfile(user.id);
+      const apiRole = profileRes?.profile?.role;
+      if (apiRole !== ROLES.AGENT && apiRole !== ROLES.AGENCY) {
+        router.push("/profile");
+        return;
+      }
+
       const portalRes = await AgentClientService.getPortalData(user.id);
       const app = portalRes.application;
       if (app?.payout_settings) {
@@ -58,6 +67,7 @@ export default function MetodosCobroPage() {
       }
     } catch (err) {
       console.error("Error loading payout settings:", err);
+      router.push("/profile");
     } finally {
       setLoading(false);
     }
@@ -65,10 +75,6 @@ export default function MetodosCobroPage() {
 
   useEffect(() => {
     if (isMounted && user) {
-      if (user.role !== ROLES.AGENT && user.role !== ROLES.AGENCY) {
-        router.push("/profile");
-        return;
-      }
       loadPayoutSettings();
     }
   }, [isMounted, user?.id]);

@@ -46,10 +46,19 @@ export default function ComisionesPage() {
     if (!user) return;
     setIsLoadingCommissions(true);
     try {
+      // Validate role with the API
+      const profileRes = await ProfileClientService.getProfile(user.id);
+      const apiRole = profileRes?.profile?.role;
+      if (apiRole !== ROLES.AGENT && apiRole !== ROLES.AGENCY) {
+        router.push("/profile");
+        return;
+      }
+
       const data = await ProfileClientService.getCommissions(user.id);
       setAgentCommissions(data || []);
     } catch (err) {
       console.error("Error fetching commissions:", err);
+      router.push("/profile");
     } finally {
       setIsLoadingCommissions(false);
     }
@@ -57,10 +66,6 @@ export default function ComisionesPage() {
 
   useEffect(() => {
     if (isMounted && user) {
-      if (user.role !== ROLES.AGENT && user.role !== ROLES.AGENCY) {
-        router.push("/profile");
-        return;
-      }
       loadCommissions();
     }
   }, [isMounted, user?.id]);

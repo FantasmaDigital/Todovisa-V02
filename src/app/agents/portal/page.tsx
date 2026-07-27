@@ -8,6 +8,7 @@ import { useAuthStore } from "../../store/authStore";
 import { AgentClientService } from "@/services/client/AgentClientService";
 import { MessageClientService } from "@/app/service/MessageClientService";
 import { ProfileClientService } from "@/services/client/ProfileClientService";
+import supabase from "@/app/lib/supabase";
 
 interface AgentApplication {
   id: string;
@@ -69,6 +70,32 @@ function AgentPortalContent() {
     }, 4500);
   };
 
+  const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
+    e.preventDefault();
+    if (!docUrl) return;
+
+    const isSupabaseStorage = docUrl.includes("/storage/v1/object/public/todovisa/");
+    if (isSupabaseStorage) {
+      try {
+        const filePath = docUrl.split("/storage/v1/object/public/todovisa/")[1];
+        if (filePath) {
+          const { data, error } = await supabase.storage
+            .from("todovisa")
+            .createSignedUrl(filePath, 60);
+
+          if (error) throw error;
+          if (data?.signedUrl) {
+            window.open(data.signedUrl, "_blank");
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error generating signed URL, falling back to public URL:", err);
+      }
+    }
+    window.open(docUrl, "_blank");
+  };
+
   // Manual lookup input
   const [lookupId, setLookupId] = useState("");
 
@@ -77,8 +104,7 @@ function AgentPortalContent() {
   const [signatureName, setSignatureName] = useState("");
   const [signing, setSigning] = useState(false);
 
-  // Admin mock states
-  const [approving, setApproving] = useState(false);
+
 
   // Real Counts and Simulator Stats (computed/real)
   const [invitedCount, setInvitedCount] = useState(0);
@@ -496,32 +522,7 @@ function AgentPortalContent() {
     router.push(`/agents/portal?id=${lookupId.trim().toUpperCase()}`);
   };
 
-  // Mock Admin Action: Approve the application
-  const simulateApproval = async () => {
-    if (!agent) return;
-    setApproving(true);
-    try {
-      if (agent.is_local) {
-        const updated = { ...agent, status: "approved" as const };
-        localStorage.setItem(`agent_app_${agent.application_id}`, JSON.stringify(updated));
-        setAgent(updated);
-        showToast("¡Perfil Aprobado (Local)! Ahora puedes revisar y firmar el contrato legal.", "success");
-      } else {
-        await AgentClientService.updateApplication({
-          id: agent.id,
-          updates: { status: "approved" },
-        });
 
-        setAgent((prev) => (prev ? { ...prev, status: "approved" } : null));
-        showToast("¡Perfil Aprobado! Ahora puedes revisar y firmar el contrato legal.", "success");
-      }
-    } catch (err: unknown) {
-      const errMessage = err instanceof Error ? err.message : String(err);
-      showToast("Error al actualizar estado: " + errMessage, "error");
-    } finally {
-      setApproving(false);
-    }
-  };
 
   // Sign Contract Action
   const signContract = async (e: React.FormEvent) => {
@@ -675,7 +676,7 @@ function AgentPortalContent() {
       </div>
 
       <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col gap-8">
-        {agent && (!agent.signed_at || (agent.status !== "active" && agent.status !== "approved")) && (
+        {agent && agent.status === "approved" && !agent.signed_at && (
           <div className="bg-red-50 border border-red-200 rounded-sm p-6 text-left shadow-xs flex flex-col gap-3">
             <div className="flex items-center gap-2 text-red-800 font-bold text-sm">
               <span>🛑</span> Acreditación Pendiente de Firma / Aprobación
@@ -877,30 +878,6 @@ function AgentPortalContent() {
                     </div>
                   </div>
 
-                  {/* Testing Simulation Box */}
-                  <div className="bg-brand-light/35 border border-brand-primary/20 rounded-sm p-6 space-y-4">
-                    <div>
-                      <span className="bg-brand-primary text-white text-[8px] font-bold px-2 py-0.5 rounded tracking-wide">MOCK TESTING DE ADMINISTRACIÓN</span>
-                      <h3 className="text-md font-bold text-text-primary mt-2">Simular Aprobación de TodoVisa</h3>
-                      <p className="text-xs text-text-secondary mt-1">
-                        Dado que estás en modo de demostración, puedes omitir la espera de 3 días y aprobar este perfil de inmediato haciendo clic en el botón de abajo. Esto actualizará el estado de la postulación en la base de datos de Supabase.
-                      </p>
-                    </div>
-                    <button
-                      onClick={simulateApproval}
-                      disabled={approving}
-                      className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all focus:outline-none flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
-                    >
-                      {approving ? (
-                        <>
-                          <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                          Actualizando Supabase...
-                        </>
-                      ) : (
-                        "Aprobar Perfil Ahora ✓"
-                      )}
-                    </button>
-                  </div>
 
                   {/* Submission Details Summary */}
                   <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
@@ -921,7 +898,7 @@ function AgentPortalContent() {
                       </div>
                       <div>
                         <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Años de Experiencia</span>
-                        <p>{agent.experience_years} Años</p>
+                        <p>{/^\d+$/.test(agent.experience_years.trim()) ? `${agent.experience_years} Años` : agent.experience_years}</p>
                       </div>
                       </div>
                     </div>
@@ -1598,31 +1575,39 @@ function AgentPortalContent() {
                 </h4>
 
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-secondary">Documento Identidad (DUI)</span>
-                    <span className="text-emerald-600 font-bold">✓ Recibido</span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-secondary">Certificación Profesional</span>
-                    <span className={agent.documents.certificacion ? "text-emerald-600 font-bold" : "text-text-muted font-medium"}>
-                      {agent.documents.certificacion ? "✓ Recibido" : "No adjuntado"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-secondary">Antecedentes Penales</span>
-                    <span className={agent.documents.antecedentes ? "text-emerald-600 font-bold" : "text-text-muted font-medium"}>
-                      {agent.documents.antecedentes ? "✓ Recibido" : "No adjuntado"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-secondary">Currículum Vitae (CV)</span>
-                    <span className={agent.documents.cv ? "text-emerald-600 font-bold" : "text-text-muted font-medium"}>
-                      {agent.documents.cv ? "✓ Recibido" : "No adjuntado"}
-                    </span>
-                  </div>
+                  {[
+                    { key: "dui", label: "Documento Identidad (DUI)" },
+                    { key: "certificacion", label: "Certificación Profesional" },
+                    { key: "antecedentes", label: "Antecedentes Penales" },
+                    { key: "cv", label: "Currículum Vitae (CV)" },
+                    { key: "domicilio", label: "Comprobante de Domicilio" },
+                    { key: "titulo", label: "Título Profesional / Brochure" }
+                  ].map((doc) => {
+                    const docUrl = agent.documents?.[doc.key as keyof typeof agent.documents];
+                    const hasDoc = !!docUrl;
+                    const isValidUrl = hasDoc && (docUrl.startsWith("http://") || docUrl.startsWith("https://") || docUrl.startsWith("/"));
+                    
+                    return (
+                      <div key={doc.key} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0 last:pb-0">
+                        <span className="text-text-secondary">{doc.label}</span>
+                        {hasDoc ? (
+                          isValidUrl ? (
+                            <a
+                              href={docUrl}
+                              onClick={(e) => handleViewDocument(e, docUrl)}
+                              className="text-emerald-600 hover:text-emerald-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              ✓ Ver Documento
+                            </a>
+                          ) : (
+                            <span className="text-emerald-600 font-bold">✓ Recibido</span>
+                          )
+                        ) : (
+                          <span className="text-text-muted font-medium">No adjuntado</span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

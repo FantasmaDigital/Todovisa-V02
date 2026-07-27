@@ -18,6 +18,56 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
     useEffect(() => {
         setIsMounted(true);
         if (typeof window !== "undefined") {
+            if (!(window as any).__fetch_intercepted__) {
+                (window as any).__fetch_intercepted__ = true;
+                const originalFetch = window.fetch;
+                window.fetch = async function (input, init) {
+                    let url = "";
+                    if (typeof input === "string") {
+                        url = input;
+                    } else if (input instanceof URL) {
+                        url = input.href;
+                    } else if (input && typeof input === "object" && "url" in input) {
+                        url = (input as any).url;
+                    }
+
+                    const isRelativeApi = url.startsWith("/api/") || url.startsWith("api/");
+                    const isAbsoluteLocalApi = url.startsWith(window.location.origin + "/api/");
+                    
+                    if (isRelativeApi || isAbsoluteLocalApi) {
+                        init = init || {};
+                        let headers: Headers;
+                        if (init.headers) {
+                            headers = new Headers(init.headers);
+                        } else if (input && typeof input === "object" && "headers" in input) {
+                            headers = new Headers((input as any).headers);
+                        } else {
+                            headers = new Headers();
+                        }
+                        
+                        let sessionStr = null;
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const key = localStorage.key(i);
+                            if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                                sessionStr = localStorage.getItem(key);
+                                break;
+                            }
+                        }
+                        if (sessionStr) {
+                            try {
+                                const parsed = JSON.parse(sessionStr);
+                                if (parsed?.access_token && !headers.has("Authorization")) {
+                                    headers.set("Authorization", `Bearer ${parsed.access_token}`);
+                                }
+                            } catch (e) {}
+                        }
+                        
+                        init.headers = headers;
+                    }
+                    return originalFetch.call(this, input, init);
+                };
+            }
+
             const params = new URLSearchParams(window.location.search);
             const refParam = params.get("ref") || params.get("agency_ref");
             if (refParam) {
@@ -33,55 +83,88 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
     useEffect(() => {
         const syncSession = async () => {
-            if (!user) {
-                try {
-                    const userRes = await AuthService.getUser().catch(() => null);
-                    const supabaseUser = userRes?.data?.user;
-                    if (supabaseUser) {
-                        let profileRole = null;
-                        try {
-                            const profileRes = await ProfileClientService.getProfile(supabaseUser.id);
-                            profileRole = profileRes?.profile?.role;
-                        } catch (pErr) {
-                            console.warn("Could not fetch profile role:", pErr);
+            try {
+                // Pre-check if any supabase session token exists in localStorage to avoid useless 401 calls
+                let hasToken = false;
+                if (typeof window !== "undefined") {
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                            const val = localStorage.getItem(key);
+                            if (val) {
+                                try {
+                                    const parsed = JSON.parse(val);
+                                    if (parsed?.access_token) {
+                                        hasToken = true;
+                                    }
+                                } catch (e) {}
+                            }
+                            break;
                         }
+                    }
+                }
 
-                        const metadata = supabaseUser.user_metadata || {};
-                        const updatedUser = {
-                            id: supabaseUser.id,
-                            email: supabaseUser.email || '',
-                            firstName: metadata.first_name || metadata.full_name?.split(' ')[0] || metadata.name?.split(' ')[0] || '',
-                            lastName: metadata.last_name || metadata.full_name?.split(' ').slice(1).join(' ') || metadata.name?.split(' ').slice(1).join(' ') || '',
-                            phone: metadata.phone || '',
-                            country: metadata.country || '',
-                            viproScore: metadata.vipro_score || null,
-                            viproCompleted: metadata.vipro_completed || false,
-                            viproDestination: metadata.vipro_destination || null,
-                            hasPaidAdvisor: metadata.has_paid_advisor || false,
-                            assignedAgentId: metadata.assigned_agent_id || null,
-                            photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
-                            avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-                            lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
-                            ds160FullName: metadata.ds160_full_name || null,
-                            ds160PassportNum: metadata.ds160_passport_num || null,
-                            ds160BirthDate: metadata.ds160_birth_date || null,
-                            ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
-                            ds160HasAssets: metadata.ds160_has_assets ?? true,
-                            ds160Confirmed: metadata.ds160_confirmed || false,
-                            expedienteStatus: metadata.expediente_status || 'draft',
-                            role: (profileRole as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
-                        };
+                if (!hasToken) {
+                    return;
+                }
+
+                const userRes = await AuthService.getUser().catch(() => null);
+                const supabaseUser = userRes?.data?.user;
+                if (supabaseUser) {
+                    let profileRole = null;
+                    try {
+                        const profileRes = await ProfileClientService.getProfile(supabaseUser.id);
+                        profileRole = profileRes?.profile?.role;
+                    } catch (pErr) {
+                        console.warn("Could not fetch profile role:", pErr);
+                    }
+
+                    const metadata = supabaseUser.user_metadata || {};
+                    const updatedUser = {
+                        id: supabaseUser.id,
+                        email: supabaseUser.email || '',
+                        firstName: metadata.first_name || metadata.full_name?.split(' ')[0] || metadata.name?.split(' ')[0] || '',
+                        lastName: metadata.last_name || metadata.full_name?.split(' ').slice(1).join(' ') || metadata.name?.split(' ').slice(1).join(' ') || '',
+                        phone: metadata.phone || '',
+                        country: metadata.country || '',
+                        viproScore: metadata.vipro_score || null,
+                        viproCompleted: metadata.vipro_completed || false,
+                        viproDestination: metadata.vipro_destination || null,
+                        hasPaidAdvisor: metadata.has_paid_advisor || false,
+                        assignedAgentId: metadata.assigned_agent_id || null,
+                        photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
+                        avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
+                        lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
+                        ds160FullName: metadata.ds160_full_name || null,
+                        ds160PassportNum: metadata.ds160_passport_num || null,
+                        ds160BirthDate: metadata.ds160_birth_date || null,
+                        ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
+                        ds160HasAssets: metadata.ds160_has_assets ?? true,
+                        ds160Confirmed: metadata.ds160_confirmed || false,
+                        expedienteStatus: metadata.expediente_status || 'draft',
+                        role: (profileRole as typeof ROLES[keyof typeof ROLES]) || ROLES.USER,
+                    };
+
+                    const currentUser = useAuthStore.getState().user;
+                    const isDifferent = !currentUser || 
+                        currentUser.id !== updatedUser.id || 
+                        currentUser.role !== updatedUser.role || 
+                        currentUser.email !== updatedUser.email || 
+                        currentUser.firstName !== updatedUser.firstName ||
+                        currentUser.lastName !== updatedUser.lastName;
+
+                    if (isDifferent) {
                         useAuthStore.getState().setUser(updatedUser);
                     }
-                } catch (e) {
-                    console.error("Error syncing Google/OAuth user session in Header:", e);
                 }
+            } catch (e) {
+                console.error("Error syncing Google/OAuth user session in Header:", e);
             }
         };
         if (isMounted) {
             syncSession();
         }
-    }, [user, isMounted]);
+    }, [isMounted]);
 
     const userData = isMounted ? user : null;
 
@@ -117,6 +200,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                         width={72}
                                         height={72}
                                         className="object-contain"
+                                        style={{ height: "auto" }}
                                     />
                                 </Link>
                             </div>

@@ -91,7 +91,7 @@ export default function AgentesPage() {
             languages: app?.languages || ["Español"],
             countries: app?.target_countries || ["Estados Unidos"],
             specialties: app?.specialties || ["Asesoría General"],
-            experience: app?.experience_years ? `${app.experience_years} años` : "—",
+            experience: app?.experience_years ? (/^\d+$/.test(app.experience_years.trim()) ? `${app.experience_years} años` : app.experience_years) : "—",
             availability: "Inmediata",
             bio: profile.bio || app?.biography ||
               `Agencia Registrada. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
@@ -120,7 +120,7 @@ export default function AgentesPage() {
             languages: app.languages || ["Español"],
             countries: app.target_countries || ["Estados Unidos"],
             specialties: app.specialties || ["Asesoría General"],
-            experience: app.experience_years ? `${app.experience_years} años` : "—",
+            experience: app.experience_years ? (/^\d+$/.test(app.experience_years.trim()) ? `${app.experience_years} años` : app.experience_years) : "—",
             availability: "Inmediata",
             bio: app.biography || "Asesor consular certificado en la red TodoVisa.",
             whatsapp: `https://wa.me/${phone}?text=Hola,%20me%20gustar%C3%ADa%20recibir%20asesor%C3%ADa.`,

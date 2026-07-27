@@ -1,8 +1,16 @@
 import { AuthRepository } from "@/lib/repositories/auth.repository";
 import { NextResponse } from "next/server";
 
+import supabase from "@/app/lib/supabase";
+
 export async function POST(request: Request) {
   try {
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+    if (token) {
+      await supabase.auth.setSession({ access_token: token, refresh_token: "" }).catch(() => null);
+    }
+
     const { metadata } = await request.json();
 
     if (!metadata) {

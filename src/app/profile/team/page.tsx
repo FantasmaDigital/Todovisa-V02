@@ -61,15 +61,24 @@ export default function MiEquipoPage() {
 
   // Fetch agency team members & invitations
   const loadAgencyTeamData = async () => {
-    if (!user || user.role !== ROLES.AGENCY) return;
+    if (!user) return;
     setIsLoadingMembers(true);
     setIsLoadingInvitations(true);
     try {
+      // Validate role with the API
+      const profileRes = await ProfileClientService.getProfile(user.id);
+      const apiRole = profileRes?.profile?.role;
+      if (apiRole !== ROLES.AGENCY) {
+        router.push("/profile");
+        return;
+      }
+
       const teamData = await ProfileClientService.getTeam(user.id);
       setAgencyMembers(teamData.members || []);
       setAgencyInvitations(teamData.invitations || []);
     } catch (err) {
       console.error("Error fetching agency team data:", err);
+      router.push("/profile");
     } finally {
       setIsLoadingMembers(false);
       setIsLoadingInvitations(false);
@@ -78,10 +87,6 @@ export default function MiEquipoPage() {
 
   useEffect(() => {
     if (isMounted && user) {
-      if (user.role !== ROLES.AGENCY) {
-        router.push("/profile");
-        return;
-      }
       loadAgencyTeamData();
     }
   }, [isMounted, user?.id]);

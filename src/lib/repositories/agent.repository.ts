@@ -67,6 +67,30 @@ export class AgentRepository {
         .eq("user_id", userId)
         .maybeSingle();
       application = data;
+
+      if (!application) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (profile?.email) {
+          const { data: appByEmail } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .eq("email", profile.email)
+            .maybeSingle();
+
+          if (appByEmail) {
+            application = appByEmail;
+            await supabase
+              .from("agent_applications")
+              .update({ user_id: userId })
+              .eq("id", appByEmail.id);
+          }
+        }
+      }
     }
 
     const { data: fallback } = await supabase
