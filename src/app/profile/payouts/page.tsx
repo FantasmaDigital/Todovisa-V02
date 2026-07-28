@@ -130,7 +130,7 @@ export default function MetodosCobroPage() {
         {/* Back navigation */}
         <div className="mb-6">
           <button
-            onClick={() => router.push("/profile?tab=portal_agente")}
+            onClick={() => router.push("/agents/portal")}
             className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1 cursor-pointer border-none bg-transparent"
           >
             &larr; Volver al Panel

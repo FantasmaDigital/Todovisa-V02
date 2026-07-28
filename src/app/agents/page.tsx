@@ -41,7 +41,7 @@ export default function AgentesPage() {
   const [selectedSpecialty, setSelectedSpecialty] = useState("Todos");
   const [selectedLanguage, setSelectedLanguage] = useState("Todos");
   const [selectedAvailability, setSelectedAvailability] = useState("Todos");
-  const [selectedPartnerType, setSelectedPartnerType] = useState("Todos");
+
 
   // State for active modal agent
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
@@ -74,33 +74,7 @@ export default function AgentesPage() {
         const activeApps = data.activeApps || [];
         const agencyMemberIds = new Set(data.agencyMemberIds || []);
 
-        // 1. Agencies
-        agencyProfiles.forEach((profile: any) => {
-          const app = agencyAppsMap[profile.id];
-          const name = `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || profile.email;
-          const phone = profile.phone?.replace(/\D/g, "") || "50370200976";
-
-          list.push({
-            id: `agency-${profile.id}`,
-            userId: profile.id,
-            name,
-            title: "Agencia de Viajes y Asesoría Consular",
-            photo: profile.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=300",
-            rating: 5.0,
-            reviewsCount: 0,
-            languages: app?.languages || ["Español"],
-            countries: app?.target_countries || ["Estados Unidos"],
-            specialties: app?.specialties || ["Asesoría General"],
-            experience: app?.experience_years ? (/^\d+$/.test(app.experience_years.trim()) ? `${app.experience_years} años` : app.experience_years) : "—",
-            availability: "Inmediata",
-            bio: profile.bio || app?.biography ||
-              `Agencia Registrada. Al contratar con ${name}, nuestro equipo asignará al mejor asesor para gestionar tu trámite.`,
-            whatsapp: `https://wa.me/${phone}?text=Hola%20${encodeURIComponent(name)},%20me%20gustar%C3%ADa%20contratar%20sus%20servicios.`,
-            featured: true,
-            partnerType: "b2b_agency_entity",
-            agencyName: name,
-          });
-        });
+        // 1. Agencies (B2B Agencies are not listed directly for hire, they operate via referral links)
 
         // 2. Independent agents
         const agencyUserIds = new Set(agencyProfiles.map((p: any) => p.id));
@@ -160,8 +134,6 @@ export default function AgentesPage() {
   const allSpecialties = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.specialties))).sort()];
   const allLanguages = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.languages))).sort()];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
-  const partnerTypes = ["Todos", "Asesores Independientes", "Agencias de Viajes"];
-
   // Filter logic
   const filteredAgents = agents.filter((agent) => {
     const matchesSearch =
@@ -185,13 +157,8 @@ export default function AgentesPage() {
       selectedAvailability === "Todos" ||
       agent.availability.toLowerCase() === selectedAvailability.toLowerCase();
 
-    const matchesPartnerType =
-      selectedPartnerType === "Todos" ||
-      (selectedPartnerType === "Asesores Independientes" && agent.partnerType === "outsourced_agent") ||
-      (selectedPartnerType === "Agencias de Viajes" && agent.partnerType === "b2b_agency_entity");
 
-
-    return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability && matchesPartnerType;
+    return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability;
   });
 
   const clearFilters = () => {
@@ -200,7 +167,6 @@ export default function AgentesPage() {
     setSelectedSpecialty("Todos");
     setSelectedLanguage("Todos");
     setSelectedAvailability("Todos");
-    setSelectedPartnerType("Todos");
   };
 
   return (
@@ -337,24 +303,7 @@ export default function AgentesPage() {
               </select>
             </div>
 
-            {/* Filtro de Tipo de Socio */}
-            <div className="mb-2">
-              <label htmlFor="partner-type-select" className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
-                Tipo de Socio
-              </label>
-              <select
-                id="partner-type-select"
-                value={selectedPartnerType}
-                onChange={(e) => setSelectedPartnerType(e.target.value)}
-                className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
-              >
-                {partnerTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
+
           </div>
         </aside>
 

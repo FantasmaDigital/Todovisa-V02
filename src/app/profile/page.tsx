@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { UserAvatar } from "../components/shared/UserAvatar";
@@ -146,7 +146,7 @@ export default function PerfilUsuarioPage() {
   const [adminNotesInput, setAdminNotesInput] = useState("");
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [isLoadingPartnerApp, setIsLoadingPartnerApp] = useState(false);
+  const [isLoadingPartnerApp, setIsLoadingPartnerApp] = useState(true);
 
   // Real Commissions & Agency Portal states
   const [agentCommissions, setAgentCommissions] = useState<Commission[]>([]);
@@ -168,6 +168,7 @@ export default function PerfilUsuarioPage() {
   const [taxId, setTaxId] = useState("");
   const [savingPayout, setSavingPayout] = useState(false);
   const [isLoadingPayout, setIsLoadingPayout] = useState(false);
+  const [copiedReferral, setCopiedReferral] = useState(false);
 
   // Inline Accreditation states (for mi_acreditacion tab)
   const [agentApp, setAgentApp] = useState<AgentApplicationData | null>(null);
@@ -315,7 +316,7 @@ export default function PerfilUsuarioPage() {
     };
 
     fetchMyAgency();
-  }, [user]);
+  }, [user?.id, user?.role]);  // Only re-run on identity/role changes
 
   useEffect(() => {
     if (!user || user.role === "agent") {
@@ -335,7 +336,7 @@ export default function PerfilUsuarioPage() {
     };
 
     fetchRealInvitation();
-  }, [user]);
+  }, [user?.id, user?.role]);  // Only re-run on identity/role changes
 
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -808,7 +809,10 @@ export default function PerfilUsuarioPage() {
 
   // Load partner application and admin list
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setIsLoadingPartnerApp(false);
+      return;
+    }
 
     const loadPartnerData = async () => {
       setIsLoadingPartnerApp(true);
@@ -827,6 +831,10 @@ export default function PerfilUsuarioPage() {
         const portalRes = await AgentClientService.getPortalData(targetUserId);
         if (portalRes.application) {
           setPartnerApp(portalRes.application);
+          setAgentApp(portalRes.application);
+          if (portalRes.application.signature_name) {
+            setSignatureName(portalRes.application.signature_name);
+          }
         }
 
         const isAdmin = user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR;
@@ -844,12 +852,11 @@ export default function PerfilUsuarioPage() {
     };
 
     loadPartnerData();
-  }, [user]);
+  }, [user?.id, user?.role]);  // Re-run when identity OR role changes (role syncs async), but not on metadata updates
 
-  // Admin action handlers: trigger security modal and execute database status change
+  // Admin action handlers: trigger database status change directly
   const triggerAdminSecurityModal = (app: AgentApplicationData, action: "approved" | "rejected") => {
-    setSecurityConfirmed(false);
-    setSecurityModalData({ app, targetAction: action });
+    executeAdminAction(app.id, action);
   };
 
   const executeAdminAction = async (appId: string, action: "approved" | "rejected" | "comment_only") => {
@@ -886,10 +893,39 @@ export default function PerfilUsuarioPage() {
         "success"
       );
 
-      if (action === "approved" && targetApp?.user_id) {
+      if (action === "approved") {
         const applicantType = targetApp.application_type || "individual";
         const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
-        await ProfileClientService.updateProfile(targetApp.user_id, { role: newRole });
+
+        // Try direct user_id, or email match, or application profile lookup
+        let targetUserId = targetApp?.user_id;
+
+        if (!targetUserId && targetApp?.email) {
+          try {
+            const allProfiles = await ProfileClientService.getAllProfiles();
+            const matchingProfile = allProfiles?.find((p: any) =>
+              p.email?.toLowerCase() === targetApp.email?.toLowerCase()
+            );
+            if (matchingProfile?.id) {
+              targetUserId = matchingProfile.id;
+            }
+          } catch (e) {
+            console.error("[Admin Approval] Error fetching profiles by email:", e);
+          }
+        }
+
+        if (targetUserId) {
+          console.log(`[Admin Approval] Updating profile ${targetUserId} to role: ${newRole}`);
+          await ProfileClientService.updateProfile(targetUserId, { role: newRole });
+
+          // If the admin approved their own agent application, sync current user state
+          if (targetUserId === user.id) {
+            setUser({ ...user, role: newRole as any });
+          }
+        } else {
+          console.warn("[Admin Approval] Could not match application to any profile ID or email:", targetApp);
+          showToast("Aprobado en solicitudes, pero el usuario no tiene una cuenta vinculada aún.", "info");
+        }
       }
 
       setSelectedApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
@@ -911,8 +947,6 @@ export default function PerfilUsuarioPage() {
       showToast("Error al guardar cambios.", "error");
     } finally {
       setIsSavingAdmin(false);
-      setSecurityModalData(null);
-      setSecurityConfirmed(false);
     }
   };
 
@@ -1089,6 +1123,7 @@ export default function PerfilUsuarioPage() {
         updates: { status: "active", signature_name: signatureName.trim(), signed_at: nowString }
       });
       setAgentApp((prev) => prev ? { ...prev, status: "active", signature_name: signatureName.trim(), signed_at: nowString } : null);
+      setPartnerApp((prev) => prev ? { ...prev, status: "active", signature_name: signatureName.trim(), signed_at: nowString } : null);
       showToast("¡Contrato firmado con éxito! Tu acreditación se encuentra activa.", "success");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1767,8 +1802,10 @@ export default function PerfilUsuarioPage() {
           </div>
 
           <div className="text-center md:text-left text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5">
-              {user?.role === ROLES.ADMIN || user?.role === ROLES.MODERATOR
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5 flex items-center justify-center md:justify-start gap-2 min-h-[16px]">
+              {isLoadingPartnerApp ? (
+                <span className="inline-block w-24 h-3 bg-white/20 rounded animate-pulse"></span>
+              ) : user?.role === ROLES.ADMIN || user?.role === ROLES.MODERATOR
                 ? "Panel de Administración"
                 : (user?.role === ROLES.AGENT || user?.role === ROLES.AGENCY) && agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at)
                   ? (user?.role === ROLES.AGENCY ? "Panel de Agencia" : "Panel de Asesor")
@@ -1812,97 +1849,118 @@ export default function PerfilUsuarioPage() {
 
             {/* Navegación Vertical */}
             <nav className="p-2 flex flex-col gap-1">
-              {(() => {
-                const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
-                const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
+              {isLoadingPartnerApp ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <div
+                    key={`sidebar-skeleton-${index}`}
+                    className="w-full flex items-center gap-3 px-4 py-3 animate-pulse"
+                  >
+                    <div className="w-4 h-4 bg-slate-100 rounded-full shrink-0"></div>
+                    <div className="h-4 bg-slate-100 rounded-md w-32"></div>
+                  </div>
+                ))
+              ) : (
+                (() => {
+                  const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
+                  const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
 
-                const svgIcons: Record<string, JSX.Element> = {
-                  datos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
-                  proceso: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>,
-                  vipro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
-                  asesor: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-                  pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
-                  admin_dashboard: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 13a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1v-6z" /></svg>,
-                  admin_socios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
-                  admin_usuarios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
-                  admin_expedientes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>,
-                  admin_vipro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
-                  admin_pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
-                  mi_acreditacion: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
-                  panel_empresa: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
-                  invitar_agentes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>,
-                  chat_agente: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>,
-                  comisiones: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-                  metodos_cobro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-                  solicitud: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
-                };
+                  const svgIcons: Record<string, React.ReactNode> = {
+                    datos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+                    proceso: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>,
+                    vipro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
+                    asesor: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+                    pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
+                    admin_dashboard: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 13a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1v-6z" /></svg>,
+                    admin_socios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
+                    admin_usuarios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+                    admin_expedientes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>,
+                    admin_vipro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
+                    admin_pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
+                    mi_acreditacion: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
+                    panel_empresa: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+                    invitar_agentes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>,
+                    chat_agente: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>,
+                    comisiones: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+                    metodos_cobro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+                    solicitud: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+                  };
 
-                const baseUserTabs = [
-                  { id: "datos", label: "Mis Datos Personales" },
-                  { id: "proceso", label: "Seguimiento de Trámite" },
-                  { id: "vipro", label: "Evaluación VIPRO" },
-                  { id: "asesor", label: "Mi Asesor Asignado" },
-                  { id: "pagos", label: "Pagos y Comprobantes" },
-                ];
-
-                // --- Tabs for admin / moderator ---
-                if (isStaff) {
-                  return [
+                  const baseUserTabs = [
                     { id: "datos", label: "Mis Datos Personales" },
-                    { id: "admin_dashboard", label: "Panel de Control Global" },
-                    { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderación de Socios" : "Administrar Socios y Agentes" },
-                    { id: "admin_usuarios", label: "Gestión de Usuarios" },
-                    { id: "admin_expedientes", label: "Monitor de Expedientes" },
-                    { id: "admin_vipro", label: "Evaluaciones VIPRO" },
-                    { id: "admin_pagos", label: "Historial de Pagos" },
-                  ].map(t => ({ ...t, svgIcon: svgIcons[t.id] }));
-                }
+                    { id: "proceso", label: "Seguimiento de Trámite" },
+                    { id: "vipro", label: "Evaluación VIPRO" },
+                    { id: "asesor", label: "Mi Asesor Asignado" },
+                    { id: "pagos", label: "Pagos y Comprobantes" },
+                  ];
 
-                // --- Tabs for agents / agencies ---
-                if (isAgent) {
-                  const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
+                  // --- Tabs for admin / moderator ---
+                  if (isStaff) {
+                    return [
+                      { id: "datos", label: "Mis Datos Personales" },
+                      { id: "admin_dashboard", label: "Panel de Control Global" },
+                      { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderación de Socios" : "Administrar Socios y Agentes" },
+                      { id: "admin_usuarios", label: "Gestión de Usuarios" },
+                      { id: "admin_expedientes", label: "Monitor de Expedientes" },
+                      { id: "admin_vipro", label: "Evaluaciones VIPRO" },
+                      { id: "admin_pagos", label: "Historial de Pagos" },
+                    ].map(t => ({ ...t, svgIcon: svgIcons[t.id] }));
+                  }
+
+                  // --- Tabs for agents / agencies ---
+                  if (isAgent) {
+                    const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
+                    
+                    if (user.role === ROLES.AGENCY) {
+                      return [
+                        { id: "datos", label: "Mis Datos Personales" },
+                        { id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" },
+                        ...(isAccredited ? [
+                          { id: "invitar_agentes", label: "Link de Referidos" },
+                          { id: "comisiones", label: "Comisiones Realizadas" },
+                          { id: "metodos_cobro", label: "Métodos de Cobro" },
+                        ] : []),
+                      ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
+                    }
+
+                    // For standard Agent (advisor)
+                    return [
+                      ...baseUserTabs,
+                      { id: "mi_acreditacion", label: "Mi Acreditación" },
+                      ...(isAccredited ? [
+                        { id: "chat_agente", label: "Chat con Clientes" },
+                        { id: "comisiones", label: "Comisiones Realizadas" },
+                        { id: "metodos_cobro", label: "Métodos de Cobro" },
+                      ] : []),
+                    ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
+                  }
+
+                  // --- Default tabs for regular users ---
                   return [
                     ...baseUserTabs,
-                    { id: "mi_acreditacion", label: "Mi Acreditación" },
-                    ...(isAccredited ? [
-                      ...(user.role === ROLES.AGENCY ? [
-                        { id: "panel_empresa", label: "Panel de Empresa", isLink: true, url: "/agents/portal" },
-                        { id: "invitar_agentes", label: "Link de Referidos" },
-                      ] : [
-                        { id: "chat_agente", label: "Chat con Clientes" },
-                      ]),
-                      { id: "comisiones", label: "Comisiones Realizadas" },
-                      { id: "metodos_cobro", label: "Métodos de Cobro" },
-                    ] : []),
+                    ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
                   ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
-                }
-
-                // --- Default tabs for regular users ---
-                return [
-                  ...baseUserTabs,
-                  ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
-                ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
-              })().map((tab: { id: string; label: string; svgIcon?: JSX.Element; isLink?: boolean; url?: string }) => (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    if (tab.isLink && tab.url) {
-                      router.push(tab.url);
-                    } else {
-                      handleTabChange(tab.id);
-                    }
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
-                      ? "bg-brand-light text-brand-primary font-semibold"
-                      : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
-                    }`}
-                >
-                  <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"}`}>
-                    {tab.svgIcon || <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg>}
-                  </span>
-                  <span>{tab.label}</span>
-                </button>
-              ))}
+                })().map((tab: { id: string; label: string; svgIcon?: React.ReactNode; isLink?: boolean; url?: string }) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      if (tab.isLink && tab.url) {
+                        router.push(tab.url);
+                      } else {
+                        handleTabChange(tab.id);
+                      }
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
+                        ? "bg-brand-light text-brand-primary font-semibold"
+                        : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
+                      }`}
+                  >
+                    <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"}`}>
+                      {tab.svgIcon || <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg>}
+                    </span>
+                    <span>{tab.label}</span>
+                  </button>
+                ))
+              )}
             </nav>
           </div>
         </aside>
@@ -1910,12 +1968,25 @@ export default function PerfilUsuarioPage() {
         {/* Columna Derecha: Contenido del Tab Activo */}
         <section className="w-full lg:w-3/4">
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
-
-
-
-
-            {/* TAB: DATOS PERSONALES */}
-            {activeTab === "datos" && (
+            {isLoadingPartnerApp ? (
+              <div className="space-y-6 text-left animate-pulse">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-light pb-4">
+                  <div className="space-y-2">
+                    <div className="h-6 bg-slate-200 rounded-lg w-64"></div>
+                    <div className="h-4 bg-slate-100 rounded-lg w-80"></div>
+                  </div>
+                  <div className="h-10 bg-slate-200 rounded-lg w-24"></div>
+                </div>
+                <div className="space-y-4 pt-4">
+                  <div className="h-10 bg-slate-200 rounded-xl w-full"></div>
+                  <div className="h-10 bg-slate-100 rounded-xl w-full"></div>
+                  <div className="h-10 bg-slate-100 rounded-xl w-full"></div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* TAB: DATOS PERSONALES */}
+                {activeTab === "datos" && (
               <div>
                 <div className="mb-6 pb-4 border-b border-border-light">
                   <h2 className="text-lg font-bold text-text-primary">Datos Personales</h2>
@@ -4804,35 +4875,53 @@ export default function PerfilUsuarioPage() {
             {/* TAB: COMISIONES REALIZADAS */}
             {activeTab === "comisiones" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
               <div className="animate-fadeIn">
-                <div className="mb-6 pb-4 border-b border-border-light">
+                <div className="mb-6 pb-4 border-b border-border-light text-left">
                   <h2 className="text-lg font-bold text-text-primary">Historial y Control de Comisiones</h2>
                   <p className="text-xs text-text-secondary mt-1">Revisa el detalle, tasa de comisiones y balances netos acumulados de tus expedientes cerrados.</p>
                 </div>
 
+                {/* Info Card explaining how commissions work */}
+                <div className="bg-brand-light/30 border border-brand-primary/10 rounded-sm p-5 mb-6 text-left space-y-2">
+                  <div className="flex items-center gap-2 text-brand-primary font-bold text-xs">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 111.085 1.085l-.04.02-.086.041a.25.25 0 00-.115.1l-.014.032m-3.56 3.85a9 9 0 1112.728 0M12 20.25a8.25 8.25 0 100-16.5 8.25 8.25 0 000 16.5z" />
+                    </svg>
+                    <span>¿Cómo funciona el esquema de comisiones?</span>
+                  </div>
+                  {user.role === ROLES.AGENCY ? (
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Como Agencia/Socio Comercial, recibes el <strong>30% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>40% (tarifa estándar) o 60% (tarifa experto)</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                    </p>
+                  )}
+                </div>
+
                 {/* Financial metrics */}
                 {(() => {
-                  const rate = user.role === ROLES.AGENCY ? 0.85 : 0.80;
-                  const gross = agentCommissions.filter(c => c.status === "paid").reduce((sum, c) => sum + (c.commission_amount || 0), 0);
-                  const share = gross * rate;
-                  const fee = share * 0.05;
-                  const net = share - fee;
+                  const rateLabel = user.role === ROLES.AGENCY ? "30% (Referido)" : "40% / 60% (Asesor)";
+                  const gross = agentCommissions.reduce((sum, c) => sum + (c.gross_amount || (user.role === ROLES.AGENCY ? c.commission_amount / 0.30 : c.commission_amount / 0.60) || 0), 0);
+                  const net = agentCommissions.reduce((sum, c) => sum + (c.commission_amount || 0), 0);
+                  const platformShare = gross - net;
                   return (
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
                       <div className="p-4 bg-background-main border border-border-light rounded-sm">
                         <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Facturación Bruta</span>
-                        <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)}</p>
+                        <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)} USD</p>
                       </div>
                       <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Tasa de Comisión</span>
-                        <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{(rate * 100).toFixed(0)}%</p>
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Esquema de Comisión</span>
+                        <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{rateLabel}</p>
                       </div>
                       <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Deducción TodoVisa (5%)</span>
-                        <p className="text-lg font-bold text-red-600 font-mono mt-1">-${fee.toFixed(2)}</p>
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Parte TodoVisa</span>
+                        <p className="text-lg font-bold text-text-secondary font-mono mt-1">${platformShare.toFixed(2)} USD</p>
                       </div>
                       <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
                         <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Liquidación Neta</span>
-                        <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)}</p>
+                        <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)} USD</p>
                       </div>
                     </div>
                   );
@@ -4901,85 +4990,144 @@ export default function PerfilUsuarioPage() {
                     <div className="w-8 h-8 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
                   </div>
                 ) : (
-                  <form onSubmit={handleSavePayoutSettings} className="space-y-6 max-w-2xl">
-                    <div className="space-y-2">
+                  <form onSubmit={handleSavePayoutSettings} className="space-y-6 max-w-2xl text-left">
+                    <div className="space-y-3">
                       <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary">Método de Cobro</label>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <button
                           type="button"
                           onClick={() => setPayoutMethod('paypal')}
-                          className={`py-3 px-4 rounded-sm border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${payoutMethod === 'paypal'
-                              ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
-                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
+                          className={`group py-4 px-5 rounded-sm border text-xs font-bold transition-all text-left flex items-center justify-between cursor-pointer focus:outline-none ${payoutMethod === 'paypal'
+                              ? 'bg-brand-light/30 text-brand-primary border-brand-primary ring-2 ring-brand-primary/10 shadow-sm'
+                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30 hover:bg-white'
                             }`}
                         >
-                          <span>💙</span><span>PayPal</span>
+                          <div className="flex items-center gap-3">
+                            <span className={`p-2 rounded-sm transition-colors ${payoutMethod === 'paypal' ? 'bg-brand-primary text-white' : 'bg-white border border-border-light text-text-secondary'}`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-6.18-11.25h16.86c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125H2.82c-.621 0-1.125-.504-1.125-1.125V3.87c0-.621.504-1.125 1.125-1.125z" />
+                              </svg>
+                            </span>
+                            <span className="font-bold text-text-primary text-xs">PayPal Express</span>
+                          </div>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${payoutMethod === 'paypal' ? 'border-brand-primary bg-brand-primary' : 'border-gray-300'}`}>
+                            {payoutMethod === 'paypal' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
                         </button>
+                        
                         <button
                           type="button"
                           onClick={() => setPayoutMethod('ach')}
-                          className={`py-3 px-4 rounded-sm border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${payoutMethod === 'ach'
-                              ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
-                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
+                          className={`group py-4 px-5 rounded-sm border text-xs font-bold transition-all text-left flex items-center justify-between cursor-pointer focus:outline-none ${payoutMethod === 'ach'
+                              ? 'bg-brand-light/30 text-brand-primary border-brand-primary ring-2 ring-brand-primary/10 shadow-sm'
+                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30 hover:bg-white'
                             }`}
                         >
-                          <span>🏦</span><span>Transferencia ACH</span>
+                          <div className="flex items-center gap-3">
+                            <span className={`p-2 rounded-sm transition-colors ${payoutMethod === 'ach' ? 'bg-brand-primary text-white' : 'bg-white border border-border-light text-text-secondary'}`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-3.75h16.5M2.25 9l9.75-6 9.75 6m-18.75 3v6.75M5.25 12v6.75m4.5-6.75v6.75m3-6.75v6.75m4.5-6.75v6.75m3-6.75v6.75" />
+                              </svg>
+                            </span>
+                            <span className="font-bold text-text-primary text-xs">Transferencia ACH</span>
+                          </div>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${payoutMethod === 'ach' ? 'border-brand-primary bg-brand-primary' : 'border-gray-300'}`}>
+                            {payoutMethod === 'ach' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
                         </button>
                       </div>
                     </div>
-
+ 
                     {payoutMethod === 'paypal' ? (
-                      <div className="p-4 bg-background-main rounded-sm border border-border-light space-y-3">
+                      <div className="p-5 bg-background-main rounded-sm border border-border-light space-y-3">
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Correo Electrónico de PayPal</label>
-                        <input
-                          type="email"
-                          required
-                          value={paypalEmail}
-                          onChange={(e) => setPaypalEmail(e.target.value)}
-                          placeholder="correo@paypal.com"
-                          className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary"
-                        />
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                            </svg>
+                          </span>
+                          <input
+                            type="email"
+                            required
+                            value={paypalEmail}
+                            onChange={(e) => setPaypalEmail(e.target.value)}
+                            placeholder="correo@paypal.com"
+                            className="w-full pl-9 pr-3 py-2.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary"
+                          />
+                        </div>
                         <span className="text-[9px] text-text-muted block">Tus fondos se transferirán de inmediato a esta cuenta.</span>
                       </div>
                     ) : (
-                      <div className="p-4 bg-background-main rounded-sm border border-border-light space-y-4">
+                      <div className="p-5 bg-background-main rounded-sm border border-border-light space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Nombre del Banco</label>
-                            <input type="text" required value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Banco Agrícola, BAC, etc." className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-3.75h16.5M2.25 9l9.75-6 9.75 6m-18.75 3v6.75M5.25 12v6.75m4.5-6.75v6.75m3-6.75v6.75m4.5-6.75v6.75m3-6.75v6.75" />
+                                </svg>
+                              </span>
+                              <input type="text" required value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Banco Agrícola, BAC, etc." className="w-full pl-9 pr-3 py-2 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary" />
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Tipo de Cuenta</label>
-                            <select value={accountType} onChange={(e) => setAccountType(e.target.value)} className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary cursor-pointer h-[38px]">
-                              <option value="Ahorros">Ahorros</option>
-                              <option value="Corriente">Corriente</option>
-                            </select>
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.879c1.003 1.003 2.63 1.003 3.633 0L14 13.5a2.56 2.56 0 00-2-2.5h-.5a2.56 2.56 0 01-2-2.5L10 6.5a2.56 2.56 0 012-2.5h.5c.875 0 1.625.5 2 1.25" />
+                                </svg>
+                              </span>
+                              <select value={accountType} onChange={(e) => setAccountType(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary cursor-pointer h-[38px]">
+                                <option value="Ahorros">Ahorros</option>
+                                <option value="Corriente">Corriente</option>
+                              </select>
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Número de Cuenta</label>
-                            <input type="text" required value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Nº de cuenta bancaria" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </span>
+                              <input type="text" required value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Nº de cuenta bancaria" className="w-full pl-9 pr-3 py-2.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary" />
+                            </div>
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Código de Ruta / IBAN</label>
-                            <input type="text" required value={routingCode} onChange={(e) => setRoutingCode(e.target.value)} placeholder="Código bancario" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Identificación Tributaria / NIT / DUI</label>
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />
+                                </svg>
+                              </span>
+                              <input type="text" required value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Identificación del titular de la cuenta" className="w-full pl-9 pr-3 py-2.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary" />
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Identificación Tributaria / NIT / DUI</label>
-                          <input type="text" required value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Identificación del titular de la cuenta" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
                         </div>
                       </div>
                     )}
-
-                    <div className="flex justify-end">
+ 
+                    <div className="flex justify-end pt-2">
                       <button
                         type="submit"
                         disabled={savingPayout}
-                        className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center gap-2 shadow-sm border-none"
+                        className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center justify-center gap-2 shadow-sm border-none"
                       >
                         {savingPayout ? (
                           <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</>
-                        ) : "💾 Guardar Configuración de Pago"}
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            Guardar Configuración de Pago
+                          </>
+                        )}
                       </button>
                     </div>
                   </form>
@@ -4999,7 +5147,11 @@ export default function PerfilUsuarioPage() {
                   {/* Banner alert */}
                   <div className="bg-amber-50 border border-amber-200 rounded-sm p-4 mb-6 text-left">
                     <div className="flex items-start gap-3">
-                      <span className="text-xl">📢</span>
+                      <span className="p-2 bg-amber-100 text-amber-800 rounded-sm shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                        </svg>
+                      </span>
                       <div>
                         <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
                         <p className="text-xs text-amber-800 mt-1 leading-relaxed">
@@ -5017,28 +5169,51 @@ export default function PerfilUsuarioPage() {
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={`${typeof window !== "undefined" ? window.location.origin : "https://todovisa.com"}?ref=${user?.id || ""}`}
-                        className="flex-1 px-3 py-2.5 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
-                      />
+                      <div className="relative flex-1">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                          </svg>
+                        </span>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${typeof window !== "undefined" ? `${window.location.origin}/agents` : "https://todovisa.com/agents"}?ref=${user?.id || ""}`}
+                          className="w-full pl-9 pr-3 py-2.5 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
+                        />
+                      </div>
                       <button
                         onClick={() => {
                           if (typeof window !== "undefined" && user?.id) {
-                            navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
-                            alert("¡Link de referido copiado al portapapeles!");
+                            navigator.clipboard.writeText(`${window.location.origin}/agents?ref=${user.id}`);
+                            setCopiedReferral(true);
+                            setTimeout(() => setCopiedReferral(false), 3000);
                           }
                         }}
-                        className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2"
+                        className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2 shrink-0"
                       >
-                        📋 Copiar Link de Referido
+                        {copiedReferral ? (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            ¡Enlace Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5A3.375 3.375 0 006.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0015 2.25h-1.5a2.251 2.25 0 00-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5a9 9 0 00-9-9z" />
+                            </svg>
+                            Copiar Link de Referido
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
                 </div>
-
               </div>
+            )}
+              </>
             )}
 
           </div>

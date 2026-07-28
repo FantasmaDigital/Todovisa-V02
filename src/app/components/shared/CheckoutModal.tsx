@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { AuthService } from "../../service/AuthService";
 import { AgentClientService } from "@/services/client/AgentClientService";
@@ -26,6 +26,19 @@ interface CheckoutModalProps {
 export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }: CheckoutModalProps) {
   const { user, setUser } = useAuthStore();
   const [step, setStep] = useState<"billing" | "processing" | "success">("billing");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const agencyRef = localStorage.getItem("todovisa_agency_ref");
+      if (agencyRef) {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("ref") !== agencyRef) {
+          url.searchParams.set("ref", agencyRef);
+          window.history.replaceState(null, "", url.toString());
+        }
+      }
+    }
+  }, []);
 
   const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
   const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";

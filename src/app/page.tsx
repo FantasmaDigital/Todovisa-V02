@@ -10,6 +10,7 @@ import { AgentNetwork } from "./components/home/AgentNetwork";
 import { Header } from "./components/shared/Header";
 import { Hero } from "./components/home/Hero";
 import { Testimoniasl } from "./components/home/Testimonials";
+import { AnimatedSection } from "./components/home/AnimatedSection";
 
 export default function Home() {
   const headerRef = useRef(null);
@@ -31,80 +32,96 @@ export default function Home() {
         <Hero headerHeight={headerHeight} />
 
         {/* Cards hero section */}
-        <section className="h-[36.5rem] w-[98%] m-auto my-5">
-          <div className="w-full h-full grid grid-cols-1 md:grid-cols-3 gap-6">
+        <section className="w-[98%] m-auto my-8 py-4">
+          <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6">
+            <AnimatedSection className="h-full" delay={0}>
+              <HeroCard
+                eyebrow="DIAGNÓSTICO CONSULAR"
+                title="Evaluación de Viabilidad VIPRO"
+                description="Evalúa tu solvencia y lazos de arraigo (EE.UU., Canadá, Australia, UK) por primera vez o renovación. Obtén un 25% de descuento directo en tu asesoría integral."
+                imageSrc="/images/viproform.webp"
+                linkUrl="/vipro-form"
+                buttonText="Iniciar Evaluación →"
+              />
+            </AnimatedSection>
 
-            <HeroCard
-              eyebrow="DIAGNÓSTICO CONSULAR VIPRO"
-              title="Scoring de Viabilidad ($19.99 USD)"
-              description="Evalúa tu solvencia y lazos de arraigo (EE.UU., Canadá, Australia, UK) por primera vez o renovación. Obtén un 25% de descuento directo en tu asesoría integral."
-              imageSrc="/images/viproform.webp"
-              linkUrl="/vipro-form"
-              buttonText="Diagnóstico VIPRO ($19.99) →"
-            />
+            <AnimatedSection className="h-full" delay={150}>
+              <HeroCard
+                eyebrow="PRIMERA VEZ Y RENOVACIONES"
+                title="Trámites de Visado Asistidos"
+                description="Gestionamos tu visa para Estados Unidos (Drop Box Waiver), México, Canadá, Australia y el Reino Unido con rigor documental y máxima efectividad."
+                imageSrc="/images/estadosunidos.webp"
+                linkUrl="/preformulario"
+                buttonText="Iniciar Trámite de Visa →"
+              />
+            </AnimatedSection>
 
-            <HeroCard
-              eyebrow="PRIMERA VEZ Y RENOVACIONES"
-              title="Trámites de Visado Asistidos"
-              description="Gestionamos tu visa para Estados Unidos (Drop Box Waiver), México, Canadá, Australia y el Reino Unido con rigor documental y máxima efectividad."
-              imageSrc="/images/estadosunidos.webp"
-              linkUrl="/preformulario"
-              buttonText="Iniciar Trámite de Visa →"
-            />
-
-            <HeroCard
-              eyebrow="RED DE ASESORES CERTIFICADOS"
-              title="Acompañamiento 1-a-1 Experto"
-              description="Selecciona a tu agente especializado para la elaboración de tu DS-160, auditoría de expediente y simulacros intensivos de entrevista presencial por Zoom."
-              imageSrc="/images/virtual-agent.webp"
-              linkUrl="/agents"
-              buttonText="Conocer Red de Asesores →"
-            />
-
+            <AnimatedSection className="h-full" delay={300}>
+              <HeroCard
+                eyebrow="RED DE ASESORES CERTIFICADOS"
+                title="Acompañamiento 1-a-1 Experto"
+                description="Selecciona a tu agente especializado para la elaboración de tu DS-160, auditoría de expediente y simulacros intensivos de entrevista presencial por Zoom."
+                imageSrc="/images/virtual-agent.webp"
+                linkUrl="/agents"
+                buttonText="Conocer Red de Asesores →"
+              />
+            </AnimatedSection>
           </div>
         </section>
 
         {/* split image */}
-        <FeatureSplit refHeaderHeight={headerHeight} />
+        <AnimatedSection>
+          <FeatureSplit refHeaderHeight={headerHeight} />
+        </AnimatedSection>
 
         {/* process */}
-        <ProcessSection />
+        <AnimatedSection>
+          <ProcessSection />
+        </AnimatedSection>
 
         {/* testimonials */}
-        <Testimoniasl />
+        <AnimatedSection>
+          <Testimoniasl />
+        </AnimatedSection>
 
         {/* agente network */}
-        <AgentNetwork />
+        <AnimatedSection>
+          <AgentNetwork />
+        </AnimatedSection>
 
         {/* tu tranquilidad */}
-        <section className="w-full bg-gradient-to-r from-brand-light/60 via-white to-brand-light/60 py-20 border-y border-border-light/40">
-          <div className="flex flex-col items-center justify-center text-center text-text-primary p-4 max-w-4xl mx-auto space-y-4">
-            <span className="text-xs font-bold uppercase tracking-widest text-brand-primary bg-brand-light px-3.5 py-1 rounded-full border border-brand-primary/20">
-              Compromiso TodoVisa
-            </span>
-            <h2 className="text-4xl md:text-5xl lg:text-[4vw] font-serif italic font-semibold text-brand-primary leading-tight">
-              Tu tranquilidad es nuestro compromiso.
-            </h2>
-            <h3 className="text-lg md:text-xl font-medium text-text-primary">
-              Detrás de cada visa aprobada hay un expediente preparado con rigor.
-            </h3>
-            <p className="text-sm md:text-base text-text-secondary max-w-2xl leading-relaxed">
-              Nuestros expertos transforman procesos complejos en pasos claros para que tú solo te preocupes por hacer las maletas.
-            </p>
-            <div className="pt-2">
-              <a
-                href="/citas"
-                className="inline-flex items-center gap-3 bg-brand-primary hover:bg-brand-hover text-white font-bold px-8 py-3.5 rounded-lg transition-all duration-300 text-sm shadow-md cursor-pointer border-none"
-              >
-                <span>Agenda una Cita Consular</span>
-                <span className="text-base">→</span>
-              </a>
+        <AnimatedSection>
+          <section className="w-full bg-gradient-to-r from-brand-light/60 via-white to-brand-light/60 py-20 border-y border-border-light/40">
+            <div className="flex flex-col items-center justify-center text-center text-text-primary p-4 max-w-4xl mx-auto space-y-4">
+              <span className="text-xs font-bold uppercase tracking-widest text-brand-primary bg-brand-light px-3.5 py-1 rounded-full border border-brand-primary/20">
+                Compromiso TodoVisa
+              </span>
+              <h2 className="text-4xl md:text-5xl lg:text-[4vw] font-serif italic font-semibold text-brand-primary leading-tight">
+                Tu tranquilidad es nuestro compromiso.
+              </h2>
+              <h3 className="text-lg md:text-xl font-medium text-text-primary">
+                Detrás de cada visa aprobada hay un expediente preparado con rigor.
+              </h3>
+              <p className="text-sm md:text-base text-text-secondary max-w-2xl leading-relaxed">
+                Nuestros expertos transforman procesos complejos en pasos claros para que tú solo te preocupes por hacer las maletas.
+              </p>
+              <div className="pt-2">
+                <a
+                  href="/citas"
+                  className="inline-flex items-center gap-3 bg-brand-primary hover:bg-brand-hover text-white font-bold px-8 py-3.5 rounded-lg transition-all duration-300 text-sm shadow-md cursor-pointer border-none"
+                >
+                  <span>Agenda una Cita Consular</span>
+                  <span className="text-base">→</span>
+                </a>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </AnimatedSection>
 
         {/* FAQs */}
-        <FAQs />
+        <AnimatedSection>
+          <FAQs />
+        </AnimatedSection>
       </main>
       <Footer />
     </div>

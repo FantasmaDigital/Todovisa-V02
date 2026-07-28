@@ -31,25 +31,25 @@ export class AgentRepository {
   }
 
   static async getActiveIndependentAgents() {
-    const { data: activeApps, error: appErr } = await supabase
-      .from("agent_applications")
-      .select("user_id, full_name, email, phone, specialties, target_countries, languages, experience_years, biography, status, application_id")
-      .eq("status", "active");
-
-    if (appErr) throw new Error(appErr.message);
-
-    let memberIdsSet = new Set<string>();
-    const appUserIds = (activeApps || []).map((a) => a.user_id).filter(Boolean);
-
-    if (appUserIds.length > 0) {
-      const { data: members } = await supabase
+    // ⚡ Parallel: fetch active applications and agency members at the same time
+    const [appsResult, membersResult] = await Promise.all([
+      supabase
+        .from("agent_applications")
+        .select("user_id, full_name, email, phone, specialties, target_countries, languages, experience_years, biography, status, application_id")
+        .eq("status", "active"),
+      supabase
         .from("agency_members")
-        .select("member_id")
-        .in("member_id", appUserIds);
-      members?.forEach((m) => memberIdsSet.add(m.member_id));
-    }
+        .select("member_id"),
+    ]);
 
-    return { activeApps: activeApps || [], agencyMemberIds: Array.from(memberIdsSet) };
+    if (appsResult.error) throw new Error(appsResult.error.message);
+
+    const activeApps = appsResult.data || [];
+    const memberIdsSet = new Set<string>(
+      (membersResult.data || []).map((m) => m.member_id)
+    );
+
+    return { activeApps, agencyMemberIds: Array.from(memberIdsSet) };
   }
 
   static async getPortalDetails(userId?: string) {
@@ -61,13 +61,24 @@ export class AgentRepository {
     let commissions: any[] = [];
 
     if (userId) {
-      const { data } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
-      application = data;
+      // ⚡ Parallel: fire all userId-based queries simultaneously
+      const [appResult, fallbackResult, agencyAppResult, membersResult, invitationsResult, commissionsResult] = await Promise.all([
+        supabase.from("agent_applications").select("*").eq("user_id", userId).maybeSingle(),
+        supabase.from("agent_applications").select("*").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("agent_applications").select("*").eq("agency_id", userId).maybeSingle(),
+        supabase.from("agency_members").select("*").eq("agency_id", userId),
+        supabase.from("agency_invitations").select("*").eq("agency_id", userId),
+        supabase.from("agent_commissions").select("*").eq("agent_id", userId),
+      ]);
 
+      application = appResult.data;
+      fallbackData = fallbackResult.data;
+      agencyApp = agencyAppResult.data;
+      members = membersResult.data || [];
+      invitations = invitationsResult.data || [];
+      commissions = commissionsResult.data || [];
+
+      // If no application found by user_id, try lookup by email (email-linked fallback)
       if (!application) {
         const { data: profile } = await supabase
           .from("profiles")
@@ -84,50 +95,24 @@ export class AgentRepository {
 
           if (appByEmail) {
             application = appByEmail;
-            await supabase
+            // Fire-and-forget: link the application to the userId
+            supabase
               .from("agent_applications")
               .update({ user_id: userId })
-              .eq("id", appByEmail.id);
+              .eq("id", appByEmail.id)
+              .then(() => {});
           }
         }
       }
-    }
-
-    const { data: fallback } = await supabase
-      .from("agent_applications")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    fallbackData = fallback;
-
-    if (userId) {
-      const { data: agApp } = await supabase
+    } else {
+      // No userId — just get the most recent application as fallback
+      const { data: fallback } = await supabase
         .from("agent_applications")
         .select("*")
-        .eq("agency_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
-      agencyApp = agApp;
-    }
-
-    if (userId) {
-      const { data: mems } = await supabase
-        .from("agency_members")
-        .select("*")
-        .eq("agency_id", userId);
-      members = mems || [];
-
-      const { data: invs } = await supabase
-        .from("agency_invitations")
-        .select("*")
-        .eq("agency_id", userId);
-      invitations = invs || [];
-
-      const { data: comms } = await supabase
-        .from("agent_commissions")
-        .select("*")
-        .eq("agent_id", userId);
-      commissions = comms || [];
+      fallbackData = fallback;
     }
 
     return { application, fallbackData, agencyApp, members, invitations, commissions };

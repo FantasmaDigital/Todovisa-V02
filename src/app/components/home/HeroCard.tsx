@@ -18,7 +18,7 @@ export const HeroCard = ({
     return (
         <Link
             href={linkUrl}
-            className="relative w-full h-full rounded-2xl overflow-hidden group cursor-pointer border border-border-light/40 bg-background-surface block shadow-md hover:shadow-2xl transition-all duration-500"
+            className="relative w-full h-[440px] rounded-2xl overflow-hidden group cursor-pointer border border-border-light/40 bg-background-surface block shadow-md hover:shadow-2xl transition-all duration-500"
         >
             <img
                 className="absolute inset-0 w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 ease-out"

@@ -194,28 +194,87 @@ function PreformularioContent() {
         );
     }
 
+    // Guard: only accessible by regular users who have contracted an advisor
+    // Agents, agencies, and non-paying users are blocked
     const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
-    if (!isAdminOrStaff && !user.hasPaidAdvisor) {
+    const isAgentOrAgency = user && (user.role === "agent" || user.role === "agency");
 
+    if (!isAdminOrStaff && (isAgentOrAgency || !user.hasPaidAdvisor)) {
+        const isStaff = isAgentOrAgency;
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
-                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-xl mx-auto gap-6 my-12">
-                    <div className="w-20 h-20 bg-amber-50 border border-amber-200 text-amber-600 rounded-full flex items-center justify-center text-3xl shadow-sm">
-                        ⚠️
+                <main className="flex-1 flex flex-col items-center justify-center p-6">
+                    <div className="w-full max-w-lg bg-white border border-border-light rounded-2xl shadow-sm p-10 flex flex-col items-center text-center gap-6">
+                        {/* Icon */}
+                        <div className="w-20 h-20 bg-brand-light border border-brand-primary/20 text-brand-primary rounded-full flex items-center justify-center">
+                            <svg className="w-9 h-9" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                            </svg>
+                        </div>
+
+                        {/* Heading */}
+                        <div className="space-y-2">
+                            <span className="text-xs font-bold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full border border-brand-primary/20">
+                                Acceso Restringido
+                            </span>
+                            <h1 className="text-2xl md:text-3xl font-bold text-text-primary font-serif italic mt-3">
+                                {isStaff
+                                    ? "Esta sección es exclusiva para clientes"
+                                    : "Necesitas contratar un asesor"}
+                            </h1>
+                            <p className="text-sm text-text-secondary leading-relaxed max-w-sm mx-auto">
+                                {isStaff
+                                    ? "El preformulario de visa está diseñado para ser completado por clientes finales junto a su asesor asignado. Accede a tu portal de trabajo desde tu perfil."
+                                    : "El preformulario de visa es de uso exclusivo para clientes que han contratado el Servicio Completo con un asesor certificado TodoVisa. Conecta con un experto para comenzar."}
+                            </p>
+                        </div>
+
+                        {/* Steps visual */}
+                        {!isStaff && (
+                            <div className="w-full bg-background-main rounded-xl p-4 flex flex-col gap-3 text-left border border-border-light">
+                                {[
+                                    { num: "1", text: "Explora el directorio de asesores certificados" },
+                                    { num: "2", text: "Selecciona y contrata tu asesor ideal" },
+                                    { num: "3", text: "Accede al preformulario con tu asesor asignado" },
+                                ].map((step) => (
+                                    <div key={step.num} className="flex items-center gap-3">
+                                        <div className="w-7 h-7 bg-brand-primary text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                            {step.num}
+                                        </div>
+                                        <span className="text-sm text-text-secondary">{step.text}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* CTAs */}
+                        <div className="flex flex-col sm:flex-row gap-3 w-full">
+                            {isStaff ? (
+                                <button
+                                    onClick={() => router.push("/profile")}
+                                    className="flex-1 bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm border-none cursor-pointer"
+                                >
+                                    Ir a mi Perfil de Asesor
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={() => router.push("/agents")}
+                                        className="flex-1 bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm border-none cursor-pointer"
+                                    >
+                                        Explorar Asesores
+                                    </button>
+                                    <button
+                                        onClick={() => router.push("/profile")}
+                                        className="flex-1 bg-white border border-border-light text-text-secondary font-semibold py-3 rounded-sm hover:bg-background-hover transition-colors text-sm cursor-pointer"
+                                    >
+                                        Ver mi Perfil
+                                    </button>
+                                </>
+                            )}
+                        </div>
                     </div>
-                    <div className="space-y-3">
-                        <h2 className="text-3xl font-bold text-text-primary tracking-tight font-serif italic">Servicio Completo Requerido</h2>
-                        <p className="text-base text-text-secondary max-w-md mx-auto leading-relaxed">
-                            Este preformulario es de uso exclusivo para clientes que han adquirido el **Servicio Completo con Asesor** para coordinar su llenado oficial de visa.
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => router.push("/agents")}
-                        className="bg-brand-primary text-white font-semibold px-6 py-3 rounded-xl hover:bg-brand-hover transition-colors text-sm shadow-md"
-                    >
-                        Ver Asesores e Iniciar
-                    </button>
                 </main>
                 <Footer />
             </div>

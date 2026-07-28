@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export const AgentNetwork = () => {
     return (
-        <section id="unirte-red" className="w-full mx-auto flex flex-col gap-16">
+        <section id="unirte-red" className="w-full mx-auto flex flex-col">
 
             {/* Incentivación superior: stats bar */}
             <div className="w-full bg-brand-primary rounded-sm px-8 py-6 relative overflow-hidden">

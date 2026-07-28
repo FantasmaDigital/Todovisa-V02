@@ -26,9 +26,13 @@ export class ProfileRepository {
     const { data, error } = await supabase
       .from("profiles")
       .update(updates)
-      .eq("id", userId);
+      .eq("id", userId)
+      .select();
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      console.error("[ProfileRepository.updateProfile Error]", error);
+      throw new Error(error.message);
+    }
     return data;
   }
 
@@ -57,7 +61,7 @@ export class ProfileRepository {
   static async getAgencyMembers(agencyId: string) {
     const { data, error } = await supabase
       .from("agency_members")
-      .select("*, profile:profiles(first_name, last_name, email)")
+      .select("*, profile:profiles!member_id(first_name, last_name, email)")
       .eq("agency_id", agencyId);
 
     if (error) throw new Error(error.message);
@@ -87,12 +91,14 @@ export class ProfileRepository {
   }
 
   static async getAgencyMemberInfo(userId: string) {
+    // First query: check if this user is a member of any agency (fast single-row lookup)
     const { data: memberData } = await supabase
       .from("agency_members")
       .select("agency_id, member_role")
       .eq("member_id", userId)
       .maybeSingle();
 
+    // Second query only fires when the user actually belongs to an agency — skipped for regular users
     if (memberData?.agency_id) {
       const { data: agencyProfile } = await supabase
         .from("profiles")

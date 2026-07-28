@@ -3,8 +3,14 @@ import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   try {
-    const { agencyProfiles, agencyAppsMap } = await AgentRepository.getAgenciesWithApplications();
-    const { activeApps, agencyMemberIds } = await AgentRepository.getActiveIndependentAgents();
+    // ⚡ Parallel: both queries are independent — run them together
+    const [agenciesData, agentsData] = await Promise.all([
+      AgentRepository.getAgenciesWithApplications(),
+      AgentRepository.getActiveIndependentAgents(),
+    ]);
+
+    const { agencyProfiles, agencyAppsMap } = agenciesData;
+    const { activeApps, agencyMemberIds } = agentsData;
 
     return NextResponse.json(
       {
@@ -15,7 +21,13 @@ export async function GET(request: Request) {
           agencyMemberIds,
         },
       },
-      { status: 200 }
+      {
+        status: 200,
+        headers: {
+          // Cache directory data for 30s on edge, serve stale up to 60s while revalidating
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+        },
+      }
     );
   } catch (err: any) {
     console.error("GET /api/agents error:", err);

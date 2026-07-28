@@ -658,7 +658,7 @@ function AgentPortalContent() {
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         <div className="w-[80%] mx-auto relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div>
-            <p className="text-xs font-bold tracking-[0.2em] text-emerald-400 uppercase mb-2">Portal de Agentes TodoVisa</p>
+            <p className="text-xs font-bold tracking-[0.2em] text-emerald-400 uppercase mb-2">Mi Acreditación Red TodoVisa</p>
             <h1 className="text-3xl md:text-4xl font-serif text-white font-semibold leading-tight">
               {agent ? `Bienvenido, ${agent.full_name.split(" ")[0]}` : "Contrato y Onboarding"}
             </h1>
@@ -677,21 +677,13 @@ function AgentPortalContent() {
 
       <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col gap-8">
         {agent && agent.status === "approved" && !agent.signed_at && (
-          <div className="bg-red-50 border border-red-200 rounded-sm p-6 text-left shadow-xs flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-red-800 font-bold text-sm">
-              <span>🛑</span> Acreditación Pendiente de Firma / Aprobación
+          <div className="bg-amber-50 border border-amber-200 rounded-sm p-6 text-left shadow-xs flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-amber-800 font-bold text-sm">
+              <span>⚠️</span> Firma de Acuerdo Comercial Requerida
             </div>
-            <p className="text-xs text-red-700 leading-relaxed">
-              Para ser oficialmente reconocido como <strong>Agente o Agencia en TodoVisa</strong>, debes contar con tu expediente de postulación aprobado por la administración y haber firmado tu contrato de acreditación comercial digital.
+            <p className="text-xs text-amber-700 leading-relaxed">
+              Tu postulación ha sido aprobada por la administración. Para comenzar a operar, por favor lee el acuerdo comercial a continuación y firma digitalmente en el formulario inferior para activar tu cuenta de socio.
             </p>
-            <div>
-              <button
-                onClick={() => router.push("/profile?tab=mi_acreditacion")}
-                className="px-4 py-2 bg-red-700 hover:bg-red-800 text-white text-xs font-bold rounded-sm transition-colors cursor-pointer border-none"
-              >
-                Ir a Mi Acreditación para Firmar →
-              </button>
-            </div>
           </div>
         )}
 
@@ -834,7 +826,17 @@ function AgentPortalContent() {
 
         {/* AGENT PORTAL WORKFLOW STATES */}
         {!loading && !error && agent && (
-          <div className="w-full space-y-6">
+          <div className="w-full space-y-6 text-left">
+            {/* Back navigation */}
+            <div className="mb-2">
+              <button
+                onClick={() => router.push("/profile")}
+                className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1 cursor-pointer border-none bg-transparent"
+              >
+                &larr; Volver a mi Perfil
+              </button>
+            </div>
+
             {/* Warning banner if agency has no advisors */}
             {hasNoAdvisors && (
               <div className="bg-amber-50 border border-amber-200 rounded-sm p-5 text-left flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fadeIn shadow-xs w-full mb-2">
@@ -905,45 +907,61 @@ function AgentPortalContent() {
                   </div>
               )}
 
-              {/* STATE 2: APPROVED / PENDING CONTRACT SIGNATURE */}
-              {agent.status === "approved" && (
+              {/* STATE 2 & 3: APPROVED OR ACTIVE CONTRACT */}
+              {(agent.status === "approved" || agent.status === "active") && (
                 <div className="space-y-6">
                   {/* Status Banner */}
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-sm p-6 flex items-start gap-4">
-                    <span className="text-2xl mt-0.5">🎉</span>
-                    <div>
-                      <h4 className="font-bold text-emerald-800 text-sm">
-                        {agent.application_id.startsWith("B2B-") 
-                          ? "¡Alianza B2B Aprobada con Éxito!" 
-                          : "¡Postulación Aprobada con Éxito!"}
-                      </h4>
-                      <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                        {agent.application_id.startsWith("B2B-")
-                          ? "Felicidades, la alianza de distribución B2B ha sido validada. Hemos redactado tu acuerdo comercial corporativo. Por favor, lee los términos a continuación, proporciona la firma digital del representante legal y acéptalo para comenzar."
-                          : "Felicidades, tu perfil ha superado las validaciones técnicas. Hemos redactado tu acuerdo comercial. Por favor, lee los términos del contrato comercial a continuación, proporciona tu firma electrónica digital y acéptalo para comenzar."}
-                      </p>
+                  {agent.status === "active" ? (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-sm p-6 flex items-start gap-4 animate-fadeIn">
+                      <span className="text-2xl mt-0.5">✅</span>
+                      <div className="flex-1 text-left">
+                        <h4 className="font-bold text-emerald-800 text-sm">Contrato Activo e Incorporado</h4>
+                        <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
+                          Tu estatus como Agencia/Socio de la Red TodoVisa está activo. Tu acuerdo comercial ha sido firmado digitalmente y se encuentra plenamente vigente.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-sm p-6 flex items-start gap-4 animate-fadeIn">
+                      <span className="text-2xl mt-0.5">🎉</span>
+                      <div className="text-left">
+                        <h4 className="font-bold text-emerald-800 text-sm">
+                          {agent.application_id.startsWith("B2B-") 
+                            ? "¡Alianza Comercial Aprobada con Éxito!" 
+                            : "¡Postulación Aprobada con Éxito!"}
+                        </h4>
+                        <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
+                          {agent.application_id.startsWith("B2B-")
+                            ? "Felicidades, la alianza de distribución comercial ha sido validada. Hemos redactado tu acuerdo comercial corporativo. Por favor, lee los términos a continuación, proporciona la firma digital del representante legal y acéptalo para comenzar."
+                            : "Felicidades, tu perfil ha superado las validaciones técnicas. Hemos redactado tu acuerdo comercial. Por favor, lee los términos del contrato comercial a continuación, proporciona tu firma electrónica digital y acéptalo para comenzar."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* The Contract Document */}
                   <div className="bg-white border border-border-light rounded-sm shadow-sm overflow-hidden flex flex-col">
                     <div className="bg-gray-50 border-b border-border-light px-6 py-4 flex items-center justify-between">
                       <span className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono">
                         {agent.application_id.startsWith("B2B-") 
-                          ? "ACUERDO_ALIANZA_DISTRIBUCION_B2B.pdf" 
+                          ? "ACUERDO_ALIANZA_DISTRIBUCION_AGENCIA.pdf" 
                           : "CONTRATO_AGENTE_TODOVISA.pdf"}
                       </span>
-                      <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold px-2 py-0.5 rounded">PENDIENTE DE FIRMA</span>
+                      {agent.status === "active" ? (
+                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold px-2 py-0.5 rounded">CONTRATO FIRMADO</span>
+                      ) : (
+                        <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold px-2 py-0.5 rounded">PENDIENTE DE FIRMA</span>
+                      )}
                     </div>
 
                     {/* Scrollable contract text */}
                     {agent.application_id.startsWith("B2B-") ? (
                       <div className="p-6 md:p-8 max-h-[350px] overflow-y-auto space-y-6 text-xs text-text-secondary leading-relaxed bg-[#fafafa] border-b border-border-light font-mono scrollbar-thin text-left">
                         <h3 className="text-center font-bold text-text-primary text-sm uppercase tracking-wide">
-                          CONTRATO DE ALIANZA COMERCIAL Y DISTRIBUCIÓN DE SERVICIOS - AGENCIAS B2B
+                          CONTRATO DE ALIANZA COMERCIAL Y DISTRIBUCIÓN DE SERVICIOS - AGENCIAS
                         </h3>
                         <p>
-                          Conste por el presente documento el Contrato de Alianza Comercial y Distribución de Asesoría Consular B2B (en adelante, el &quot;Acuerdo de Alianza&quot;), celebrado entre:
+                          Conste por el presente documento el Contrato de Alianza Comercial y Distribución de Asesoría Consular (en adelante, el &quot;Acuerdo de Alianza&quot;), celebrado entre:
                         </p>
                         <p>
                           <strong>TodoVisa S.A. de C.V.</strong>, y la Agencia de Viajes socia cuyos datos se detallan en el Folio B2B <strong>{agent.application_id}</strong> (en adelante, la &quot;Agencia&quot;).
@@ -955,15 +973,21 @@ function AgentPortalContent() {
                           </p>
                         </div>
                         <div>
-                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA SEGUNDA: COMISIONES CORPORATIVAS B2B</h4>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA SEGUNDA: COMISIONES CORPORATIVAS</h4>
                           <p>
-                            La Agencia B2B percibirá una tasa de comisión del 75% neto sobre las ventas de asesoría consular procesadas. Adicionalmente, si el volumen consolidado de la Agencia supera los 15 expedientes exitosos al mes, se aplicará un Bono Corporativo del 10% adicional (total 85% de retribución neta).
+                            La Agencia percibirá una tasa de comisión del 75% neto sobre las ventas de asesoría consular procesadas. Adicionalmente, si el volumen consolidado de la Agencia supera los 15 expedientes exitosos al mes, se aplicará un Bono Corporativo del 10% adicional (total 85% de retribución neta).
                           </p>
                         </div>
                         <div>
-                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA TERCERA: CONFIDENCIALIDAD DE CLIENTES B2B</h4>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA TERCERA: CONFIDENCIALIDAD DE CLIENTES</h4>
                           <p>
                             Toda la información personal de los clientes captados por la Agencia y procesada en el portal es confidencial y no podrá ser compartida ni comercializada fuera del alcance de la solicitud de visado respectiva.
+                          </p>
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA CUARTA: CONFIDENCIALIDAD DE DATOS</h4>
+                          <p>
+                            El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al trámite migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
                           </p>
                         </div>
                       </div>
@@ -1015,475 +1039,81 @@ function AgentPortalContent() {
                       </div>
                     )}
 
-                    {/* Signature Form */}
-                    <form onSubmit={signContract} className="p-6 space-y-5 bg-white">
-                      <div className="flex items-start gap-3">
-                        <input
-                          id="terms"
-                          type="checkbox"
-                          checked={termsChecked}
-                          onChange={(e) => setTermsChecked(e.target.checked)}
-                          className="mt-1 w-4 h-4 border border-border-light text-brand-primary rounded-sm focus:ring-brand-primary"
-                        />
-                        <label htmlFor="terms" className="text-xs text-text-secondary leading-normal cursor-pointer select-none text-left">
-                          {agent.application_id.startsWith("B2B-") 
-                            ? <span>Acepto los términos de alianza comercial B2B, las comisiones financieras corporativas del 75% al 85% y las cláusulas penales por filtración de datos de clientes.</span>
-                            : <span>He leído en su totalidad y de conformidad, <strong>acepto los términos comerciales</strong>, las comisiones financieras del 70% (con posibilidad de 80% por bono de excelencia) y las cláusulas penales por incumplimiento de confidencialidad de datos.</span>}
-                        </label>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end pt-2">
-                        <div>
-                          <label htmlFor="signature-input" className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 text-left">
-                            {agent.application_id.startsWith("B2B-") 
-                              ? "Firma Digital de Representante Legal (Escribe tu Nombre)"
-                              : "Firma Legal Digital (Escribe tu Nombre Completo)"}
-                          </label>
-                          <input
-                            id="signature-input"
-                            type="text"
-                            value={signatureName}
-                            onChange={(e) => setSignatureName(e.target.value)}
-                            placeholder="Nombre como firma"
-                            className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary font-serif italic"
-                            required
-                          />
-                        </div>
-
-                        <button
-                          type="submit"
-                          disabled={signing || !termsChecked || !signatureName.trim()}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center justify-center gap-2"
-                        >
-                          {signing ? (
-                            <>
-                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                              Firmando contrato...
-                            </>
-                          ) : (
-                            agent.application_id.startsWith("B2B-") 
-                              ? "🤝 Firmar y Activar Alianza Comercial"
-                              : "✍️ Firmar y Activar Contrato"
-                          )}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              )}
-
-              {/* STATE 3: ACTIVE CONTRACT AND EARNINGS DASHBOARD */}
-              {agent.status === "active" && (
-                <div className="space-y-6">
-                  {/* Status Banner */}
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-sm p-6 flex items-start gap-4">
-                    <span className="text-2xl mt-0.5">✅</span>
-                    <div className="flex-1">
-                      <h4 className="font-bold text-emerald-800 text-sm">Contrato Activo e Incorporado</h4>
-                      <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                        Tu estatus como Agente de la Red TodoVisa está activo. Tu perfil público ya es visible para los solicitantes de visado. Abajo puedes monitorear tus metas semanales de ganancias.
-                      </p>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
-                          CONTRATO FIRMADO DIGITALMENTE POR: {agent.signature_name}
-                        </span>
-                        <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
-                          FECHA: {agent.signed_at ? new Date(agent.signed_at).toLocaleString() : ""}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* EARNINGS SIMULATOR */}
-                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
-                    <div className="mb-6 pb-2 border-b border-border-light">
-                      <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Plan Financiero</span>
-                      <h3 className="text-lg font-bold text-text-primary mt-1 text-left">
-                        {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-")
-                          ? "Simulador de Comisiones Consolidadas (Agencia B2B)" 
-                          : "Simulador de Comisiones Semanales"}
-                      </h3>
-                      <p className="text-xs text-text-secondary mt-1 text-left">
-                        {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-")
-                          ? "Estima los ingresos acumulados por todos los agentes de viajes de tu equipo en base al volumen mensual de expedientes."
-                          : "Estima cuánto ganarás según el número de expedientes que aprueben los clientes que asesores."}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {/* Controls Panel */}
-                      <div className="space-y-5">
-                        {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") && (
-                          /* Active Advisors count display */
-                          <div className="p-3 bg-background-main border border-border-light rounded-sm">
-                            <div className="flex justify-between items-center text-xs text-left">
-                              <span className="font-semibold text-text-primary">Asesores Activos de la Agencia</span>
-                              <span className="font-bold text-brand-primary font-mono bg-brand-light px-2 py-0.5 rounded border border-brand-primary/20">{activeAdvisorsCount} agentes</span>
-                            </div>
-                            <span className="text-[9px] text-text-muted block text-left mt-1">Conteo de asesores vinculados e invitaciones generadas por la agencia.</span>
-                          </div>
-                        )}
-
-                        {/* Customer Rating Rating */}
-                        <div className="p-3 bg-background-main border border-border-light rounded-sm">
-                          <div className="flex justify-between items-center text-xs text-left">
-                            <span className="font-semibold text-text-primary">Calificación de Satisfacción</span>
-                            <span className="font-bold font-mono flex items-center gap-1 bg-brand-light px-2 py-0.5 rounded border border-brand-primary/20">
-                              ⭐ <span className="text-emerald-600 font-bold">{finalRating.toFixed(1)}</span>
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-[9px] text-text-muted mt-1">
-                            <span>Calificación del asesor calculada por la opinión de los usuarios.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Display Panel */}
-                      <div className="bg-background-main border border-border-light rounded p-5 flex flex-col justify-between">
-                        <div className="space-y-4">
-                          <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
-                            <span>{agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") ? "Facturación Bruta Consolidada" : "Facturación Bruta"}</span>
-                            <span className="font-mono font-semibold text-text-primary">${getGrossEarnings().toFixed(2)} USD</span>
-                          </div>
-
-                          <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
-                            <span>Tasa de Comisión {agent.application_id.startsWith("B2B-") ? "B2B" : ""}</span>
-                            <span className="font-mono font-bold text-text-primary">
-                              {getCommissionRate() * 100}%
-                            </span>
-                          </div>
-
-                          <div className="flex justify-between text-xs text-text-secondary border-b border-border-light pb-2">
-                            <span>Deducción Plataforma (5%)</span>
-                            <span className="font-mono text-red-600">-${getPlatformFee().toFixed(2)} USD</span>
-                          </div>
-                        </div>
-
-                        <div className="pt-4 mt-4 border-t border-dashed border-border-light text-center">
-                          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">
-                            {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") ? "Liquidación Neta Semanal de Agencia" : "Liquidación Neta Semanal (Estimado)"}
-                          </span>
-                          <p className="text-3xl font-bold text-brand-primary font-mono mt-1">${getNetEarnings().toFixed(2)} USD</p>
-                          <span className="text-[10px] text-emerald-600 font-semibold block mt-1">
-                            Aproximado Mensual: ${(getNetEarnings() * 4).toFixed(2)} USD
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* CONFIGURACIÓN DE PAGO */}
-                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-6">
-                    <div className="border-b border-border-light pb-3">
-                      <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Configuración Financiera</span>
-                      <h3 className="text-lg font-bold text-text-primary mt-0.5 text-left">Método de Recepción de Ganancias</h3>
-                      <p className="text-xs text-text-secondary mt-1 text-left">
-                        Elige y registra el procesador donde TodoVisa transferirá tus liquidaciones de comisiones todos los viernes.
-                      </p>
-                    </div>
-
-                    <form onSubmit={savePayoutSettings} className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary text-left">
-                          Selecciona tu método preferido
-                        </label>
-                        <div className="grid grid-cols-2 gap-4">
-                          <button
-                            type="button"
-                            onClick={() => setPayoutMethod('paypal')}
-                            className={`py-3 px-4 rounded border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
-                              payoutMethod === 'paypal'
-                                ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
-                                : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
-                            }`}
-                          >
-                            <span>💙</span>
-                            <span>PayPal</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPayoutMethod('ach')}
-                            className={`py-3 px-4 rounded border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
-                              payoutMethod === 'ach'
-                                ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
-                                : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
-                            }`}
-                          >
-                            <span>🏦</span>
-                            <span>Transferencia ACH</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {payoutMethod === 'paypal' ? (
-                        <div className="space-y-4 animate-in fade-in duration-250">
-                          <div className="flex flex-col gap-1.5 text-left">
-                            <label htmlFor="paypal-email-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
-                              Dirección de Correo PayPal
-                            </label>
-                            <input
-                              id="paypal-email-input"
-                              type="email"
-                              value={paypalEmail}
-                              onChange={(e) => setPaypalEmail(e.target.value)}
-                              placeholder="ejemplo@paypal.com"
-                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
-                              required={payoutMethod === 'paypal'}
-                            />
-                            <span className="text-[9px] text-text-muted">
-                              El pago neto simulado se enviará a esta cuenta. Asegúrate de que acepte recepciones de pagos en USD.
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in duration-250">
-                          <div className="flex flex-col gap-1.5 text-left">
-                            <label htmlFor="bank-name-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
-                              Nombre del Banco
-                            </label>
-                            <input
-                              id="bank-name-input"
-                              type="text"
-                              value={bankName}
-                              onChange={(e) => setBankName(e.target.value)}
-                              placeholder="Banco Agrícola, BAC, etc."
-                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
-                              required={payoutMethod === 'ach'}
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1.5 text-left">
-                            <label htmlFor="account-type-select" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
-                              Tipo de Cuenta
-                            </label>
-                            <select
-                              id="account-type-select"
-                              value={accountType}
-                              onChange={(e) => setAccountType(e.target.value)}
-                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
-                            >
-                              <option value="Ahorros">Cuenta de Ahorros</option>
-                              <option value="Corriente">Cuenta Corriente</option>
-                            </select>
-                          </div>
-
-                          <div className="flex flex-col gap-1.5 text-left">
-                            <label htmlFor="account-number-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
-                              Número de Cuenta (ACH)
-                            </label>
-                            <input
-                              id="account-number-input"
-                              type="text"
-                              value={accountNumber}
-                              onChange={(e) => setAccountNumber(e.target.value)}
-                              placeholder="Número de cuenta de banco"
-                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
-                              required={payoutMethod === 'ach'}
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1.5 text-left">
-                            <label htmlFor="tax-id-input" className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
-                              DUI / Identificación Tributaria
-                            </label>
-                            <input
-                              id="tax-id-input"
-                              type="text"
-                              value={taxId}
-                              onChange={(e) => setTaxId(e.target.value)}
-                              placeholder="DUI del titular de la cuenta"
-                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary"
-                              required={payoutMethod === 'ach'}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="pt-2 flex justify-end">
-                        <button
-                          type="submit"
-                          disabled={savingPayout}
-                          className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center justify-center gap-2 shadow-sm border-none"
-                        >
-                          {savingPayout ? (
-                            <>
-                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                              Guardando configuración...
-                            </>
-                          ) : (
-                            "💾 Guardar Configuración de Pago"
-                          )}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-
-                  {/* ── CLIENT REQUEST NOTIFICATIONS (B2B agency only) ──────────── */}
-                  {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") && clientRequests.length > 0 && (
-                    <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-5">
-                      <div className="border-b border-border-light pb-3 flex items-center gap-3">
-                        <div className="flex-1 text-left">
-                          <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Solicitudes Entrantes</span>
-                          <h3 className="text-md font-bold text-text-primary mt-0.5">Clientes que Contrataron tu Agencia</h3>
-                          <p className="text-xs text-text-secondary mt-0.5">Asigna un asesor de tu equipo para habilitar el chat con cada cliente.</p>
-                        </div>
-                        {/* Notification badge */}
-                        <span className="flex-shrink-0 bg-amber-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow animate-bounce">
-                          {clientRequests.filter(r => r.status === "pending").length}
-                        </span>
-                      </div>
-
-                      <div className="space-y-4">
-                        {clientRequests.map(request => (
-                          <div
-                            key={request.id}
-                            className={`rounded-sm border p-4 flex flex-col gap-4 text-xs transition-all ${
-                              request.status === "assigned"
-                                ? "bg-emerald-50 border-emerald-200"
-                                : "bg-amber-50 border-amber-200"
-                            }`}
-                          >
-                            {/* Client info row */}
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm flex-shrink-0">
-                                {(request.client_name || request.client_email || "?").charAt(0).toUpperCase()}
-                              </div>
-                              <div className="flex-1 text-left">
-                                <p className="font-bold text-text-primary">{request.client_name || "Cliente"}</p>
-                                <p className="text-[10px] text-text-secondary">{request.client_email}</p>
-                              </div>
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                request.status === "assigned"
-                                  ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                                  : "bg-amber-100 text-amber-700 border border-amber-200"
-                              }`}>
-                                {request.status === "assigned" ? "ASIGNADO" : "PENDIENTE"}
-                              </span>
-                            </div>
-
-                            {/* Assignment section */}
-                            {request.status === "pending" ? (
-                              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1 border-t border-amber-200">
-                                <select
-                                  value={selectedMemberForRequest[request.id] || ""}
-                                  onChange={e => setSelectedMemberForRequest(prev => ({ ...prev, [request.id]: e.target.value }))}
-                                  className="flex-1 px-3 py-1.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:outline-none text-text-primary"
-                                >
-                                  <option value="">— Selecciona un asesor —</option>
-                                  {realMembers.map(m => (
-                                    <option key={m.member_id || m.id} value={m.member_id || m.id}>
-                                      {m.profile ? `${m.profile.first_name} ${m.profile.last_name}` : m.member_id}
-                                    </option>
-                                  ))}
-                                </select>
-                                <button
-                                  onClick={() => handleAssignMember(request)}
-                                  disabled={assigningRequestId === request.id}
-                                  className="px-4 py-1.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-[10px] font-bold rounded-sm transition-colors cursor-pointer flex items-center gap-1.5 flex-shrink-0"
-                                >
-                                  {assigningRequestId === request.id ? (
-                                    <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Asignando...</>
-                                  ) : "✓ Asignar y Habilitar Chat"}
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2 pt-1 border-t border-emerald-200 text-emerald-700 text-[10px] font-semibold">
-                                <span>✅</span>
-                                <span>Asesor asignado: {request.assigned_member_name || "Asesor de equipo"} · Chat habilitado</span>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* ─────────────────────────────────────────────────────────────── */}
-
-                  {/* Dual card block: B2B team list vs individual profile preview */}
-                  {agent.application_id.startsWith("B2B-") && !agent.application_id.includes("B2B-AGENT-") ? (
-                    <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-6">
-                      <div className="border-b border-border-light pb-3 flex justify-between items-center">
+                    {/* Signature Form or Signed Confirmation */}
+                    {agent.status === "active" ? (
+                      <div className="p-6 bg-emerald-50/40 border-t border-emerald-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs animate-fadeIn">
                         <div className="text-left">
-                          <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">Gestión de Equipo</span>
-                          <h3 className="text-md font-bold text-text-primary mt-0.5">Asesores Asociados a la Agencia</h3>
+                          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Firma Digital Registrada</span>
+                          <p className="text-sm font-serif italic text-emerald-800 font-bold mt-0.5">{agent.signature_name || agent.full_name}</p>
                         </div>
-                        <button
-                          onClick={() => showToast("Funcionalidad demo: Enlace de invitación copiado al portapapeles.", "success")}
-                          className="px-3 py-1.5 bg-brand-primary text-white text-[10px] font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer"
-                        >
-                          + Invitar Asesor
-                        </button>
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Fecha de Firma Digital</span>
+                          <p className="font-semibold text-text-primary mt-0.5">
+                            {agent.signed_at ? new Date(agent.signed_at).toLocaleString("es-SV") : new Date(agent.created_at).toLocaleString("es-SV")}
+                          </p>
+                        </div>
+                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1.5 rounded border border-emerald-200 flex items-center gap-1 self-stretch sm:self-auto justify-center">
+                          ✅ Contrato Firmado Digitalmente
+                        </span>
                       </div>
+                    ) : (
+                      <form onSubmit={signContract} className="p-6 space-y-5 bg-white">
+                        <div className="flex items-start gap-3">
+                          <input
+                            id="terms"
+                            type="checkbox"
+                            checked={termsChecked}
+                            onChange={(e) => setTermsChecked(e.target.checked)}
+                            className="mt-1 w-4 h-4 border border-border-light text-brand-primary rounded-sm focus:ring-brand-primary"
+                          />
+                          <label htmlFor="terms" className="text-xs text-text-secondary leading-normal cursor-pointer select-none text-left">
+                            {agent.application_id.startsWith("B2B-") 
+                              ? <span>Acepto los términos de alianza comercial corporativa, las comisiones financieras corporativas del 75% al 85% y las cláusulas penales por filtración de datos de clientes.</span>
+                              : <span>He leído en su totalidad y de conformidad, <strong>acepto los términos comerciales</strong>, las comisiones financieras del 70% (con posibilidad de 80% por bono de excelencia) y las cláusulas penales por incumplimiento de confidencialidad de datos.</span>}
+                          </label>
+                        </div>
 
-                      <div className="divide-y divide-border-light text-xs">
-                        {displayMembers.length === 0 ? (
-                          <div className="py-6 text-center text-text-secondary italic">
-                            No hay asesores asociados en tu agencia. Comienza a invitar agentes a unirse a tu equipo desde tu perfil.
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end pt-2">
+                          <div>
+                            <label htmlFor="signature-input" className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 text-left">
+                              {agent.application_id.startsWith("B2B-") 
+                                ? "Firma Digital de Representante Legal (Escribe tu Nombre)"
+                                : "Firma Legal Digital (Escribe tu Nombre Completo)"}
+                            </label>
+                            <input
+                              id="signature-input"
+                              type="text"
+                              value={signatureName}
+                              onChange={(e) => setSignatureName(e.target.value)}
+                              placeholder="Nombre como firma"
+                              className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus focus:outline-none transition-all text-text-primary font-serif italic"
+                              required
+                            />
                           </div>
-                        ) : (
-                          displayMembers.map((member) => (
-                            <div key={member.id} className="py-3 flex items-center justify-between animate-fadeIn">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xs border border-brand-primary/20 select-none">
-                                  {member.name.charAt(0)}
-                                </div>
-                                <div className="text-left">
-                                  <p className="font-bold text-text-primary">{member.name}</p>
-                                  <p className="text-[10px] text-text-secondary">{member.role}</p>
-                                </div>
-                              </div>
 
-                              <div className="flex items-center gap-6">
-                                <div className="text-right">
-                                  <p className="font-semibold text-text-primary">{member.cases} casos cerrados</p>
-                                  <p className="text-[10px] text-text-secondary">
-                                    {member.rating ? `⭐ ${member.rating.toFixed(1)}` : "⭐ N/A"}
-                                  </p>
-                                </div>
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${member.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-gray-100 text-gray-500"}`}>
-                                  {member.active ? "ACTIVO" : "PENDIENTE"}
-                                </span>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    /* Public Profile Card */
-                    <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
-                      <h3 className="text-md font-bold text-text-primary mb-5 pb-2 border-b border-border-light text-left">Vista Previa de tu Perfil Público</h3>
-                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-                        <div className="w-16 h-16 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-xl flex-shrink-0 border border-brand-primary/20">
-                          {agent.full_name.charAt(0)}
+                          <button
+                            type="submit"
+                            disabled={signing || !termsChecked || !signatureName.trim()}
+                            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            {signing ? (
+                              <>
+                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                Firmando contrato...
+                              </>
+                            ) : (
+                              agent.application_id.startsWith("B2B-") 
+                                ? "🤝 Firmar y Activar Alianza Comercial"
+                                : "✍️ Firmar y Activar Contrato"
+                            )}
+                          </button>
                         </div>
-                        <div className="flex-grow text-center sm:text-left space-y-2">
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-center sm:justify-start">
-                            <h4 className="font-bold text-text-primary text-sm">{agent.full_name}</h4>
-                            <span className="bg-emerald-50 text-emerald-700 text-[8px] font-bold px-2 py-0.5 rounded border border-emerald-100 self-center">
-                              ASESOR CERTIFICADO
-                            </span>
-                          </div>
-                          <p className="text-xs text-brand-primary font-semibold text-left">Especialista en {agent.specialties.join(", ")}</p>
-                          <p className="text-xs text-text-secondary italic text-left">&quot;{agent.biography}&quot;</p>
-                          <div className="flex flex-wrap gap-1.5 justify-center sm:justify-start pt-1">
-                            {agent.languages.map((l) => (
-                              <span key={l} className="bg-gray-100 text-text-secondary text-[9px] px-2 py-0.5 rounded">
-                                🗣️ {l}
-                              </span>
-                            ))}
-                            {agent.target_countries.map((c) => (
-                              <span key={c} className="bg-brand-light text-brand-primary text-[9px] px-2 py-0.5 rounded">
-                                📍 {c}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                      </form>
+                    )}
+                  </div>
                 </div>
               )}
+
             </div>
 
             {/* RIGHT COLUMN - SIDEBAR CHECKLIST & CANDIDATE CARD */}
@@ -1521,52 +1151,7 @@ function AgentPortalContent() {
                 </div>
               </div>
 
-              {/* ACTIVE STATE ONBOARDING STEPS */}
-              {agent.status === "active" && (
-                <div className="bg-white border border-border-light rounded-sm p-6 shadow-sm flex flex-col gap-4">
-                  <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider border-b border-border-light pb-2">
-                    Pasos de Onboarding
-                  </h4>
-                  <p className="text-[11px] text-text-secondary leading-relaxed">
-                    Completa las siguientes tareas iniciales para comenzar a recibir leads en tu chat:
-                  </p>
 
-                  <div className="space-y-3.5">
-                    {/* Step 1 */}
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={onboardingSteps.training}
-                        onChange={(e) => setOnboardingSteps(prev => ({ ...prev, training: e.target.checked }))}
-                        className="mt-0.5 w-3.5 h-3.5 border-border-light text-brand-primary focus:ring-brand-primary"
-                      />
-                      <div>
-                        <span className={`text-xs font-semibold block leading-tight ${onboardingSteps.training ? "line-through text-text-muted" : "text-text-primary"}`}>
-                          Videos de Capacitación
-                        </span>
-                        <span className="text-[9px] text-text-muted">Aprende a usar el chat y armar formularios consulares.</span>
-                      </div>
-                    </div>
-
-                    {/* Step 2 */}
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={onboardingSteps.payment}
-                        onChange={(e) => setOnboardingSteps(prev => ({ ...prev, payment: e.target.checked }))}
-                        className="mt-0.5 w-3.5 h-3.5 border-border-light text-brand-primary focus:ring-brand-primary"
-                      />
-                      <div>
-                        <span className={`text-xs font-semibold block leading-tight ${onboardingSteps.payment ? "line-through text-text-muted" : "text-text-primary"}`}>
-                          Configurar Cuenta de Pago
-                        </span>
-                        <span className="text-[9px] text-text-muted">Registra tu cuenta bancaria o Stripe para las transferencias de los viernes.</span>
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-              )}
 
               {/* DOCUMENTS CARD */}
               <div className="bg-white border border-border-light rounded-sm p-6 shadow-sm flex flex-col gap-4">

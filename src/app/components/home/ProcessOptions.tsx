@@ -138,29 +138,32 @@ export const ProcessSection = () => {
       {/* Plan Details Card */}
       <div
         key={`${active}-plan-details`}
-        className="max-w-3xl mx-auto mt-20 bg-white border border-border-light rounded-3xl p-8 md:p-12 shadow-sm flex flex-col md:flex-row items-center gap-8 animate-in fade-in-0 slide-in-from-bottom-3 duration-500"
+        className="w-full bg-brand-primary rounded-sm px-8 py-10 md:py-12 relative overflow-hidden flex flex-col md:flex-row items-center gap-8 animate-in fade-in-0 slide-in-from-bottom-3 duration-500 mt-20"
       >
-        <div className="flex-1 space-y-4 text-center md:text-left">
-          <span className="inline-block text-xs font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3.5 py-1 rounded-full border border-brand-primary/20">
+        {/* Background grid */}
+        <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:12px_12px] pointer-events-none select-none"></div>
+
+        <div className="flex-1 space-y-4 text-center md:text-left relative z-10">
+          <span className="inline-block text-xs font-extrabold uppercase tracking-widest text-white/90 bg-white/10 px-3.5 py-1 rounded-full border border-white/25 backdrop-blur-xs">
             {planInfo[active as keyof typeof planInfo].promo}
           </span>
-          <h4 className="text-2xl md:text-3xl font-bold text-gray-900 font-serif italic">
+          <h4 className="text-3xl md:text-4xl font-bold text-white font-serif italic">
             {processOptions[active as keyof typeof processOptions].title}
           </h4>
-          <p className="text-sm text-gray-600 leading-relaxed max-w-md">
+          <p className="text-sm md:text-base text-white/90 leading-relaxed max-w-2xl font-light">
             {planInfo[active as keyof typeof planInfo].description}
           </p>
         </div>
-        <div className="flex flex-col items-center md:items-end justify-center gap-4 flex-shrink-0 w-full md:w-auto">
+        <div className="flex flex-col items-center md:items-end justify-center gap-4 flex-shrink-0 w-full md:w-auto relative z-10">
           <div className="text-center md:text-right">
-            <p className="text-3xl font-black text-brand-primary font-mono">
+            <p className="text-4xl font-black text-white font-mono tracking-tight">
               {planInfo[active as keyof typeof planInfo].price}
             </p>
-            <p className="text-xs text-gray-400 font-medium">Pago único y transparente</p>
+            <p className="text-xs text-white/60 font-medium">Pago único y transparente</p>
           </div>
           <button
             onClick={planInfo[active as keyof typeof planInfo].action}
-            className="w-full md:w-auto px-8 py-3.5 bg-brand-primary text-white font-bold text-sm rounded-xl hover:bg-brand-hover shadow-md hover:shadow-lg transition-all focus:outline-none cursor-pointer text-center border-none"
+            className="w-full md:w-auto px-8 py-4 bg-white hover:bg-gray-100 text-brand-primary font-bold text-sm rounded-sm transition-all focus:outline-none cursor-pointer text-center border-none shadow-md"
           >
             {planInfo[active as keyof typeof planInfo].buttonText}
           </button>

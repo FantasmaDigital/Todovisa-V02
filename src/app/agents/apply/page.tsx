@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StorageClientService } from "@/services/client/StorageClientService";
 import { AgentClientService } from "@/services/client/AgentClientService";
+import { useAuthStore } from "../../store/authStore";
+import { ROLES } from "../../constants/roles";
 
 interface FormData {
   fullName: string;
@@ -24,6 +26,14 @@ interface FormData {
 
 export default function AgentApplyPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
+
+  useEffect(() => {
+    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY || user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
+      router.replace("/profile");
+    }
+  }, [user, router]);
+
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<FormData>({
     fullName: "",

@@ -1,24 +1,25 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 const footerLinks = {
   Servicios: [
     { label: "Asesoría Virtual", href: "/citas" },
     { label: "Evaluación VIPRO", href: "/vipro-form" },
-    { label: "Red de Agentes", href: "/agents" },
+    { label: "Tramitar mi Visa", href: "/visas" },
     { label: "Cómo Funciona", href: "/#como-funciona" },
   ],
   Compañía: [
-    { label: "Sobre Nosotros", href: "#" },
-    { label: "Red de Agentes", href: "#" },
-    { label: "Preguntas Frecuentes", href: "#" },
-    { label: "Blog de Viajes", href: "#" },
+    { label: "Sobre Nosotros", href: "/about-us" },
+    { label: "Red de Asesores", href: "/agents" },
+    { label: "Únete a la Red", href: "/agents/apply" },
+    { label: "Preguntas Frecuentes", href: "/sobre-todovisa" },
   ],
   Legal: [
-    { label: "Política de Privacidad", href: "#" },
-    { label: "Términos de Uso", href: "#" },
-    { label: "Aviso de Cookies", href: "#" },
+    { label: "Política de Privacidad", href: "/about-us#privacidad" },
+    { label: "Términos de Uso", href: "/about-us#terminos" },
+    { label: "Aviso de Cookies", href: "/about-us#cookies" },
   ],
 };
 
@@ -75,6 +76,8 @@ export function Footer() {
                 key={label}
                 href={href}
                 aria-label={label}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-9 h-9 rounded-full bg-white/10 hover:bg-brand-primary flex items-center justify-center text-white/70 hover:text-white transition-all duration-200"
               >
                 {icon}
@@ -90,12 +93,12 @@ export function Footer() {
             <ul className="flex flex-col gap-3">
               {links.map(({ label, href }) => (
                 <li key={label}>
-                  <a
+                  <Link
                     href={href}
                     className="text-sm text-white/60 hover:text-white transition-colors duration-200"
                   >
                     {label}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
