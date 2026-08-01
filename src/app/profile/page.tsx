@@ -112,6 +112,19 @@ export default function PerfilUsuarioPage() {
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
+  const [fullServicePrice, setFullServicePrice] = useState(150);
+  const [viproPrice, setViproPrice] = useState(19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("fullServicePrice");
+    if (savedPrice) {
+      setFullServicePrice(Number(savedPrice));
+    }
+    const savedViproPrice = localStorage.getItem("viproPrice");
+    if (savedViproPrice) {
+      setViproPrice(Number(savedViproPrice));
+    }
+  }, []);
 
   const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
     e.preventDefault();
@@ -401,67 +414,6 @@ export default function PerfilUsuarioPage() {
 
 
   const [preformMetadata, setPreformMetadata] = useState<{ intake_type?: string; interview_waiver_eligible?: boolean | null; appointment_date?: string; courier_tracking?: string } | null>(null);
-
-  // Audit Modal state for Admin
-  const [auditModalItem, setAuditModalItem] = useState<any | null>(null);
-  const [auditDocs, setAuditDocs] = useState<{ name: string; url: string; path: string }[]>([]);
-  const [isLoadingAuditDocs, setIsLoadingAuditDocs] = useState(false);
-
-  const handleOpenAuditModal = async (item: any) => {
-    setAuditModalItem(item);
-    setAuditDocs([]);
-    setIsLoadingAuditDocs(true);
-
-    try {
-      const targetUserId = item.user_id || item.id;
-      const docsList: { name: string; url: string; path: string }[] = [];
-
-      try {
-        const { data: storageFiles } = await supabase.storage
-          .from("todovisa")
-          .list(`expedientes/${targetUserId}`);
-
-        if (storageFiles && storageFiles.length > 0) {
-          for (const f of storageFiles) {
-            if (f.name && !f.name.startsWith(".")) {
-              const filePath = `expedientes/${targetUserId}/${f.name}`;
-              const { data: signedData } = await supabase.storage
-                .from("todovisa")
-                .createSignedUrl(filePath, 3600);
-              docsList.push({
-                name: f.name,
-                url: signedData?.signedUrl || "",
-                path: filePath,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("Storage check for expedientes error:", err);
-      }
-
-      if (item.documents && typeof item.documents === "object") {
-        for (const [key, val] of Object.entries(item.documents)) {
-          if (val && typeof val === "string" && val.startsWith("http")) {
-            if (!docsList.some(d => d.url === val)) {
-              docsList.push({
-                name: `Documento (${key.toUpperCase()})`,
-                url: val,
-                path: val,
-              });
-            }
-          }
-        }
-      }
-
-      setAuditDocs(docsList);
-    } catch (err) {
-      console.error("Error loading audit docs:", err);
-    } finally {
-      setIsLoadingAuditDocs(false);
-    }
-  };
-
 
   useEffect(() => {
     if (user?.id) {
@@ -2181,7 +2133,7 @@ export default function PerfilUsuarioPage() {
                           {isViproCompleted ? "Completado" : hasVipro ? "Disponible" : "No Adquirido"}
                         </span>
                       </div>
-                      <h4 className="text-sm font-bold text-text-primary mb-1">Diagnóstico de Probabilidad Consular ($19.99 USD)</h4>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Diagnóstico de Probabilidad Consular (${viproPrice.toFixed(2)} USD)</h4>
                       <p className="text-xs text-text-secondary leading-relaxed mb-4">
                         Evaluación expres para analizar solvencia, arraigo y perfil de viabilidad.
                       </p>
@@ -2211,7 +2163,7 @@ export default function PerfilUsuarioPage() {
                           onClick={() => router.push("/vipro-form")}
                           className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer shadow-xs"
                         >
-                          Adquirir VIPRO por $19.99 USD &rarr;
+                          Adquirir VIPRO por ${viproPrice.toFixed(2)} USD &rarr;
                         </button>
                       )}
                     </div>
@@ -2226,7 +2178,7 @@ export default function PerfilUsuarioPage() {
                           {user.hasPaidAdvisor ? "Activo" : "No Adquirido"}
                         </span>
                       </div>
-                      <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento ($112.50 USD)</h4>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento (${(fullServicePrice * 0.75).toFixed(2)} USD)</h4>
                       <p className="text-xs text-text-secondary leading-relaxed mb-4">
                         Asesoría 1-a-1, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
                       </p>
@@ -2254,7 +2206,7 @@ export default function PerfilUsuarioPage() {
                           onClick={() => router.push("/agents")}
                           className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-xs"
                         >
-                          Seleccionar Asesor ($112.50 USD) &rarr;
+                          Seleccionar Asesor (${(fullServicePrice * 0.75).toFixed(2)} USD) &rarr;
                         </button>
                       )}
 
@@ -2271,7 +2223,7 @@ export default function PerfilUsuarioPage() {
                       <div className="space-y-1.5 max-w-lg mx-auto">
                         <h3 className="text-base font-bold text-text-primary">Línea de Seguimiento No Activa</h3>
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Para habilitar los pasos interactivos de seguimiento en tu perfil, debes contratar la **Evaluación Diagnóstica VIPRO ($19.99 USD)** o la **Asesoría Consular Completa con Asesor ($112.50 USD)**.
+                          Para habilitar los pasos interactivos de seguimiento en tu perfil, debes contratar la **Evaluación Diagnóstica VIPRO ($${viproPrice.toFixed(2)} USD)** o la **Asesoría Consular Completa con Asesor (${(fullServicePrice * 0.75).toFixed(2)} USD)**.
                         </p>
                       </div>
                     </div>
@@ -2369,7 +2321,7 @@ export default function PerfilUsuarioPage() {
                           onClick={() => router.push("/agents")}
                           className="px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0"
                         >
-                          Seleccionar Asesor ($112.50 USD) &rarr;
+                          Seleccionar Asesor (${(fullServicePrice * 0.75).toFixed(2)} USD) &rarr;
                         </button>
                       </div>
                     </div>
@@ -2915,7 +2867,7 @@ export default function PerfilUsuarioPage() {
                         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-5 border-t border-border-light">
                           <div>
                             <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Precio Único</span>
-                            <span className="text-xl font-extrabold text-[#113E5F] font-mono">$19.99 USD</span>
+                            <span className="text-xl font-extrabold text-[#113E5F] font-mono">${viproPrice.toFixed(2)} USD</span>
                           </div>
                           <button
                             onClick={() => router.push("/vipro-form")}
@@ -3347,7 +3299,7 @@ export default function PerfilUsuarioPage() {
                               </div>
                             </td>
                             <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                            <td className="py-4 px-4 font-bold text-text-primary">$19.99 USD</td>
+                            <td className="py-4 px-4 font-bold text-text-primary">${viproPrice.toFixed(2)} USD</td>
                             <td className="py-4 px-4">
                               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidVipro || user.hasPaidAdvisor
                                 ? "bg-emerald-50 text-emerald-700 border-emerald-100"
@@ -3389,7 +3341,7 @@ export default function PerfilUsuarioPage() {
                             </td>
                             <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
                             <td className="py-4 px-4 font-bold text-text-primary">
-                              {user.hasPaidAdvisor ? "$112.50 USD" : "$150.00 USD"}
+                              {user.hasPaidAdvisor ? `$${(fullServicePrice * 0.75).toFixed(2)} USD` : `$${fullServicePrice.toFixed(2)} USD`}
                             </td>
                             <td className="py-4 px-4">
                               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidAdvisor
@@ -3432,7 +3384,7 @@ export default function PerfilUsuarioPage() {
                   <div>
                     <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
                     <p className="text-[11px] text-text-secondary leading-relaxed">
-                      Como completaste tu evaluación VIPRO de $19.99 USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
+                      Como completaste tu evaluación VIPRO de $${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
                     </p>
                   </div>
                 </div>
@@ -4005,7 +3957,7 @@ export default function PerfilUsuarioPage() {
                     <div className="text-3xl font-black text-[#113E5F] font-mono">
                       {(allProfilesList.length + 1).toLocaleString()}
                     </div>
-                    <p className="text-[11px] text-text-muted mt-1 font-medium">Clientes y Agentes en Supabase</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-medium">Clientes y Agentes Registrados</p>
                   </div>
 
                   <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
@@ -4051,7 +4003,7 @@ export default function PerfilUsuarioPage() {
                     <div className="text-3xl font-black text-[#113E5F] font-mono">
                       ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <p className="text-[11px] text-text-muted mt-1 font-medium">USD procesados en Supabase</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-medium">USD procesados</p>
                   </div>
                 </div>
 
@@ -4113,9 +4065,60 @@ export default function PerfilUsuarioPage() {
                     </div>
                     <h4 className="text-sm font-bold text-text-primary">Monitor de Expedientes Consulares</h4>
                     <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                      Supervisar preformularios completados, auditoría de formularios DS-160 y documentos en Supabase.
+                      Supervisar preformularios completados, auditoría de formularios DS-160 y documentos cargados.
                     </p>
                   </button>
+                </div>
+
+                {/* System Configuration Panel */}
+                <div className="bg-white p-6 border border-border-light rounded-2xl shadow-xs space-y-4">
+                  <div className="flex items-center gap-2 border-b border-border-light pb-3">
+                    <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    </svg>
+                    <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider">Configuración de Precios del Sistema</h3>
+                  </div>
+                  <div className="flex flex-col gap-4 max-w-md text-left">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                        Precio Asesoría Consular Completa ($ USD)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={fullServicePrice}
+                        onChange={(e) => setFullServicePrice(Number(e.target.value))}
+                        className="w-full text-xs px-3.5 py-2 border border-border-light rounded-lg focus:outline-none focus:border-[#113E5F] font-mono font-bold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                        Precio Evaluación VIPRO ($ USD)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={viproPrice}
+                        onChange={(e) => setViproPrice(Number(e.target.value))}
+                        className="w-full text-xs px-3.5 py-2 border border-border-light rounded-lg focus:outline-none focus:border-[#113E5F] font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-start">
+                    <button
+                      onClick={() => {
+                        localStorage.setItem("fullServicePrice", String(fullServicePrice));
+                        localStorage.setItem("viproPrice", String(viproPrice));
+                        showToast(`Precios actualizados correctamente. Asesoría: $${Number(fullServicePrice).toFixed(2)} USD, VIPRO: $${Number(viproPrice).toFixed(2)} USD.`, "success");
+                        window.dispatchEvent(new Event("storage"));
+                      }}
+                      className="px-6 py-2 bg-[#113E5F] hover:bg-[#0f3755] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Guardar Precios
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -4162,7 +4165,7 @@ export default function PerfilUsuarioPage() {
                           return (
                             <tr>
                               <td colSpan={3} className="py-8 text-center text-text-muted italic">
-                                No se encontraron usuarios registrados en la tabla profiles de Supabase.
+                                No se encontraron usuarios registrados en el sistema.
                               </td>
                             </tr>
                           );
@@ -4220,7 +4223,7 @@ export default function PerfilUsuarioPage() {
                 <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-lg font-bold text-text-primary">Monitor de Expedientes Consulares y Documentos</h2>
-                    <p className="text-xs text-text-secondary mt-1">Revisión centralizada de preformularios, estado de DS-160 y archivos cargados en Supabase Storage.</p>
+                    <p className="text-xs text-text-secondary mt-1">Revisión centralizada de preformularios, estado de DS-160 y archivos cargados.</p>
                   </div>
                 </div>
 
@@ -4230,7 +4233,7 @@ export default function PerfilUsuarioPage() {
                       <tr>
                         <th className="py-3 px-4">Solicitante</th>
                         <th className="py-3 px-4">Preformulario</th>
-                        <th className="py-3 px-4">Documentos en Supabase Storage</th>
+                        <th className="py-3 px-4">Documentos Cargados</th>
                         <th className="py-3 px-4 text-center">Acción</th>
                       </tr>
                     </thead>
@@ -4345,11 +4348,11 @@ export default function PerfilUsuarioPage() {
                                 </span>
                               </td>
                               <td className="py-3.5 px-4 text-xs font-mono">
-                                Bucket <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{userIdShort}</code>
+                                <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{userIdShort}</code>
                               </td>
                               <td className="py-3.5 px-4 text-center">
                                 <button
-                                  onClick={() => handleOpenAuditModal({ ...sol, clientName, clientEmail, fullUser })}
+                                  onClick={() => router.push(`/profile/dossier/${sol.user_id || sol.id}`)}
                                   className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm inline-flex items-center gap-1.5"
                                 >
                                   <span>Auditar Expediente</span>
@@ -4470,7 +4473,7 @@ export default function PerfilUsuarioPage() {
                         <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-948271</td>
                         <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
                         <td className="py-3.5 px-4">Evaluación Diagnóstica VIPRO</td>
-                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">$19.99 USD</td>
+                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">${viproPrice.toFixed(2)} USD</td>
                         <td className="py-3.5 px-4">
                           <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
                         </td>
@@ -4479,7 +4482,7 @@ export default function PerfilUsuarioPage() {
                         <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-827410</td>
                         <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
                         <td className="py-3.5 px-4">Servicio Completo con Asesor Acreditado</td>
-                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">$112.50 USD</td>
+                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">${(fullServicePrice * 0.75).toFixed(2)} USD</td>
                         <td className="py-3.5 px-4">
                           <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
                         </td>
@@ -5291,7 +5294,7 @@ export default function PerfilUsuarioPage() {
                 : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
                 }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${ds160Confirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
-                {ds160Confirmed ? 'DATOS CONFIRMADOS EN SUPABASE' : 'PENDIENTE DE CONFIRMACIÓN'}
+                {ds160Confirmed ? 'DATOS CONFIRMADOS' : 'PENDIENTE DE CONFIRMACIÓN'}
               </div>
             </div>
 
@@ -5542,208 +5545,9 @@ export default function PerfilUsuarioPage() {
         </div>
       )}
 
-      {/* MODAL / APARTADO DE DETALLES Y AUDITORÍA DE SOLICITUD (ADMIN - 100% ANCHO & TODOVISA DESIGN) */}
-      {auditModalItem && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-0 md:p-6 z-50 animate-fadeIn">
-          <div className="bg-white md:rounded-2xl w-full max-w-full md:max-w-6xl h-full md:h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-border-light text-left">
-            
-            {/* Header Modal - TodoVisa Navy Brand Banner */}
-            <div className="p-5 md:p-6 bg-[#113E5F] text-white flex items-center justify-between shadow-md flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-white">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-white bg-white/20 px-2.5 py-0.5 rounded-full border border-white/30">
-                      {auditModalItem.type || "Expediente Consular"}
-                    </span>
-                    {auditModalItem.score && (
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-300 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-400/30">
-                        Score VIPRO: {auditModalItem.score}/100
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-xl font-bold text-white mt-1">
-                    Expediente de {auditModalItem.clientName}
-                  </h3>
-                  <p className="text-xs text-white/80 font-mono mt-0.5">
-                    ID Solicitante: {auditModalItem.user_id}
-                  </p>
-                </div>
-              </div>
 
-              <button
-                onClick={() => setAuditModalItem(null)}
-                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer border border-white/20"
-                title="Cerrar Auditoría"
-              >
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
 
-            {/* Body Modal - Spacious 100% Content */}
-            <div className="p-6 md:p-8 space-y-8 overflow-y-auto flex-1 font-sans bg-[#FAFAFA]">
-              
-              {/* Sección 1: Perfil del Solicitante */}
-              <div className="bg-white p-6 rounded-xl border border-border-light shadow-xs space-y-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-border-light">
-                  <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                  <h4 className="text-xs font-bold text-[#113E5F] uppercase tracking-wider">
-                    Información Personal y de Perfil
-                  </h4>
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 text-xs">
-                  <div className="space-y-1">
-                    <span className="text-text-muted block text-[11px] font-medium">Nombre Completo</span>
-                    <span className="font-bold text-text-primary text-sm">{auditModalItem.clientName}</span>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-text-muted block text-[11px] font-medium font-mono">Correo Electrónico</span>
-                    <span className="font-semibold text-text-primary text-sm">{auditModalItem.clientEmail}</span>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-text-muted block text-[11px] font-medium">Teléfono / Contacto</span>
-                    <span className="font-semibold text-text-primary">{auditModalItem.fullUser?.phone || auditModalItem.answers?.phone || "No especificado"}</span>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-text-muted block text-[11px] font-medium">País de Residencia</span>
-                    <span className="font-semibold text-text-primary">{auditModalItem.fullUser?.country || auditModalItem.answers?.country_residence || "El Salvador"}</span>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-text-muted block text-[11px] font-medium">Rol en Sistema</span>
-                    <span className="inline-block font-extrabold text-[10px] px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-800 border border-gray-200 uppercase">
-                      {auditModalItem.fullUser?.role || "CLIENTE"}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-text-muted block text-[11px] font-medium">Fecha de Solicitud</span>
-                    <span className="font-mono text-text-muted">{auditModalItem.updated_at ? new Date(auditModalItem.updated_at).toLocaleDateString("es-ES") : "Reciente"}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Sección 2: Respuestas Registradas del Cuestionario */}
-              <div className="bg-white p-6 rounded-xl border border-border-light shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-border-light">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <h4 className="text-xs font-bold text-[#113E5F] uppercase tracking-wider">
-                      Respuestas Registradas de la Solicitud
-                    </h4>
-                  </div>
-                </div>
-
-                {auditModalItem.answers && typeof auditModalItem.answers === "object" && Object.keys(auditModalItem.answers).length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-3 bg-[#FAFAFA] rounded-xl border border-border-light text-xs font-sans max-h-72 overflow-y-auto">
-                    {Object.entries(auditModalItem.answers).map(([key, value], idx) => {
-                      if (typeof value === "object" && value !== null) return null;
-                      return (
-                        <div key={idx} className="p-3 bg-white rounded-lg border border-border-light space-y-1">
-                          <span className="text-text-muted block text-[10px] uppercase font-bold tracking-wider">Campo #{key}</span>
-                          <span className="font-semibold text-text-primary break-words">{String(value)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-xs italic text-text-muted p-5 text-center bg-[#FAFAFA] rounded-xl border border-border-light">
-                    El usuario registró la solicitud de expediente.
-                  </div>
-                )}
-              </div>
-
-              {/* Sección 3: Documentos Subidos en Supabase Storage */}
-              <div className="bg-white p-6 rounded-xl border border-border-light shadow-xs space-y-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-border-light">
-                  <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                  </svg>
-                  <h4 className="text-xs font-bold text-[#113E5F] uppercase tracking-wider">
-                    Documentos Adjuntos y Cargados en Supabase Storage
-                  </h4>
-                </div>
-
-                {isLoadingAuditDocs ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 animate-pulse">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="p-4 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-gray-200 flex-shrink-0"></div>
-                          <div className="space-y-1.5">
-                            <div className="h-3 bg-gray-200 rounded w-32"></div>
-                            <div className="h-2.5 bg-gray-100 rounded w-20"></div>
-                          </div>
-                        </div>
-                        <div className="h-8 bg-gray-200 rounded-md w-24 flex-shrink-0"></div>
-                      </div>
-                    ))}
-                  </div>
-                ) : auditDocs.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {auditDocs.map((doc, idx) => (
-                      <div key={idx} className="p-4 bg-white rounded-xl border border-border-light shadow-xs flex items-center justify-between gap-3 hover:border-[#113E5F] transition-all">
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          <div className="w-10 h-10 rounded-lg bg-[#EFF6FF] text-[#113E5F] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                          </div>
-                          <div className="truncate">
-                            <div className="text-xs font-bold text-text-primary truncate">{doc.name}</div>
-                            <div className="text-[10px] text-text-muted font-mono">Supabase Storage</div>
-                          </div>
-                        </div>
-                        {doc.url ? (
-                          <a
-                            href={doc.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3.5 py-2 bg-[#113E5F] hover:bg-[#0f3755] text-white text-xs font-bold rounded-lg transition-colors flex-shrink-0 flex items-center gap-1.5 shadow-xs"
-                          >
-                            <span>Ver</span>
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                          </a>
-                        ) : (
-                          <span className="text-[10px] text-text-muted italic">Sin URL</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-6 text-center text-xs text-text-muted italic bg-[#FAFAFA] rounded-xl border border-border-light">
-                    No se encontraron documentos cargados físicamente en Supabase Storage para este expediente.
-                  </div>
-                )}
-              </div>
-
-            </div>
-
-            {/* Footer Modal */}
-            <div className="p-4 px-6 border-t border-border-light bg-white flex items-center justify-end gap-3 flex-shrink-0">
-              <button
-                onClick={() => setAuditModalItem(null)}
-                className="px-6 py-2.5 bg-[#113E5F] hover:bg-[#0f3755] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm"
-              >
-                Cerrar Auditoría
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
+      
       {/* Toast Alert Component */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[400] flex items-center gap-3 px-5 py-4 rounded-lg shadow-2xl border animate-in slide-in-from-bottom-4 duration-300 max-w-sm ${toast.type === 'success'

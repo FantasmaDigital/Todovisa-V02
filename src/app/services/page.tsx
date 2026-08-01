@@ -2,7 +2,7 @@
 
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "../store/authStore";
 
@@ -76,10 +76,34 @@ export default function ServicesPage() {
     const headerRef = useRef(null);
     const user = useAuthStore((state) => state.user);
     const isViproCompleted = Boolean(user?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))));
+    const [price, setPrice] = useState(150);
+    const [viproPrice, setViproPrice] = useState(19.99);
 
     useEffect(() => {
-        if (headerRef.current) { }
+        const savedPrice = localStorage.getItem("fullServicePrice");
+        if (savedPrice) {
+            setPrice(Number(savedPrice));
+        }
+        const savedViproPrice = localStorage.getItem("viproPrice");
+        if (savedViproPrice) {
+            setViproPrice(Number(savedViproPrice));
+        }
+
+        const handleStorage = () => {
+            const saved = localStorage.getItem("fullServicePrice");
+            if (saved) {
+                setPrice(Number(saved));
+            }
+            const savedVipro = localStorage.getItem("viproPrice");
+            if (savedVipro) {
+                setViproPrice(Number(savedVipro));
+            }
+        };
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
     }, []);
+
+    const discountPrice = price * 0.75;
 
     return (
         <div className="min-h-screen w-full flex flex-col bg-background-main">
@@ -124,7 +148,7 @@ export default function ServicesPage() {
                                         📊 Evaluación VIPRO
                                     </h3>
                                     <div className="flex items-baseline gap-2">
-                                        <span className="text-3xl font-extrabold text-brand-primary font-mono">$19.99</span>
+                                        <span className="text-3xl font-extrabold text-brand-primary font-mono">${viproPrice.toFixed(2)}</span>
                                         <span className="text-xs text-text-muted font-sans">USD / pago único</span>
                                     </div>
                                     <p className="text-xs text-text-secondary leading-relaxed">
@@ -168,7 +192,7 @@ export default function ServicesPage() {
                                         href="/vipro-form"
                                         className="w-full inline-block text-center px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-xs"
                                     >
-                                        Comenzar Evaluación VIPRO ($19.99 USD) &rarr;
+                                        Comenzar Evaluación VIPRO (${viproPrice.toFixed(2)} USD) &rarr;
                                     </Link>
                                 )}
                             </div>
@@ -184,7 +208,7 @@ export default function ServicesPage() {
                                         👤 Asesoría Completa con Experto
                                     </h3>
                                     <div className="flex items-baseline gap-2">
-                                        <span className="text-3xl font-extrabold text-emerald-700 font-mono">$112.50</span>
+                                        <span className="text-3xl font-extrabold text-emerald-700 font-mono">${discountPrice.toFixed(2)}</span>
                                         <span className="text-xs text-text-muted font-sans">USD / paquete completo</span>
                                     </div>
                                     <p className="text-xs text-text-secondary leading-relaxed">
@@ -228,7 +252,7 @@ export default function ServicesPage() {
                                     href="/agents"
                                     className="w-full inline-block text-center px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-sm transition-all shadow-xs"
                                 >
-                                    Elegir mi Asesor Consular ($112.50 USD) &rarr;
+                                    Elegir mi Asesor Consular (${discountPrice.toFixed(2)} USD) &rarr;
                                 </Link>
                             </div>
                         </div>

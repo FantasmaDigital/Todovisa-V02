@@ -1,27 +1,46 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 export const AgentNetwork = () => {
+    const [price, setPrice] = useState(150);
+
+    useEffect(() => {
+        const savedPrice = localStorage.getItem("fullServicePrice");
+        if (savedPrice) {
+            setPrice(Number(savedPrice));
+        }
+
+        const handleStorage = () => {
+            const saved = localStorage.getItem("fullServicePrice");
+            if (saved) {
+                setPrice(Number(saved));
+            }
+        };
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
+    }, []);
+
+    const commissionAmount = price * 0.60;
+
     return (
         <section id="unirte-red" className="w-full mx-auto flex flex-col">
 
             {/* Incentivación superior: stats bar */}
-            <div className="w-full bg-brand-primary rounded-sm px-8 py-6 relative overflow-hidden">
+            <div className="w-full bg-brand-primary px-8 py-6 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:12px_12px]"></div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 relative">
                     <div className="max-w-sm">
                         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">Red de Expertos TodoVisa</span>
                         <p className="text-white font-bold text-xl mt-1 leading-snug font-serif italic">
-                            Gana hasta $350 USD por trámite. Sin buscar clientes.
+                            Gana hasta ${commissionAmount.toFixed(2)} USD por trámite. Sin buscar clientes.
                         </p>
                     </div>
-                    <div className="grid grid-cols-3 gap-6 text-center text-xs">
+                    <div className="grid grid-cols-2 gap-6 text-center text-xs">
                         <div>
-                            <span className="block text-3xl font-bold text-white">70%</span>
+                            <span className="block text-3xl font-bold text-white">60%</span>
                             <span className="text-white/60 leading-tight">Comisión base</span>
-                        </div>
-                        <div>
-                            <span className="block text-3xl font-bold text-white">+10%</span>
-                            <span className="text-white/60 leading-tight">Bono excelencia</span>
                         </div>
                         <div>
                             <span className="block text-sm font-bold text-white mt-2">Semanal</span>
@@ -51,7 +70,7 @@ export const AgentNetwork = () => {
                             {[
                                 "Clientes pre-calificados y comprometidos asignados automáticamente",
                                 "Panel digital para expedientes, chat y documentos",
-                                "Comisiones del 70% + bono de excelencia del 10%",
+                                "Comisiones del 60% por expediente gestionado",
                                 "Soporte técnico y legal incluido en la plataforma",
                             ].map((item) => (
                                 <li key={item} className="flex items-start gap-3 text-sm text-text-secondary">

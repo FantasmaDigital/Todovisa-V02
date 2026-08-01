@@ -107,12 +107,35 @@ export class AuthClientService {
     return handleResponse(res);
   }
 
+  static clearSessionData() {
+    if (typeof window === "undefined") return;
+
+    const prefixes = [
+      "sb-",
+      "auth-storage",
+      "todovisa_",
+      "vipro_",
+      "preform_",
+      "preformulario_",
+      "agent_app_",
+      "client_docs_user_",
+    ];
+
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (prefixes.some((p) => key.startsWith(p)) || key.includes("auth-token")) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+  }
+
   static async signOut() {
     if (typeof window !== "undefined") {
       await supabase.auth.signOut().catch(() => null);
-      localStorage.removeItem("todovisa_user_session");
-      localStorage.removeItem("vipro_completed");
-      localStorage.removeItem("vipro_score");
+      this.clearSessionData();
     }
   }
 }

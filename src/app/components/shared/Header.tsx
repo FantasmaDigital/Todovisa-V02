@@ -8,6 +8,7 @@ import { useAuthStore } from "@/app/store/authStore"
 import { AuthService } from "@/app/service/AuthService"
 import { ProfileClientService } from "@/services/client/ProfileClientService"
 import { ROLES } from "@/app/constants/roles"
+import { visaDestinations } from "@/app/constants/visas/destinations"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
     const user = useAuthStore((state) => state.user);
@@ -196,7 +197,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         </Link>
                     ) : (
                         <Link href="/vipro-form" className="hover:underline flex items-center gap-1">
-                            <span>Evaluación VIPRO — Obtén un 25% de descuento al completar tu perfil &nbsp;→</span>
+                            <span>Evaluación VIPRO — Completa tu perfil &nbsp;→</span>
                         </Link>
                     )}
                 </div>
@@ -240,16 +241,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-[10px] text-text-secondary mt-1">Todos los destinos disponibles</span>
                                             </div>
                                         </Link>
-                                        {[
-                                            { code: "us", flag: "🇺🇸", name: "Estados Unidos", disabled: true },
-                                            { code: "ca", flag: "🇨🇦", name: "Canadá" },
-                                            { code: "mx", flag: "🇲🇽", name: "México" },
-                                            { code: "uk", flag: "🇬🇧", name: "Inglaterra" },
-                                            { code: "cn", flag: "🇨🇳", name: "China", disabled: true },
-                                            { code: "au", flag: "🇦🇺", name: "Australia" },
-                                            { code: "in", flag: "🇮🇳", name: "India" },
-                                        ].map((c) => (
-                                            c.disabled ? (
+                                        {visaDestinations.map((c) => (
+                                            !c.enabled ? (
                                                 <div key={c.code} className="flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-gray-300 cursor-not-allowed">
                                                     <span className="text-base">{c.flag}</span>
                                                     <span className="text-xs">{c.name}</span>

@@ -43,21 +43,21 @@ export const Hero = ({ headerHeight }: { headerHeight: number | null }) => {
           <span className="flex items-center gap-1 text-amber-300">
             ★ ★ ★ ★ ★
           </span>
-          <span className="font-medium">4.9/5 por +15,000 trámites evaluados</span>
+          <span className="font-medium">4.9/5 por +1,000 trámites evaluados</span>
         </div>
 
         {/* Heading */}
         <h1 className={`text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-[1.15] tracking-tight font-serif max-w-3xl transition-all duration-1000 ease-out delay-200 ${
           mounted ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0"
         }`}>
-          Consigue tu visa con seguridad, inteligencia consular y acompañamiento experto.
+          Tu visa con seguridad, inteligencia consular y acompañamiento experto.
         </h1>
         
         {/* Subtitle */}
         <p className={`text-base md:text-lg text-white/80 max-w-2xl font-light leading-relaxed transition-all duration-1000 ease-out delay-500 ${
           mounted ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
         }`}>
-          Diagnostica tu viabilidad consular con VIPRO o conéctate con un asesor certificado para garantizar una solicitud sólida y libre de errores.
+          Diagnostica tu viabilidad con VIPRO o conéctate con un asesor certificado para una solicitud sin errores.
         </p>
 
         {/* Call-to-Action buttons */}

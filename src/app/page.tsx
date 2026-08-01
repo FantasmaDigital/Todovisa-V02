@@ -51,7 +51,7 @@ export default function Home() {
                 title="Trámites de Visado Asistidos"
                 description="Gestionamos tu visa para Estados Unidos (Drop Box Waiver), México, Canadá, Australia y el Reino Unido con rigor documental y máxima efectividad."
                 imageSrc="/images/estadosunidos.webp"
-                linkUrl="/preformulario"
+                linkUrl="/agents"
                 buttonText="Iniciar Trámite de Visa →"
               />
             </AnimatedSection>

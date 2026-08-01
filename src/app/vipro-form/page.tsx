@@ -15,6 +15,14 @@ function ViproFormContent() {
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const router = useRouter();
     const user = useAuthStore((state) => state.user);
+    const [viproPrice, setViproPrice] = useState(19.99);
+
+    useEffect(() => {
+        const savedPrice = localStorage.getItem("viproPrice");
+        if (savedPrice) {
+            setViproPrice(Number(savedPrice));
+        }
+    }, []);
 
     // Check if there is an in-progress evaluation
     useEffect(() => {
@@ -85,7 +93,8 @@ function ViproFormContent() {
         );
     }
 
-    const hasPaid = user.hasPaidVipro || user.hasPaidAdvisor;
+    const isAdmin = user && (user.role === "admin" || user.role === "moderator");
+    const hasPaid = user.hasPaidVipro || user.hasPaidAdvisor || isAdmin;
     const completed = user.viproCompleted;
 
     return (
@@ -104,12 +113,12 @@ function ViproFormContent() {
 
                         {completed ? (
                             /* Already completed state matching TodoVisa design system */
-                            <div className="w-full bg-white border border-border-light rounded-2xl p-8 shadow-[0_4px_24px_rgba(0,0,0,0.03)] flex flex-col gap-5 text-left">
+                            <div className="w-full flex flex-col gap-5 text-left">
                                 <div className="space-y-2">
                                     <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-3 py-1 rounded-full">
                                         ✓ Diagnóstico Registrado
                                     </span>
-                                    <h2 className="text-2xl font-serif font-bold text-text-primary">
+                                    <h2 className="text-2xl font-bold text-text-primary">
                                         ¡Has completado tu Evaluación VIPRO!
                                     </h2>
                                     <p className="text-xs text-text-secondary leading-relaxed">
@@ -140,7 +149,7 @@ function ViproFormContent() {
                                     </p>
                                 </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-brand-light/35 border border-brand-primary/10 rounded-xl p-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-2">
                                     <div className="flex items-start gap-2 text-xs text-text-primary">
                                         <span className="text-emerald-600 font-bold">✓</span>
                                         <span><strong>Scoring Consular (0-100 pts)</strong> de solvencia y perfil.</span>
@@ -162,22 +171,22 @@ function ViproFormContent() {
                                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-border-light">
                                     <div>
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Precio Único</span>
-                                        <span className="text-3xl font-extrabold text-brand-primary font-mono">$19.99 <span className="text-xs font-sans text-text-muted">USD</span></span>
+                                        <span className="text-3xl font-extrabold text-brand-primary font-mono">${viproPrice.toFixed(2)} <span className="text-xs font-sans text-text-muted">USD</span></span>
                                     </div>
                                     <button
                                         onClick={() => setIsCheckoutOpen(true)}
                                         className="w-full sm:w-auto bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold py-3.5 px-8 rounded-sm transition-all shadow-sm cursor-pointer text-center"
                                     >
-                                        Adquirir Evaluación VIPRO ($19.99 USD) &rarr;
+                                        Adquirir Evaluación VIPRO &rarr;
                                     </button>
                                 </div>
                             </div>
                         ) : inProgress ? (
                             /* Paid and in-progress state */
-                            <div className="w-full bg-brand-light/45 border border-brand-primary/20 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
+                            <div className="w-full flex flex-col gap-5 text-left">
                                 <div className="flex flex-col gap-1">
                                     <span className="text-xs font-bold text-brand-primary uppercase tracking-widest">Cuestionario en Curso</span>
-                                    <p className="text-lg font-serif font-semibold text-text-primary">
+                                    <p className="text-xl font-bold text-text-primary">
                                         Tienes una evaluación iniciada
                                     </p>
                                 </div>
@@ -195,10 +204,10 @@ function ViproFormContent() {
                             </div>
                         ) : (
                             /* Paid but not started state */
-                            <div className="w-full bg-brand-light/45 border border-brand-primary/20 rounded-[1.5rem] p-6 md:p-8 flex flex-col gap-5 text-left shadow-sm">
+                            <div className="w-full flex flex-col gap-5 text-left">
                                 <div className="flex flex-col gap-1">
                                     <span className="text-xs font-bold text-brand-primary uppercase tracking-widest">Acceso Habilitado</span>
-                                    <p className="text-lg font-serif font-semibold text-text-primary">
+                                    <p className="text-xl font-bold text-text-primary">
                                         Estás listo para realizar tu Evaluación
                                     </p>
                                 </div>

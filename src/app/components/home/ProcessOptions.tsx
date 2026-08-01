@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
 
@@ -8,40 +8,44 @@ const processOptions = {
   servicioCompleto: {
     title: "Servicio Completo",
     icon: (
-      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
     ),
     steps: [
       {
-        title: "Elige tu Asesor Certificado",
-        description: "Explora nuestra red de agentes y agencias B2B para seleccionar al experto ideal para tu tipo de visado."
+        title: "Paso 1: Formulario DS-160 Completo",
+        description: "Llenamos digitalmente tu formulario oficial sin errores de perfilamiento ni inconsistencias de solvencia."
       },
       {
-        title: "Asesoría y Llenado Guiado",
-        description: "Agenda tus sesiones virtuales y completa tu formulario oficial DS-160 con acompañamiento experto paso a paso."
+        title: "Paso 2: Auditoría y Documentación",
+        description: "Cotejamos tus constancias laborales, estados bancarios y pasaportes para blindar tu expediente."
       },
       {
-        title: "Simulacro y Preparación",
-        description: "Realiza simulacros de entrevista consular y organiza tu documentación crítica para presentarte con total seguridad."
+        title: "Paso 3: Simulacros Zoom y Citas",
+        description: "Agendamos las fechas en el consulado y realizamos simulaciones intensivas con preguntas reales."
       }
     ]
   },
   autonomia: {
-    title: "Evaluación Express",
+    title: "Evaluación VIPRO",
     icon: (
-      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
     ),
     steps: [
       {
-        title: "Llena tu formulario VIPRO",
-        description: "Completa nuestra evaluación digital con tus datos y antecedentes para analizar tu caso a profundidad."
+        title: "Paso 1: Respuestas Express",
+        description: "Completa el cuestionario interactivo de 10 minutos analizando tu perfil socioeconómico."
       },
       {
-        title: "Recibe consejos de mejora",
-        description: "Obtén un reporte detallado con las fortalezas y áreas de oportunidad detectadas en tu perfil."
+        title: "Paso 2: Diagnóstico Algorítmico",
+        description: "Obtén un reporte inmediato de viabilidad (0-100 pts) y detección automatizada de debilidades."
       },
       {
-        title: "Optimiza tu perfil",
-        description: "Aplica nuestras recomendaciones clave antes de iniciar tu proceso formal de solicitud."
+        title: "Paso 3: Recomendaciones",
+        description: "Recibe sugerencias personalizadas de cómo corregir vulnerabilidades antes de postular."
       }
     ]
   }
@@ -53,17 +57,48 @@ export const ProcessSection = () => {
   const [active, setActive] = useState('servicioCompleto');
   const router = useRouter();
   const { user } = useAuthStore();
+  const [price, setPrice] = useState(150);
+  const [viproPrice, setViproPrice] = useState(19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("fullServicePrice");
+    if (savedPrice) {
+      setPrice(Number(savedPrice));
+    }
+    const savedViproPrice = localStorage.getItem("viproPrice");
+    if (savedViproPrice) {
+      setViproPrice(Number(savedViproPrice));
+    }
+
+    const handleStorage = () => {
+      const saved = localStorage.getItem("fullServicePrice");
+      if (saved) {
+        setPrice(Number(saved));
+      }
+      const savedVipro = localStorage.getItem("viproPrice");
+      if (savedVipro) {
+        setViproPrice(Number(savedVipro));
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  const discountPrice = price * 0.75;
+  const formattedPrice = `$${price.toFixed(2)} USD`;
+  const formattedDiscount = `$${discountPrice.toFixed(2)} USD`;
+  const formattedViproPrice = `$${viproPrice.toFixed(2)} USD`;
 
   const planInfo = {
     servicioCompleto: {
-      price: user?.hasPaidVipro ? "$112.50 USD" : "$150.00 USD",
+      price: user?.hasPaidVipro ? formattedDiscount : formattedPrice,
       promo: user?.hasPaidVipro ? "¡Descuento VIPRO del 25% aplicado!" : "Obtén acompañamiento integral",
       description: "La solución completa que incluye el llenado guiado de tu formulario oficial DS-160, asesoramiento integral y simulacros de entrevista virtual con un asesor asignado.",
       buttonText: "Explorar Agentes y Contratar",
       action: () => router.push("/agents")
     },
     autonomia: {
-      price: "$19.99 USD",
+      price: formattedViproPrice,
       promo: "25% de reembolso si contratas Asesoría VIP después",
       description: "Accede de forma independiente a la Evaluación Diagnóstica VIPRO para obtener un escaneo automatizado de tus fortalezas y debilidades perfiladas.",
       buttonText: "Adquirir Evaluación Express",

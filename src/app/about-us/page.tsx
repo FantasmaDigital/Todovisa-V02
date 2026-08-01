@@ -1,16 +1,25 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import Link from "next/link";
 import Image from "next/image";
+import { visaDestinations } from "../constants/visas/destinations";
 
 export default function AboutUsPage() {
   const headerRef = useRef(null);
+  const [viproPrice, setViproPrice] = useState(19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("viproPrice");
+    if (savedPrice) {
+      setViproPrice(Number(savedPrice));
+    }
+  }, []);
 
   const stats = [
-    { label: "Solicitudes Evaluadas", value: "15,000+", detail: "Procesadas con VIPRO" },
+    { label: "Solicitudes Evaluadas", value: "1,000+", detail: "Procesadas con VIPRO" },
     { label: "Tasa de Conformidad", value: "98.4%", detail: "Satisfacción de clientes" },
     { label: "Destinos Principales", value: "5 Países", detail: "EE.UU., CA, AU, UK, MX" },
     { label: "Asesores Certificados", value: "120+", detail: "Especialistas en red" },
@@ -39,13 +48,11 @@ export default function AboutUsPage() {
     }
   ];
 
-  const destinations = [
-    { name: "Estados Unidos", flag: "🇺🇸", desc: "Visas B1/B2 de turismo/negocios, visas de estudiante F1 y Exención de Entrevista (Drop Box)." },
-    { name: "Canadá", flag: "🇨🇦", desc: "Visas de visitante e itinerarios de estudio/trabajo mediante la plataforma IRCC." },
-    { name: "Australia", flag: "🇦🇺", desc: "Visados de turismo Subclass 600 y procesamiento digital vía ImmiAccount." },
-    { name: "Reino Unido", flag: "🇬🇧", desc: "Standard Visitor Visa y asesoría para solicitudes oficiales ante la UKVI." },
-    { name: "México", flag: "🇲🇽", desc: "Visas de visitante y trámites consulares con acompañamiento integral." },
-  ];
+  const destinations = visaDestinations.map(d => ({
+    name: d.name,
+    flag: d.flag,
+    desc: d.aboutDesc || d.description
+  }));
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-background-main font-sans">
@@ -70,7 +77,7 @@ export default function AboutUsPage() {
                 href="/vipro-form"
                 className="bg-white text-brand-primary hover:bg-brand-light font-bold px-8 py-3.5 rounded-lg text-sm transition-all shadow-md"
               >
-                Diagnóstico VIPRO ($19.99 USD) →
+                Diagnóstico VIPRO (${viproPrice.toFixed(2)} USD) →
               </Link>
               <Link
                 href="/agents"
@@ -206,7 +213,7 @@ export default function AboutUsPage() {
                 Comenzar Evaluación VIPRO
               </Link>
               <Link
-                href="/preformulario"
+                href="/agents"
                 className="bg-transparent hover:bg-white/10 text-white font-bold px-8 py-3.5 rounded-lg text-sm transition-all border border-white/30"
               >
                 Iniciar Preformulario de Visado

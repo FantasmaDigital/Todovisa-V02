@@ -44,7 +44,23 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";
   const isSandbox = paypalMode !== "live" || paypalClientId === "test";
 
-  const amountToPay = product === "vipro" ? 19.99 : 112.50;
+  const [basePrice, setBasePrice] = useState(150);
+  const [viproPrice, setViproPrice] = useState(19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("fullServicePrice");
+    if (savedPrice) {
+      setBasePrice(Number(savedPrice));
+    }
+    const savedViproPrice = localStorage.getItem("viproPrice");
+    if (savedViproPrice) {
+      setViproPrice(Number(savedViproPrice));
+    }
+  }, []);
+
+  const discountAmount = basePrice * 0.25;
+  const finalPrice = basePrice * 0.75;
+  const amountToPay = product === "vipro" ? viproPrice : finalPrice;
 
   const processSuccessfulPayment = async (paypalTransactionId?: string) => {
     setStep("processing");
@@ -210,28 +226,28 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
                     <span>Evaluación Diagnóstica VIPRO</span>
-                    <span>$19.99 USD</span>
+                    <span>${viproPrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
                     <span>Total a pagar vía PayPal</span>
-                    <span className="text-[#003087] text-lg font-mono font-extrabold">$19.99 USD</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${viproPrice.toFixed(2)} USD</span>
                   </div>
                 </>
               ) : (
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
                     <span>Asesoría Consular Completa (Plan Concierge)</span>
-                    <span>$150.00 USD</span>
+                    <span>${basePrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-xs text-emerald-600 font-medium">
                     <span className="flex items-center gap-1">
                       🏷️ Descuento Especial
                     </span>
-                    <span>-$37.50 USD</span>
+                    <span>-${discountAmount.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
                     <span>Total a pagar vía PayPal</span>
-                    <span className="text-[#003087] text-lg font-mono font-extrabold">$112.50 USD</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${finalPrice.toFixed(2)} USD</span>
                   </div>
                 </>
               )}
@@ -320,12 +336,15 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               </h4>
               {product === "vipro" ? (
                 <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                  Tu pago de <span className="font-bold text-text-primary">$19.99 USD</span> vía PayPal se ha registrado exitosamente.
+                  Tu pago de <span className="font-bold text-text-primary">${viproPrice.toFixed(2)} USD</span> vía PayPal se ha registrado exitosamente.
                 </p>
               ) : (
-                <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                  Tu pago de <span className="font-bold text-text-primary">$112.50 USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
+                <>
+                <h3 className="text-sm font-bold text-text-primary">Pago Exitoso</h3>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  Tu pago de <span className="font-bold text-text-primary">${finalPrice.toFixed(2)} USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
                 </p>
+                </>
               )}
             </div>
 

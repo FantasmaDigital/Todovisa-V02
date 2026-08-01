@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import supabase from "@/app/lib/supabase";
 import { useAuthStore } from "@/app/store/authStore";
 import { AuthService } from "@/app/service/AuthService";
+import { AuthClientService } from "@/services/client/AuthClientService";
 
 export function OAuthCallbackListener() {
   const setUser = useAuthStore((state) => state.setUser);
@@ -12,6 +13,12 @@ export function OAuthCallbackListener() {
     if (typeof window === "undefined") return;
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT") {
+        useAuthStore.getState().clearUser();
+        AuthClientService.clearSessionData();
+        return;
+      }
+
       if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") && session?.user) {
         const u = session.user;
         const metadata = u.user_metadata || {};

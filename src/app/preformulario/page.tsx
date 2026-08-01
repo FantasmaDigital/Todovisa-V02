@@ -62,12 +62,28 @@ function PreformularioContent() {
     const countryName = config.name;
     const countryEmoji = config.emoji;
 
+    const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
+    const isAgentOrAgency = user && (user.role === "agent" || user.role === "agency");
+    const targetUserId = searchParams.get("userId") || searchParams.get("user_id");
+    const isViewingClient = targetUserId && (isAdminOrStaff || isAgentOrAgency);
+
     useEffect(() => {
         setIsMounted(true);
         if (headerRef.current) {
             setHeaderHeight((headerRef.current as HTMLElement).offsetHeight);
         }
     }, []);
+
+    useEffect(() => {
+        if (isMounted) {
+            if (!user) {
+                router.replace("/auth/signin");
+            } else if (!isViewingClient && !user.hasPaidAdvisor) {
+                const redirectPath = (isAgentOrAgency || isAdminOrStaff) ? "/profile" : "/agents";
+                router.replace(redirectPath);
+            }
+        }
+    }, [isMounted, user, isViewingClient, isAdminOrStaff, isAgentOrAgency, router]);
 
     // Set initial country from search parameters if valid
     useEffect(() => {
@@ -158,124 +174,13 @@ function PreformularioContent() {
         loadProgress();
     }, [user, selectedCountryCode]);
 
-    if (!isMounted) {
+    if (!isMounted || !user || (!isViewingClient && !user.hasPaidAdvisor)) {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
                 <div className="flex-1 flex items-center justify-center">
                     <div className="w-12 h-12 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin"></div>
                 </div>
-                <Footer />
-            </div>
-        );
-    }
-
-    if (!user) {
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-md mx-auto my-12">
-                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center mb-6 text-2xl font-bold">
-                        🔒
-                    </div>
-                    <h2 className="text-2xl font-bold text-text-primary mb-3">Acceso Restringido</h2>
-                    <p className="text-sm text-text-secondary mb-8 leading-relaxed">
-                        Debes iniciar sesión con tu cuenta para acceder al Preformulario.
-                    </p>
-                    <button
-                        onClick={() => router.push("/auth/signin")}
-                        className="w-full bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm shadow-sm"
-                    >
-                        Iniciar Sesión
-                    </button>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
-
-    // Guard: only accessible by regular users who have contracted an advisor
-    // Agents, agencies, and non-paying users are blocked
-    const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
-    const isAgentOrAgency = user && (user.role === "agent" || user.role === "agency");
-
-    if (!isAdminOrStaff && (isAgentOrAgency || !user.hasPaidAdvisor)) {
-        const isStaff = isAgentOrAgency;
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="flex-1 flex flex-col items-center justify-center p-6">
-                    <div className="w-full max-w-lg bg-white border border-border-light rounded-2xl shadow-sm p-10 flex flex-col items-center text-center gap-6">
-                        {/* Icon */}
-                        <div className="w-20 h-20 bg-brand-light border border-brand-primary/20 text-brand-primary rounded-full flex items-center justify-center">
-                            <svg className="w-9 h-9" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                            </svg>
-                        </div>
-
-                        {/* Heading */}
-                        <div className="space-y-2">
-                            <span className="text-xs font-bold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full border border-brand-primary/20">
-                                Acceso Restringido
-                            </span>
-                            <h1 className="text-2xl md:text-3xl font-bold text-text-primary font-serif italic mt-3">
-                                {isStaff
-                                    ? "Esta sección es exclusiva para clientes"
-                                    : "Necesitas contratar un asesor"}
-                            </h1>
-                            <p className="text-sm text-text-secondary leading-relaxed max-w-sm mx-auto">
-                                {isStaff
-                                    ? "El preformulario de visa está diseñado para ser completado por clientes finales junto a su asesor asignado. Accede a tu portal de trabajo desde tu perfil."
-                                    : "El preformulario de visa es de uso exclusivo para clientes que han contratado el Servicio Completo con un asesor certificado TodoVisa. Conecta con un experto para comenzar."}
-                            </p>
-                        </div>
-
-                        {/* Steps visual */}
-                        {!isStaff && (
-                            <div className="w-full bg-background-main rounded-xl p-4 flex flex-col gap-3 text-left border border-border-light">
-                                {[
-                                    { num: "1", text: "Explora el directorio de asesores certificados" },
-                                    { num: "2", text: "Selecciona y contrata tu asesor ideal" },
-                                    { num: "3", text: "Accede al preformulario con tu asesor asignado" },
-                                ].map((step) => (
-                                    <div key={step.num} className="flex items-center gap-3">
-                                        <div className="w-7 h-7 bg-brand-primary text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                            {step.num}
-                                        </div>
-                                        <span className="text-sm text-text-secondary">{step.text}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* CTAs */}
-                        <div className="flex flex-col sm:flex-row gap-3 w-full">
-                            {isStaff ? (
-                                <button
-                                    onClick={() => router.push("/profile")}
-                                    className="flex-1 bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm border-none cursor-pointer"
-                                >
-                                    Ir a mi Perfil de Asesor
-                                </button>
-                            ) : (
-                                <>
-                                    <button
-                                        onClick={() => router.push("/agents")}
-                                        className="flex-1 bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm border-none cursor-pointer"
-                                    >
-                                        Explorar Asesores
-                                    </button>
-                                    <button
-                                        onClick={() => router.push("/profile")}
-                                        className="flex-1 bg-white border border-border-light text-text-secondary font-semibold py-3 rounded-sm hover:bg-background-hover transition-colors text-sm cursor-pointer"
-                                    >
-                                        Ver mi Perfil
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </main>
                 <Footer />
             </div>
         );

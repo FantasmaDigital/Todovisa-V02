@@ -255,5 +255,37 @@ export const countryVisaData: Record<string, CountryVisaInfo> = {
         sources: [
             { label: "Indian e-Visa Official Portal", url: "https://indianvisaonline.gov.in/evisa/" }
         ]
+    },
+    cn: {
+        code: "CN",
+        name: "China",
+        flag: "/images/flag_ch.png",
+        flagEmoji: null,
+        available: true,
+        heroDescription: "Procedimiento oficial para la obtención de la Visa L de Turismo para China: llenado del formulario COAV, agenda de citas y recopilación de requisitos.",
+        requiringCountries: [
+            {
+                region: "Global",
+                countries: ["Nacionalidades no exentas de visado para ingresar a China"]
+            }
+        ],
+        requirements: [
+            { id: 1, title: "Pasaporte Original y Copia", description: "Pasaporte con vigencia mínima de 6 meses y al menos dos páginas en blanco, junto con copia de la página de datos." },
+            { id: 2, title: "Formulario COAV Confirmado", description: "Formulario de solicitud de visa completado e impreso desde el portal oficial COAV." },
+            { id: 3, title: "Fotografía Reciente", description: "Foto a color reciente tamaño pasaporte con fondo blanco, rostro descubierto y sin accesorios." },
+            { id: 4, title: "Itinerario o Carta de Invitación", description: "Reserva de vuelos de ida y vuelta, reservas de hotel o carta de invitación formal emitida por una entidad o residente en China." }
+        ],
+        procedure: [
+            { title: "1. Llenado de Formulario COAV", description: "Completar el formulario de visa en línea en el portal del gobierno de China." },
+            { title: "2. Agendar Cita Consular", description: "Programar fecha y hora para la entrega del expediente físico en la sección consular." },
+            { title: "3. Entrega de Expediente Físico", description: "Asistir presencialmente para entregar la documentación y toma de datos biométricos." },
+            { title: "4. Pago y Retiro de Visa", description: "Realizar el pago de aranceles consulares al retirar el pasaporte con la visa estampada." }
+        ],
+        additionalInfo: [
+            "La visa de turismo estándar suele emitirse por entradas únicas, dobles o múltiples según el perfil."
+        ],
+        sources: [
+            { label: "China Visa Application Service Center", url: "https://www.visaforchina.cn/" }
+        ]
     }
 };
