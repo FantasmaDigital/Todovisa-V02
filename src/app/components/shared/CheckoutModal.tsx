@@ -44,8 +44,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";
   const isSandbox = paypalMode !== "live" || paypalClientId === "test";
 
-  const [basePrice, setBasePrice] = useState(150);
-  const [viproPrice, setViproPrice] = useState(19.99);
+  const [basePrice, setBasePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
   useEffect(() => {
     const savedPrice = localStorage.getItem("fullServicePrice");

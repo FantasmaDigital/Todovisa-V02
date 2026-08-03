@@ -30,7 +30,7 @@ export function OAuthCallbackListener() {
           lastName: metadata.last_name || metadata.full_name?.split(" ").slice(1).join(" ") || "",
           phone: metadata.phone || "",
           country: metadata.country || "El Salvador",
-          role: metadata.role || existingRole || "user",
+          role: existingRole || metadata.role || "user",
           photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
           hasPaidVipro: Boolean(metadata.has_paid_vipro),
           hasPaidAdvisor: Boolean(metadata.has_paid_advisor),

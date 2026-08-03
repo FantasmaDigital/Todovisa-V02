@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 
 export const AgentNetwork = () => {
-    const [price, setPrice] = useState(150);
+    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
 
     useEffect(() => {
         const savedPrice = localStorage.getItem("fullServicePrice");

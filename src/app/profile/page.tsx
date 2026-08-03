@@ -14,6 +14,7 @@ import { ProfileClientService } from "@/services/client/ProfileClientService";
 import { AgentClientService } from "@/services/client/AgentClientService";
 import { StorageClientService } from "@/services/client/StorageClientService";
 import { FormClientService } from "@/services/client/FormClientService";
+import { SettingsClientService } from "@/services/client/SettingsClientService";
 import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
 import supabase from "@/app/lib/supabase";
@@ -112,8 +113,8 @@ export default function PerfilUsuarioPage() {
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
-  const [fullServicePrice, setFullServicePrice] = useState(150);
-  const [viproPrice, setViproPrice] = useState(19.99);
+  const [fullServicePrice, setFullServicePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
   useEffect(() => {
     const savedPrice = localStorage.getItem("fullServicePrice");
@@ -124,6 +125,25 @@ export default function PerfilUsuarioPage() {
     if (savedViproPrice) {
       setViproPrice(Number(savedViproPrice));
     }
+
+    async function fetchDBPrices() {
+      try {
+        const settings = await SettingsClientService.getSettings();
+        if (settings) {
+          if (settings.vipro_price) {
+            setViproPrice(Number(settings.vipro_price));
+            localStorage.setItem("viproPrice", settings.vipro_price);
+          }
+          if (settings.full_service_price) {
+            setFullServicePrice(Number(settings.full_service_price));
+            localStorage.setItem("fullServicePrice", settings.full_service_price);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching db prices in profile page:", err);
+      }
+    }
+    fetchDBPrices();
   }, []);
 
   const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
@@ -1147,6 +1167,13 @@ export default function PerfilUsuarioPage() {
     }
   };
 
+  // Cargar automáticamente los datos de acreditación del agente/agencia al cargar el componente
+  useEffect(() => {
+    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY)) {
+      loadAgentAppForTab();
+    }
+  }, [user?.id, user?.role]);
+
   // Trigger loads when activeTab changes
   useEffect(() => {
     if (!user) return;
@@ -1863,27 +1890,53 @@ export default function PerfilUsuarioPage() {
                     const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
                     
                     if (user.role === ROLES.AGENCY) {
-                      return [
-                        { id: "datos", label: "Mis Datos Personales" },
-                        { id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" },
-                        ...(isAccredited ? [
+                      const agencyTabs: any[] = [
+                        { id: "datos", label: "Mis Datos Personales" }
+                      ];
+                      if (isAccredited) {
+                        agencyTabs.push(
                           { id: "invitar_agentes", label: "Link de Referidos" },
                           { id: "comisiones", label: "Comisiones Realizadas" },
-                          { id: "metodos_cobro", label: "Métodos de Cobro" },
-                        ] : []),
-                      ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
+                          { id: "metodos_cobro", label: "Métodos de Cobro" }
+                        );
+                      }
+                      agencyTabs.push({ id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" });
+                      return agencyTabs.map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                     }
 
                     // For standard Agent (advisor)
-                    return [
-                      ...baseUserTabs,
-                      { id: "mi_acreditacion", label: "Mi Acreditación" },
-                      ...(isAccredited ? [
+                    const agentTabs: any[] = [
+                      { id: "datos", label: "Mis Datos Personales" }
+                    ];
+
+                    const isViproCompleted = Boolean(
+                      user.viproCompleted ||
+                      viproEvaluations.some((ev: any) => ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase())) ||
+                      (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+                    );
+
+                    const hasPurchases = dbPurchases.length > 0 || user.hasPaidAdvisor || user.hasPaidVipro || isViproCompleted;
+                    
+                    if (hasPurchases) {
+                      const hasViproPurchase = user.hasPaidVipro || isViproCompleted || dbPurchases.some((p: any) => p.product_type === "vipro");
+                      if (hasViproPurchase) {
+                        agentTabs.push({ id: "vipro", label: "Evaluación VIPRO" });
+                      }
+                      agentTabs.push({ id: "pagos", label: "Pagos y Comprobantes" });
+                    }
+
+                    if (isAccredited) {
+                      agentTabs.push(
                         { id: "chat_agente", label: "Chat con Clientes" },
                         { id: "comisiones", label: "Comisiones Realizadas" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro" },
-                      ] : []),
-                    ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
+                        { id: "metodos_cobro", label: "Métodos de Cobro" }
+                      );
+                    }
+
+                    // "Mi Acreditación" always at the very end
+                    agentTabs.push({ id: "mi_acreditacion", label: "Mi Acreditación" });
+
+                    return agentTabs.map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                   }
 
                   // --- Default tabs for regular users ---
@@ -3215,57 +3268,77 @@ export default function PerfilUsuarioPage() {
             )}
 
             {/* TAB: PAGOS Y COMPROBANTES */}
-            {activeTab === "pagos" && (
-              <div>
-                <div className="mb-6 pb-4 border-b border-border-light">
-                  <h2 className="text-lg font-bold text-text-primary">Historial de Transacciones</h2>
-                  <p className="text-xs text-text-secondary mt-1">Revisa el detalle de tus compras de servicios y descarga tus comprobantes.</p>
-                </div>
+            {activeTab === "pagos" && (() => {
+              const actualPurchases: any[] = [];
+              if (user.hasPaidVipro) {
+                actualPurchases.push({
+                  id: "purch-vipro",
+                  reference_id: "TV-VIPRO-8429",
+                  product_type: "vipro",
+                  payment_method: "Tarjeta",
+                  created_at: new Date().toISOString(),
+                  amount: String(viproPrice),
+                  status: "completed"
+                });
+              }
+              if (user.hasPaidAdvisor) {
+                actualPurchases.push({
+                  id: "purch-advisor",
+                  reference_id: "TV-ASES-3820",
+                  product_type: "advisor",
+                  payment_method: "Tarjeta",
+                  created_at: new Date().toISOString(),
+                  amount: String(fullServicePrice * 0.75),
+                  status: "completed"
+                });
+              }
+              return (
+                <div>
+                  <div className="mb-6 pb-4 border-b border-border-light">
+                    <h2 className="text-lg font-bold text-text-primary">Historial de Transacciones</h2>
+                    <p className="text-xs text-text-secondary mt-1">Revisa el detalle de tus compras de servicios y descarga tus comprobantes.</p>
+                  </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
-                        <th className="py-3 px-4">Referencia</th>
-                        <th className="py-3 px-4">Concepto</th>
-                        <th className="py-3 px-4">Fecha</th>
-                        <th className="py-3 px-4">Monto</th>
-                        <th className="py-3 px-4">Estado</th>
-                        <th className="py-3 px-4 text-right">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border-light text-xs">
-                      {dbPurchases.length > 0 ? (
-                        dbPurchases.map((purchase) => {
-                          const isViproItem = purchase.product_type === "vipro";
-                          return (
-                            <tr key={purchase.id} className="hover:bg-background-main/20 transition-colors">
-                              <td className="py-4 px-4 font-mono font-medium text-text-primary">{purchase.reference_id}</td>
-                              <td className="py-4 px-4">
-                                <div>
-                                  <p className="font-bold text-text-primary">
-                                    {isViproItem ? "Evaluación VIPRO Diagnóstica" : "Asesoría de Visa Premium (Completa)"}
-                                  </p>
-                                  <p className="text-[10px] text-text-secondary">Método: {purchase.payment_method}</p>
-                                </div>
-                              </td>
-                              <td className="py-4 px-4 text-text-secondary">
-                                {new Date(purchase.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                              </td>
-                              <td className="py-4 px-4 font-bold text-text-primary">
-                                ${parseFloat(purchase.amount).toFixed(2)} USD
-                              </td>
-                              <td className="py-4 px-4">
-                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${purchase.status === "completed"
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                  : "bg-amber-50 text-amber-800 border-amber-100"
-                                  }`}>
-                                  {purchase.status.toUpperCase()}
-                                </span>
-                              </td>
-                              <td className="py-4 px-4 text-right">
-                                {purchase.status === "completed" ? (
-                                  isViproItem ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
+                          <th className="py-3 px-4">Referencia</th>
+                          <th className="py-3 px-4">Concepto</th>
+                          <th className="py-3 px-4">Fecha</th>
+                          <th className="py-3 px-4">Monto</th>
+                          <th className="py-3 px-4">Estado</th>
+                          <th className="py-3 px-4 text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-light text-xs">
+                        {actualPurchases.length > 0 ? (
+                          actualPurchases.map((purchase) => {
+                            const isViproItem = purchase.product_type === "vipro";
+                            return (
+                              <tr key={purchase.id} className="hover:bg-background-main/20 transition-colors">
+                                <td className="py-4 px-4 font-mono font-medium text-text-primary">{purchase.reference_id}</td>
+                                <td className="py-4 px-4">
+                                  <div>
+                                    <p className="font-bold text-text-primary">
+                                      {isViproItem ? "Evaluación VIPRO Diagnóstica" : "Asesoría de Visa Premium (Completa)"}
+                                    </p>
+                                    <p className="text-[10px] text-text-secondary">Método: {purchase.payment_method}</p>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-4 text-text-secondary">
+                                  {new Date(purchase.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </td>
+                                <td className="py-4 px-4 font-bold text-text-primary">
+                                  ${parseFloat(purchase.amount).toFixed(2)} USD
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-100">
+                                    PAGADO
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-right">
+                                  {isViproItem ? (
                                     <button
                                       onClick={() => showToast("Generando PDF de factura...", "info")}
                                       className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
@@ -3279,117 +3352,36 @@ export default function PerfilUsuarioPage() {
                                     >
                                       Ver Chat
                                     </button>
-                                  )
-                                ) : (
-                                  <span className="text-text-muted italic">Pendiente</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <>
-                          {/* Fallback mock UI when DB has no purchases registered */}
-                          <tr className={user.hasPaidVipro || user.hasPaidAdvisor ? "" : "opacity-90"}>
-                            <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-VIPRO-8429</td>
-                            <td className="py-4 px-4">
-                              <div>
-                                <p className="font-bold text-text-primary">Evaluación VIPRO Diagnóstica</p>
-                                <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                            <td className="py-4 px-4 font-bold text-text-primary">${viproPrice.toFixed(2)} USD</td>
-                            <td className="py-4 px-4">
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidVipro || user.hasPaidAdvisor
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                : "bg-amber-50 text-amber-800 border-amber-100"
-                                }`}>
-                                {user.hasPaidVipro || user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-right">
-                              {user.hasPaidVipro || user.hasPaidAdvisor ? (
-                                <button
-                                  onClick={() => showToast("Generando PDF de factura...", "info")}
-                                  className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
-                                >
-                                  Descargar
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setCheckoutProduct("vipro");
-                                    setCheckoutAgent(null);
-                                    setIsCheckoutOpen(true);
-                                  }}
-                                  className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                                >
-                                  Pagar
-                                </button>
-                              )}
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="py-8 px-4 text-center text-text-muted italic bg-background-main/10">
+                              No has realizado ningún pago todavía.
                             </td>
                           </tr>
-
-                          <tr className={user.hasPaidAdvisor ? "" : "opacity-90"}>
-                            <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-ASES-3820</td>
-                            <td className="py-4 px-4">
-                              <div>
-                                <p className="font-bold text-text-primary">Asesoría de Visa Premium (Completa)</p>
-                                <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                            <td className="py-4 px-4 font-bold text-text-primary">
-                              {user.hasPaidAdvisor ? `$${(fullServicePrice * 0.75).toFixed(2)} USD` : `$${fullServicePrice.toFixed(2)} USD`}
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidAdvisor
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                : "bg-amber-50 text-amber-800 border-amber-100"
-                                }`}>
-                                {user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-right">
-                              {user.hasPaidAdvisor ? (
-                                <button
-                                  onClick={() => setActiveTab("asesor")}
-                                  className="text-brand-primary hover:underline font-semibold"
-                                >
-                                  Ver Chat
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setCheckoutAgent(assignedAgent);
-                                    setCheckoutProduct("advisor");
-                                    setIsCheckoutOpen(true);
-                                  }}
-                                  className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                                >
-                                  Pagar
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        </>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-8 bg-brand-light/30 border border-brand-primary/10 rounded-md p-5 flex items-start gap-4">
-                  <span className="text-xl">💡</span>
-                  <div>
-                    <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
-                    <p className="text-[11px] text-text-secondary leading-relaxed">
-                      Como completaste tu evaluación VIPRO de $${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
-                    </p>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
+
+                  {actualPurchases.length > 0 && actualPurchases.some(p => p.product_type === "vipro") && (
+                    <div className="mt-8 bg-brand-light/30 border border-brand-primary/10 rounded-md p-5 flex items-start gap-4">
+                      <span className="text-xl">💡</span>
+                      <div>
+                        <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
+                        <p className="text-[11px] text-text-secondary leading-relaxed">
+                          Como completaste tu evaluación VIPRO de ${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* TAB: MI SOLICITUD DE SOCIO */}
             {activeTab === "solicitud" && (
@@ -4108,11 +4100,23 @@ export default function PerfilUsuarioPage() {
                   </div>
                   <div className="flex justify-start">
                     <button
-                      onClick={() => {
-                        localStorage.setItem("fullServicePrice", String(fullServicePrice));
-                        localStorage.setItem("viproPrice", String(viproPrice));
-                        showToast(`Precios actualizados correctamente. Asesoría: $${Number(fullServicePrice).toFixed(2)} USD, VIPRO: $${Number(viproPrice).toFixed(2)} USD.`, "success");
-                        window.dispatchEvent(new Event("storage"));
+                      onClick={async () => {
+                        try {
+                          // Guardar en la base de datos de Supabase primero
+                          await SettingsClientService.updateSettings({
+                            vipro_price: String(viproPrice),
+                            full_service_price: String(fullServicePrice),
+                          });
+
+                          // Guardar en localStorage para reactividad local instantánea
+                          localStorage.setItem("fullServicePrice", String(fullServicePrice));
+                          localStorage.setItem("viproPrice", String(viproPrice));
+
+                          showToast(`Precios actualizados correctamente en base de datos. Asesoría: $${Number(fullServicePrice).toFixed(2)} USD, VIPRO: $${Number(viproPrice).toFixed(2)} USD.`, "success");
+                          window.dispatchEvent(new Event("storage"));
+                        } catch (err: any) {
+                          showToast(`Error al guardar precios en la base de datos: ${err.message || err}`, "error");
+                        }
                       }}
                       className="px-6 py-2 bg-[#113E5F] hover:bg-[#0f3755] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                     >
@@ -4897,14 +4901,14 @@ export default function PerfilUsuarioPage() {
                     </p>
                   ) : (
                     <p className="text-xs text-text-secondary leading-relaxed">
-                      Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>40% (tarifa estándar) o 60% (tarifa experto)</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                      Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
                     </p>
                   )}
                 </div>
 
                 {/* Financial metrics */}
                 {(() => {
-                  const rateLabel = user.role === ROLES.AGENCY ? "30% (Referido)" : "40% / 60% (Asesor)";
+                  const rateLabel = user.role === ROLES.AGENCY ? "30% (Referido)" : "60% (Asesor)";
                   const gross = agentCommissions.reduce((sum, c) => sum + (c.gross_amount || (user.role === ROLES.AGENCY ? c.commission_amount / 0.30 : c.commission_amount / 0.60) || 0), 0);
                   const net = agentCommissions.reduce((sum, c) => sum + (c.commission_amount || 0), 0);
                   const platformShare = gross - net;

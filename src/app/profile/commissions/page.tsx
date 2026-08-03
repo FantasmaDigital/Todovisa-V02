@@ -75,7 +75,7 @@ export default function ComisionesPage() {
     if (user?.role === ROLES.AGENCY) {
       return "30% (Referido)";
     }
-    return "60% / 40%";
+    return "60% (Asesor)";
   };
 
   const getGrossEarnings = () => {
@@ -141,7 +141,7 @@ export default function ComisionesPage() {
             </p>
           ) : (
             <p className="text-xs text-text-secondary leading-relaxed">
-              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>40% (tarifa estándar) o 60% (tarifa experto)</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
             </p>
           )}
         </div>

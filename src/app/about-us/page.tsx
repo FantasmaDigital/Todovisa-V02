@@ -9,7 +9,7 @@ import { visaDestinations } from "../constants/visas/destinations";
 
 export default function AboutUsPage() {
   const headerRef = useRef(null);
-  const [viproPrice, setViproPrice] = useState(19.99);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
   useEffect(() => {
     const savedPrice = localStorage.getItem("viproPrice");

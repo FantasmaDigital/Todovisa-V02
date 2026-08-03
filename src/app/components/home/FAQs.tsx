@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 
 export const FAQs = () => {
     const [openFaq, setOpenFaq] = useState<number | null>(null);
-    const [price, setPrice] = useState(150);
+    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
 
     useEffect(() => {
         const savedPrice = localStorage.getItem("fullServicePrice");

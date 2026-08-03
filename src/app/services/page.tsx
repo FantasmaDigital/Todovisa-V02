@@ -76,8 +76,8 @@ export default function ServicesPage() {
     const headerRef = useRef(null);
     const user = useAuthStore((state) => state.user);
     const isViproCompleted = Boolean(user?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))));
-    const [price, setPrice] = useState(150);
-    const [viproPrice, setViproPrice] = useState(19.99);
+    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+    const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
     useEffect(() => {
         const savedPrice = localStorage.getItem("fullServicePrice");

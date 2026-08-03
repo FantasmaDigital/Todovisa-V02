@@ -57,8 +57,8 @@ export const ProcessSection = () => {
   const [active, setActive] = useState('servicioCompleto');
   const router = useRouter();
   const { user } = useAuthStore();
-  const [price, setPrice] = useState(150);
-  const [viproPrice, setViproPrice] = useState(19.99);
+  const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
   useEffect(() => {
     const savedPrice = localStorage.getItem("fullServicePrice");

@@ -15,7 +15,7 @@ function ViproFormContent() {
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const router = useRouter();
     const user = useAuthStore((state) => state.user);
-    const [viproPrice, setViproPrice] = useState(19.99);
+    const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
     useEffect(() => {
         const savedPrice = localStorage.getItem("viproPrice");
