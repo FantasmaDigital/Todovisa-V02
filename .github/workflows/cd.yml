@@ -14,15 +14,6 @@ jobs:
   deploy:
     name: Deploy to Vercel
     runs-on: ubuntu-latest
-    
-    # NOTA: Para utilizar este workflow de despliegue, debes configurar los siguientes secretos 
-    # en GitHub (Settings > Secrets and variables > Actions):
-    # - VERCEL_TOKEN (Token de acceso personal de Vercel)
-    # - VERCEL_ORG_ID (ID de tu organización/usuario en Vercel)
-    # - VERCEL_PROJECT_ID (ID del proyecto en Vercel)
-    #
-    # Si estás utilizando la integración git nativa de Vercel (Recomendada), puedes eliminar o desactivar este archivo,
-    # ya que Vercel se encarga automáticamente de desplegar al hacer push.
 
     steps:
       - name: Checkout repository
