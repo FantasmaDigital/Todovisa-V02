@@ -52,3 +52,12 @@ supabase_schema.sql
 *.p12
 *.crt
 *.cer
+
+# workspace files (prevents local workspaces from breaking standalone production build in CI)
+pnpm-workspace.yaml
+package-lock.json
+yarn.lock
+shrinkwrap.yaml
+.pnpm-store/
+.npm/
+.yarn-cache/

@@ -44,15 +44,46 @@ export class AgentRepository {
 
     if (appsResult.error) throw new Error(appsResult.error.message);
 
-    const activeApps = appsResult.data || [];
+    const rawActiveApps = appsResult.data || [];
     const memberIdsSet = new Set<string>(
       (membersResult.data || []).map((m) => m.member_id)
     );
 
+    // Fetch photo_url from auth.users metadata (via SECURITY DEFINER RPC) + profiles fallback
+    const userIds = rawActiveApps.map(app => app.user_id).filter(Boolean);
+    let photoMap: Record<string, string> = {};
+    if (userIds.length > 0) {
+      // Try RPC first (reads auth.users raw_user_meta_data + profiles in one query)
+      const { data: photosRpc, error: rpcError } = await supabase
+        .rpc("get_agent_photos", { user_ids: userIds });
+
+      if (!rpcError && photosRpc) {
+        photosRpc.forEach((p: { id: string; photo_url: string | null }) => {
+          if (p.photo_url) photoMap[p.id] = p.photo_url;
+        });
+      } else {
+        // Fallback: read profiles table directly
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, photo_url")
+          .in("id", userIds);
+
+        profiles?.forEach(p => {
+          if (p.photo_url) photoMap[p.id] = p.photo_url;
+        });
+      }
+    }
+
+    // Merge photo_url into activeApps data
+    const activeApps = rawActiveApps.map(app => ({
+      ...app,
+      photo_url: app.user_id ? (photoMap[app.user_id] || null) : null
+    }));
+
     return { activeApps, agencyMemberIds: Array.from(memberIdsSet) };
   }
 
-  static async getPortalDetails(userId?: string) {
+  static async getPortalDetails(userId?: string, applicationId?: string) {
     let application: any = null;
     let fallbackData: any = null;
     let agencyApp: any = null;
@@ -60,7 +91,28 @@ export class AgentRepository {
     let invitations: any[] = [];
     let commissions: any[] = [];
 
-    if (userId) {
+    if (applicationId) {
+      const { data: appData } = await supabase
+        .from("agent_applications")
+        .select("*")
+        .eq("application_id", applicationId)
+        .maybeSingle();
+      application = appData;
+
+      const targetId = application?.user_id || application?.agency_id || application?.id;
+      if (targetId) {
+        const [agencyAppResult, membersResult, invitationsResult, commissionsResult] = await Promise.all([
+          supabase.from("agent_applications").select("*").eq("agency_id", targetId).maybeSingle(),
+          supabase.from("agency_members").select("*").eq("agency_id", targetId),
+          supabase.from("agency_invitations").select("*").eq("agency_id", targetId),
+          supabase.from("agent_commissions").select("*").eq("agent_id", targetId),
+        ]);
+        agencyApp = agencyAppResult.data;
+        members = membersResult.data || [];
+        invitations = invitationsResult.data || [];
+        commissions = commissionsResult.data || [];
+      }
+    } else if (userId) {
       // ⚡ Parallel: fire all userId-based queries simultaneously
       const [appResult, fallbackResult, agencyAppResult, membersResult, invitationsResult, commissionsResult] = await Promise.all([
         supabase.from("agent_applications").select("*").eq("user_id", userId).maybeSingle(),

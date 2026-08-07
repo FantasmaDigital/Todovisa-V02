@@ -51,6 +51,38 @@ export class AuthRepository {
 
   static async updateUserMetadata(attributes: Record<string, any>, token?: string | null) {
     const client = getScopedSupabaseClient(token);
-    return await client.auth.updateUser({ data: attributes });
+    if (token) {
+      const { error: sessionErr } = await client.auth.setSession({
+        access_token: token,
+        refresh_token: token, // Use token as fallback refresh_token to prevent "missing" session errors
+      });
+      if (sessionErr) {
+        console.error("[AuthRepository.updateUserMetadata] setSession error:", sessionErr.message);
+      }
+    }
+
+    const res = await client.auth.updateUser({ data: attributes });
+
+    if (!res.error) {
+      try {
+        const { data: { user } } = await client.auth.getUser();
+        if (user) {
+          const profileUpdates: Record<string, any> = {};
+          if (attributes.first_name !== undefined) profileUpdates.first_name = attributes.first_name;
+          if (attributes.last_name !== undefined) profileUpdates.last_name = attributes.last_name;
+          if (attributes.photo_url !== undefined) profileUpdates.photo_url = attributes.photo_url;
+          if (attributes.avatar_changes_this_month !== undefined) profileUpdates.avatar_changes_this_month = attributes.avatar_changes_this_month;
+          if (attributes.last_avatar_change_month !== undefined) profileUpdates.last_avatar_change_month = attributes.last_avatar_change_month;
+
+          if (Object.keys(profileUpdates).length > 0) {
+            await client.from("profiles").update(profileUpdates).eq("id", user.id);
+          }
+        }
+      } catch (e) {
+        console.error("[AuthRepository.updateUserMetadata] Profiles table update failed:", e);
+      }
+    }
+
+    return res;
   }
 }

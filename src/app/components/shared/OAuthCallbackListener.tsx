@@ -46,7 +46,19 @@ export function OAuthCallbackListener() {
               last_name: userData.lastName,
               photo_url: userData.photoUrl,
             });
-          } catch (_) {}
+
+            // Sync to the public profiles table as well
+            await supabase
+              .from("profiles")
+              .update({
+                first_name: userData.firstName,
+                last_name: userData.lastName,
+                photo_url: userData.photoUrl,
+              })
+              .eq("id", userData.id);
+          } catch (err) {
+            console.error("[OAuthCallbackListener] Error syncing profile details:", err);
+          }
         }
 
         if (window.location.hash && window.location.hash.includes("access_token=")) {

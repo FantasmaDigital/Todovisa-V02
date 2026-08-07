@@ -5,12 +5,18 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
+    const agentId = searchParams.get("agentId");
 
-    if (!userId) {
-      return NextResponse.json({ error: { message: "userId parameter is required" } }, { status: 400 });
+    if (!userId && !agentId) {
+      return NextResponse.json({ error: { message: "userId or agentId parameter is required" } }, { status: 400 });
     }
 
-    const messages = await MessageRepository.getMessagesByUserId(userId);
+    let messages;
+    if (agentId) {
+      messages = await MessageRepository.getMessagesByAgentId(agentId);
+    } else {
+      messages = await MessageRepository.getMessagesByUserId(userId!);
+    }
     return NextResponse.json({ data: messages }, { status: 200 });
   } catch (err: any) {
     return NextResponse.json({ error: { message: err.message || "Failed to fetch messages" } }, { status: 500 });

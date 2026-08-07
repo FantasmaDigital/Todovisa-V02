@@ -9,8 +9,9 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId") || undefined;
+    const applicationId = searchParams.get("id") || undefined;
 
-    const portalDetails = await AgentRepository.getPortalDetails(userId);
+    const portalDetails = await AgentRepository.getPortalDetails(userId, applicationId);
     return NextResponse.json({ data: portalDetails }, { status: 200 });
   } catch (err: any) {
     console.error("GET /api/agents/portal error:", err);
