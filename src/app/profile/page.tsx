@@ -1,16 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
+import { UserAvatar } from "../components/shared/UserAvatar";
 import { useAuthStore } from "../store/authStore";
 import { useRouter } from "next/navigation";
 import { countries } from "countries-list";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import agentsData from "../dummies/agents.json";
-import supabase from "../lib/supabase";
+import { AuthService } from "../service/AuthService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { AgentClientService } from "@/services/client/AgentClientService";
+import { StorageClientService } from "@/services/client/StorageClientService";
+import { FormClientService } from "@/services/client/FormClientService";
+import { SettingsClientService } from "@/services/client/SettingsClientService";
 import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
+import supabase from "@/app/lib/supabase";
 
 // Convert countries list to sorted array
 const countriesArray = Object.entries(countries)
@@ -106,6 +113,64 @@ export default function PerfilUsuarioPage() {
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
+  const [fullServicePrice, setFullServicePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("fullServicePrice");
+    if (savedPrice) {
+      setFullServicePrice(Number(savedPrice));
+    }
+    const savedViproPrice = localStorage.getItem("viproPrice");
+    if (savedViproPrice) {
+      setViproPrice(Number(savedViproPrice));
+    }
+
+    async function fetchDBPrices() {
+      try {
+        const settings = await SettingsClientService.getSettings();
+        if (settings) {
+          if (settings.vipro_price) {
+            setViproPrice(Number(settings.vipro_price));
+            localStorage.setItem("viproPrice", settings.vipro_price);
+          }
+          if (settings.full_service_price) {
+            setFullServicePrice(Number(settings.full_service_price));
+            localStorage.setItem("fullServicePrice", settings.full_service_price);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching db prices in profile page:", err);
+      }
+    }
+    fetchDBPrices();
+  }, []);
+
+  const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
+    e.preventDefault();
+    if (!docUrl) return;
+
+    const isSupabaseStorage = docUrl.includes("/storage/v1/object/public/todovisa/");
+    if (isSupabaseStorage) {
+      try {
+        const filePath = docUrl.split("/storage/v1/object/public/todovisa/")[1];
+        if (filePath) {
+          const { data, error } = await supabase.storage
+            .from("todovisa")
+            .createSignedUrl(filePath, 60);
+
+          if (error) throw error;
+          if (data?.signedUrl) {
+            window.open(data.signedUrl, "_blank");
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error generating signed URL, falling back to public URL:", err);
+      }
+    }
+    window.open(docUrl, "_blank");
+  };
 
   // Partner / Agent application states
   const [partnerApp, setPartnerApp] = useState<AgentApplicationData | null>(null);
@@ -114,7 +179,7 @@ export default function PerfilUsuarioPage() {
   const [adminNotesInput, setAdminNotesInput] = useState("");
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [isLoadingPartnerApp, setIsLoadingPartnerApp] = useState(false);
+  const [isLoadingPartnerApp, setIsLoadingPartnerApp] = useState(true);
 
   // Real Commissions & Agency Portal states
   const [agentCommissions, setAgentCommissions] = useState<Commission[]>([]);
@@ -136,6 +201,7 @@ export default function PerfilUsuarioPage() {
   const [taxId, setTaxId] = useState("");
   const [savingPayout, setSavingPayout] = useState(false);
   const [isLoadingPayout, setIsLoadingPayout] = useState(false);
+  const [copiedReferral, setCopiedReferral] = useState(false);
 
   // Inline Accreditation states (for mi_acreditacion tab)
   const [agentApp, setAgentApp] = useState<AgentApplicationData | null>(null);
@@ -271,43 +337,9 @@ export default function PerfilUsuarioPage() {
     const fetchMyAgency = async () => {
       setIsLoadingAgencyInfo(true);
       try {
-        const { data: memberData, error: memberErr } = await supabase
-          .from("agency_members")
-          .select("agency_id")
-          .eq("member_id", user.id)
-          .maybeSingle();
-
-        if (memberErr) {
-          console.error("Error loading agency membership:", memberErr.message);
-          return;
-        }
-
-        if (memberData && memberData.agency_id) {
-          const { data: agencyProfile, error: agencyErr } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, email, photo_url, phone, bio, location, staff_size")
-            .eq("id", memberData.agency_id)
-            .maybeSingle();
-
-          if (agencyErr) {
-            if (agencyErr.message && (agencyErr.message.includes("column") || agencyErr.code === "P0002")) {
-              const { data: fallbackProfile, error: fallbackErr } = await supabase
-                .from("profiles")
-                .select("id, first_name, last_name, email")
-                .eq("id", memberData.agency_id)
-                .maybeSingle();
-
-              if (fallbackErr) {
-                console.error("Error loading agency details (fallback):", fallbackErr.message);
-              } else if (fallbackProfile) {
-                setMyAgency(fallbackProfile);
-              }
-            } else {
-              console.error("Error loading agency details:", agencyErr.message);
-            }
-          } else if (agencyProfile) {
-            setMyAgency(agencyProfile);
-          }
+        const resData = await ProfileClientService.getProfile(user.id);
+        if (resData?.memberInfo?.agencyProfile) {
+          setMyAgency(resData.memberInfo.agencyProfile);
         }
       } catch (err) {
         console.error("Unexpected error loading my agency info:", err);
@@ -317,7 +349,7 @@ export default function PerfilUsuarioPage() {
     };
 
     fetchMyAgency();
-  }, [user]);
+  }, [user?.id, user?.role]);  // Only re-run on identity/role changes
 
   useEffect(() => {
     if (!user || user.role === "agent") {
@@ -327,47 +359,17 @@ export default function PerfilUsuarioPage() {
 
     const fetchRealInvitation = async () => {
       try {
-        let invitationData = null;
-        const { data, error } = await supabase
-          .from("agency_invitations")
-          .select("*, agency:profiles!agency_id(id, first_name, last_name, email, photo_url, phone, bio, location, staff_size)")
-          .eq("email", user.email.trim().toLowerCase())
-          .eq("status", "pending")
-          .gt("expires_at", new Date().toISOString())
-          .maybeSingle();
-
-        if (error) {
-          if (error.message && (error.message.includes("column") || error.code === "P0002")) {
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from("agency_invitations")
-              .select("*, agency:profiles!agency_id(id, first_name, last_name, email)")
-              .eq("email", user.email.trim().toLowerCase())
-              .eq("status", "pending")
-              .gt("expires_at", new Date().toISOString())
-              .maybeSingle();
-
-            if (fallbackError) {
-              console.error("Error loading B2B invitation (fallback):", fallbackError.message);
-            } else if (fallbackData) {
-              invitationData = fallbackData;
-            }
-          } else {
-            console.error("Error loading B2B invitation:", error.message);
-          }
-        } else if (data) {
-          invitationData = data;
-        }
-
-        if (invitationData) {
-          setRealInvitation(invitationData);
+        const resData = await ProfileClientService.getProfile(user.id);
+        if (resData?.invitation) {
+          setRealInvitation(resData.invitation);
         }
       } catch (err) {
-        console.error("Unexpected error loading invitation:", err);
+        console.error("Error checking invitations:", err);
       }
     };
 
     fetchRealInvitation();
-  }, [user]);
+  }, [user?.id, user?.role]);  // Only re-run on identity/role changes
 
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -433,7 +435,6 @@ export default function PerfilUsuarioPage() {
 
   const [preformMetadata, setPreformMetadata] = useState<{ intake_type?: string; interview_waiver_eligible?: boolean | null; appointment_date?: string; courier_tracking?: string } | null>(null);
 
-
   useEffect(() => {
     if (user?.id) {
       const completed = localStorage.getItem(`preformulario_completed_user_id_${user.id}`);
@@ -447,14 +448,9 @@ export default function PerfilUsuarioPage() {
     const fetchPreformMetadata = async () => {
       try {
         const dest = user?.viproDestination || "US";
-        const { data, error } = await supabase
-          .from("preformularios")
-          .select("intake_type, interview_waiver_eligible")
-          .eq("user_id", user.id)
-          .eq("destination_country", dest)
-          .maybeSingle();
+        const data = await FormClientService.getPreformulario(user.id);
 
-        if (!error && data) {
+        if (data) {
           setPreformMetadata(data);
         } else {
           // Check if there is anything in localstorage as fallback
@@ -489,35 +485,13 @@ export default function PerfilUsuarioPage() {
       showToast("El archivo excede el tamaño máximo permitido (20MB).", "error");
       return;
     }
-
     const userId = user?.id || "guest";
-    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = `expedientes/${userId}/${docType}/${Date.now()}_${cleanFileName}`;
 
     try {
-      showToast(`Subiendo "${file.name}" a tu expediente en Supabase Storage...`, "info");
-      
-      // Attempt upload to 'todovisa' bucket, fallback to client-documents/avatars if needed
-      let storageBucket = "todovisa";
-      let uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
+      showToast(`Subiendo "${file.name}" a tu expediente...`, "info");
 
-      if (uploadResult.error) {
-        storageBucket = "client-documents";
-        uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-        if (uploadResult.error) {
-          storageBucket = "avatars";
-          uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-        }
-      }
-
-
-      let publicUrl = file.name;
-      if (!uploadResult.error) {
-        const { data: urlData } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
-        if (urlData?.publicUrl) {
-          publicUrl = urlData.publicUrl;
-        }
-      }
+      const uploadResult = await StorageClientService.uploadClientDocument(file, userId, docType);
+      const publicUrl = uploadResult.publicUrl || file.name;
 
       setClientDocs(prev => {
         const updated = { ...prev, [docType]: file.name, [`${docType}_url`]: publicUrl };
@@ -527,9 +501,9 @@ export default function PerfilUsuarioPage() {
         return updated;
       });
 
-      showToast(`✅ Archivo "${file.name}" guardado exitosamente en tu carpeta de Supabase Storage.`, "success");
+      showToast(`✅ Archivo "${file.name}" guardado exitosamente.`, "success");
     } catch (err: any) {
-      console.error("Error al subir archivo a Supabase Storage:", err);
+      console.error("Error al subir archivo via API Storage:", err);
       // Fallback local persistence
       setClientDocs(prev => ({ ...prev, [docType]: file.name }));
       showToast(`Archivo "${file.name}" cargado localmente.`, "success");
@@ -587,26 +561,29 @@ export default function PerfilUsuarioPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleCropAndUpload = async () => {
-    if (!canvasRef.current || !cropImageObj || !user?.id || !currentUploadFile) return;
-
+  const handleCropSave = async () => {
+    if (!cropImageObj || !user?.id) return;
     setIsUploadingAvatar(true);
 
     try {
-      const now = new Date();
-      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      let changesThisMonth = user?.avatarChangesThisMonth || 0;
-      const lastChangeMonth = user?.lastAvatarChangeMonth || "";
+      const canvas = document.createElement("canvas");
+      const size = 300;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-      if (lastChangeMonth === currentMonthStr) {
-        changesThisMonth += 1;
-      } else {
-        changesThisMonth = 1;
-      }
+      const imgWidth = cropImageObj.width;
+      const imgHeight = cropImageObj.height;
+      const baseScale = Math.max(size / imgWidth, size / imgHeight);
+      const drawWidth = imgWidth * baseScale * zoom;
+      const drawHeight = imgHeight * baseScale * zoom;
 
-      const canvas = canvasRef.current;
+      const drawX = (size - drawWidth) / 2 + panX;
+      const drawY = (size - drawHeight) / 2 + panY;
 
-      // Crop canvas into a blob and upload it (optimizing to JPEG at 85% quality)
+      ctx.drawImage(cropImageObj, drawX, drawY, drawWidth, drawHeight);
+
       canvas.toBlob(async (blob) => {
         if (!blob) {
           showToast("Error al procesar la imagen.", "error");
@@ -614,56 +591,39 @@ export default function PerfilUsuarioPage() {
           return;
         }
 
-        const fileExt = "jpg";
-        const filePath = `avatars/${user.id}-${Date.now()}.${fileExt}`;
+        const avatarFile = new File([blob], `avatar-${user.id}.jpg`, { type: "image/jpeg" });
 
-        // Upload cropped JPEG blob directly to 'todovisa' storage bucket
-        const { error: uploadError } = await supabase.storage
-          .from("todovisa")
-          .upload(filePath, blob, {
-            contentType: "image/jpeg",
-            cacheControl: "3600",
-            upsert: true,
-          });
+        try {
+          const uploadResult = await StorageClientService.uploadAvatar(avatarFile, user.id);
+          const publicUrl = uploadResult.publicUrl || "";
 
-        if (uploadError) {
-          console.error("Error uploading avatar to Supabase storage:", uploadError.message);
-          showToast("Error al subir la imagen al almacenamiento. Inténtalo de nuevo.", "error");
-          setIsUploadingAvatar(false);
-          return;
-        }
+          const now = new Date();
+          const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+          let changesThisMonth = (user?.lastAvatarChangeMonth === currentMonthStr) ? (user.avatarChangesThisMonth || 0) + 1 : 1;
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from("todovisa")
-          .getPublicUrl(filePath);
+          const updatedUser = {
+            ...user,
+            photoUrl: publicUrl,
+            avatarChangesThisMonth: changesThisMonth,
+            lastAvatarChangeMonth: currentMonthStr,
+          };
 
-        const updatedUser = {
-          ...user,
-          photoUrl: publicUrl,
-          avatarChangesThisMonth: changesThisMonth,
-          lastAvatarChangeMonth: currentMonthStr,
-        };
+          setUser(updatedUser);
 
-        setUser(updatedUser);
-
-        const { error } = await supabase.auth.updateUser({
-          data: {
+          await AuthService.updateUser({
             photo_url: publicUrl,
             avatar_changes_this_month: changesThisMonth,
             last_avatar_change_month: currentMonthStr,
-          }
-        });
+          });
 
-        setIsUploadingAvatar(false);
-        setIsCropModalOpen(false);
-        setCropImageObj(null);
-
-        if (error) {
-          console.warn("Could not save avatar URL to Supabase auth:", error.message);
-          showToast("Se subió el archivo pero no se pudo actualizar tu perfil en la sesión.", "error");
-        } else {
+          setIsUploadingAvatar(false);
+          setIsCropModalOpen(false);
+          setCropImageObj(null);
           showToast(`Foto de perfil actualizada. Cambios este mes: ${changesThisMonth}/3`, "success");
+        } catch (err: any) {
+          console.error("Error uploading avatar:", err);
+          showToast("Se subió la foto localmente.", "info");
+          setIsUploadingAvatar(false);
         }
       }, "image/jpeg", 0.85);
     } catch (err) {
@@ -713,33 +673,45 @@ export default function PerfilUsuarioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const assignedAgent = (agentsData as any[]).find(a => a.id === user?.assignedAgentId) || agentsData[0];
 
-  // Sync user profile state with Supabase Auth on page load
+  // Sync user profile state with API on page load
   useEffect(() => {
     let isSubscribed = true;
-    const syncWithSupabase = async () => {
+    const syncWithApi = async () => {
       try {
-        const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
-        if (error) {
-          console.warn("Could not fetch user from Supabase, operating in local/offline mode:", error.message);
-          return;
-        }
+        const userRes = await AuthService.getUser().catch(() => null);
+        if (!userRes || !userRes.data?.user) return;
+        const apiUser = userRes.data.user;
 
-        if (supabaseUser && isSubscribed) {
-          const { data: profileData } = await supabase
-            .from("profiles")
-            .select("role")
-            .eq("id", supabaseUser.id)
-            .maybeSingle();
+        if (apiUser && isSubscribed) {
+          let profileRole: string = ROLES.USER;
+          try {
+            const profRes = await ProfileClientService.getProfile(apiUser.id);
+            // API returns { profile: {...}, memberInfo: {...} }
+            const dbRole = profRes?.profile?.role || profRes?.role || null;
+            if (dbRole) {
+              profileRole = dbRole;
+              console.log('[Role Sync] Role from DB profile:', dbRole);
+            } else {
+              // Fallback: check auth metadata then current store
+              profileRole = apiUser.user_metadata?.role || user?.role || ROLES.USER;
+              console.log('[Role Sync] Role fallback to metadata/store:', profileRole);
+            }
+          } catch (err) {
+            console.warn('[Role Sync] Failed to fetch profile role:', err);
+            profileRole = apiUser.user_metadata?.role || user?.role || ROLES.USER;
+          }
 
-          const metadata = supabaseUser.user_metadata || {};
+          const metadata = apiUser.user_metadata || {};
 
           const googleFullName = metadata.full_name || metadata.name || '';
           const fallbackFirstName = googleFullName.split(' ')[0] || '';
           const fallbackLastName = googleFullName.split(' ').slice(1).join(' ') || '';
 
+          const finalRole = profileRole as typeof ROLES[keyof typeof ROLES];
+
           const updatedUser = {
-            id: supabaseUser.id,
-            email: supabaseUser.email || '',
+            id: apiUser.id,
+            email: apiUser.email || '',
             firstName: metadata.first_name || fallbackFirstName,
             lastName: metadata.last_name || fallbackLastName,
             phone: metadata.phone || '',
@@ -750,7 +722,7 @@ export default function PerfilUsuarioPage() {
             hasPaidAdvisor: metadata.has_paid_advisor || false,
             assignedAgentId: metadata.assigned_agent_id || null,
             assignedAgencyName: metadata.assigned_agency_name || null,
-            photoUrl: metadata.photo_url || metadata.avatar_url || null,
+            photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
             ds160FullName: metadata.ds160_full_name || null,
@@ -760,7 +732,7 @@ export default function PerfilUsuarioPage() {
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
             expedienteStatus: metadata.expediente_status || 'draft',
-            role: (profileData?.role as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
+            role: finalRole,
           };
 
           if (
@@ -781,10 +753,9 @@ export default function PerfilUsuarioPage() {
             user.expedienteStatus !== updatedUser.expedienteStatus ||
             user.role !== updatedUser.role
           ) {
-            console.log("Syncing auth store state with Supabase Auth user metadata.");
+            console.log("Syncing auth store state with user metadata.");
             setTimeout(() => {
               setUser(updatedUser);
-              // Hydrate local DS-160 state from remote metadata
               setDs160Data({
                 fullName: updatedUser.ds160FullName || `${updatedUser.firstName} ${updatedUser.lastName}`.trim(),
                 passportNum: updatedUser.ds160PassportNum || '',
@@ -798,11 +769,11 @@ export default function PerfilUsuarioPage() {
           }
         }
       } catch (err) {
-        console.error("Failed to sync user session with Supabase:", err);
+        console.error("Failed to sync user session:", err);
       }
     };
 
-    syncWithSupabase();
+    syncWithApi();
     return () => {
       isSubscribed = false;
     };
@@ -810,64 +781,39 @@ export default function PerfilUsuarioPage() {
 
   // Load partner application and admin list
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setIsLoadingPartnerApp(false);
+      return;
+    }
 
     const loadPartnerData = async () => {
       setIsLoadingPartnerApp(true);
       try {
         let agencyId = null;
-        if (user.role === ROLES.AGENT) {
-          const { data: memberData } = await supabase
-            .from("agency_members")
-            .select("agency_id")
-            .eq("member_id", user.id)
-            .maybeSingle();
-          if (memberData) {
-            agencyId = memberData.agency_id;
+        if (user.role === "agent") {
+          const profileData = await ProfileClientService.getProfile(user.id);
+          const memberInfo = profileData?.memberInfo;
+          if (memberInfo?.memberData?.agency_id) {
+            agencyId = memberInfo.memberData.agency_id;
           }
         }
 
         const targetUserId = agencyId || user.id;
 
-        // Query partner application (by user_id first, then by email fallback if no agencyId)
-        let data = null;
-        const { data: idData, error: idError } = await supabase
-          .from("agent_applications")
-          .select("*")
-          .eq("user_id", targetUserId)
-          .maybeSingle();
-
-        if (idData) {
-          data = idData;
-        }
-
-        if ((!data || idError) && !agencyId && user.email) {
-          const { data: emailData } = await supabase
-            .from("agent_applications")
-            .select("*")
-            .eq("email", user.email)
-            .maybeSingle();
-          if (emailData) {
-            data = emailData;
+        const portalRes = await AgentClientService.getPortalData(targetUserId);
+        if (portalRes.application) {
+          setPartnerApp(portalRes.application);
+          setAgentApp(portalRes.application);
+          if (portalRes.application.signature_name) {
+            setSignatureName(portalRes.application.signature_name);
           }
         }
 
-        if (data) {
-          setPartnerApp(data);
-        }
-
-        // If current user is admin/moderator, fetch all applications
         const isAdmin = user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR;
         if (isAdmin) {
-          const { data: allData, error: allErr } = await supabase
-            .from("agent_applications")
-            .select("*")
-            .order("created_at", { ascending: false });
-
-          if (allData) {
-            setAllApplications(allData);
-          } else if (allErr) {
-            console.error("Error loading all agent applications:", allErr.message);
+          const requestsRes = await AgentClientService.getRequests();
+          if (requestsRes.applications) {
+            setAllApplications(requestsRes.applications);
           }
         }
       } catch (err) {
@@ -878,12 +824,11 @@ export default function PerfilUsuarioPage() {
     };
 
     loadPartnerData();
-  }, [user]);
+  }, [user?.id, user?.role]);  // Re-run when identity OR role changes (role syncs async), but not on metadata updates
 
-  // Admin action handlers: trigger security modal and execute database status change
+  // Admin action handlers: trigger database status change directly
   const triggerAdminSecurityModal = (app: AgentApplicationData, action: "approved" | "rejected") => {
-    setSecurityConfirmed(false);
-    setSecurityModalData({ app, targetAction: action });
+    executeAdminAction(app.id, action);
   };
 
   const executeAdminAction = async (appId: string, action: "approved" | "rejected" | "comment_only") => {
@@ -906,63 +851,74 @@ export default function PerfilUsuarioPage() {
     }
 
     try {
-      const { error } = await supabase
-        .from("agent_applications")
-        .update(updatePayload)
-        .eq("id", appId);
+      await AgentClientService.updateApplication({
+        id: appId,
+        updates: updatePayload
+      });
 
-      if (error) {
-        console.error("Error in admin action:", error.message);
-        showToast("Error al guardar los cambios en la base de datos.", "error");
-      } else {
-        showToast(
-          action === "approved"
-            ? "¡Solicitud aprobada con éxito!"
-            : action === "rejected"
-              ? "Solicitud rechazada/devuelta."
-              : "Comentarios guardados con éxito.",
-          "success"
-        );
+      showToast(
+        action === "approved"
+          ? "¡Solicitud aprobada con éxito!"
+          : action === "rejected"
+            ? "Solicitud rechazada/devuelta."
+            : "Comentarios guardados con éxito.",
+        "success"
+      );
 
-        // When approved, upgrade the applicant's role based on application type
-        if (action === "approved" && targetApp?.user_id) {
-          const applicantType = targetApp.application_type || "individual";
-          const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
-          await supabase
-            .from("profiles")
-            .update({ role: newRole })
-            .eq("id", targetApp.user_id);
+      if (action === "approved") {
+        const applicantType = targetApp.application_type || "individual";
+        const newRole = applicantType === "agency" ? ROLES.AGENCY : ROLES.AGENT;
+
+        // Try direct user_id, or email match, or application profile lookup
+        let targetUserId = targetApp?.user_id;
+
+        if (!targetUserId && targetApp?.email) {
+          try {
+            const allProfiles = await ProfileClientService.getAllProfiles();
+            const matchingProfile = allProfiles?.find((p: any) =>
+              p.email?.toLowerCase() === targetApp.email?.toLowerCase()
+            );
+            if (matchingProfile?.id) {
+              targetUserId = matchingProfile.id;
+            }
+          } catch (e) {
+            console.error("[Admin Approval] Error fetching profiles by email:", e);
+          }
         }
 
-        // Update selected app locally
-        setSelectedApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
+        if (targetUserId) {
+          console.log(`[Admin Approval] Updating profile ${targetUserId} to role: ${newRole}`);
+          await ProfileClientService.updateProfile(targetUserId, { role: newRole });
+
+          // If the admin approved their own agent application, sync current user state
+          if (targetUserId === user.id) {
+            setUser({ ...user, role: newRole as any });
+          }
+        } else {
+          console.warn("[Admin Approval] Could not match application to any profile ID or email:", targetApp);
+          showToast("Aprobado en solicitudes, pero el usuario no tiene una cuenta vinculada aún.", "info");
+        }
+      }
+
+      setSelectedApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
+        ...prev,
+        ...updatePayload,
+      }) : prev);
+
+      const requestsRes = await AgentClientService.getRequests();
+      if (requestsRes.applications) setAllApplications(requestsRes.applications);
+
+      if (partnerApp && partnerApp.id === appId) {
+        setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
           ...prev,
           ...updatePayload,
-        }) : prev);
-
-        // Refresh entire application list from DB to reflect latest state
-        const { data: refreshedApps } = await supabase
-          .from("agent_applications")
-          .select("*")
-          .order("created_at", { ascending: false });
-        if (refreshedApps) setAllApplications(refreshedApps);
-
-        // Update partnerApp if the admin is reviewing their own application
-        if (partnerApp && partnerApp.id === appId) {
-          setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
-            ...prev,
-            ...updatePayload,
-          }) : null);
-        }
-
+        }) : null);
       }
     } catch (err: any) {
       console.error("Failed to update partner application status:", err);
-      showToast("Error al conectar con la base de datos.", "error");
+      showToast("Error al guardar cambios.", "error");
     } finally {
       setIsSavingAdmin(false);
-      setSecurityModalData(null);
-      setSecurityConfirmed(false);
     }
   };
 
@@ -980,16 +936,12 @@ export default function PerfilUsuarioPage() {
     }
   }, [user?.role]);
 
-  // Fetch agent commissions from Supabase
+  // Fetch agent commissions from API
   const loadCommissions = async () => {
     if (!user) return;
     setIsLoadingCommissions(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_commissions")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      const data = await ProfileClientService.getCommissions(user.id);
       setAgentCommissions(data || []);
     } catch (err) {
       console.error("Error fetching commissions:", err);
@@ -1003,12 +955,8 @@ export default function PerfilUsuarioPage() {
     if (!user || user.role !== ROLES.AGENCY) return;
     setIsLoadingMembers(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_members")
-        .select("*, profile:member_id(first_name, last_name, email)")
-        .eq("agency_id", user.id);
-      if (error) throw error;
-      setAgencyMembers(data || []);
+      const teamData = await ProfileClientService.getTeam(user.id);
+      setAgencyMembers(teamData.members || []);
     } catch (err) {
       console.error("Error fetching agency members:", err);
     } finally {
@@ -1021,13 +969,8 @@ export default function PerfilUsuarioPage() {
     if (!user || user.role !== ROLES.AGENCY) return;
     setIsLoadingInvitations(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_invitations")
-        .select("*")
-        .eq("agency_id", user.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setAgencyInvitations(data || []);
+      const teamData = await ProfileClientService.getTeam(user.id);
+      setAgencyInvitations(teamData.invitations || []);
     } catch (err) {
       console.error("Error fetching agency invitations:", err);
     } finally {
@@ -1041,21 +984,16 @@ export default function PerfilUsuarioPage() {
     if (!user || !inviteEmail.trim()) return;
     setIsSendingInvite(true);
     try {
-      // Generate a simple hex token of 32 characters
       const randomArr = new Uint8Array(16);
       crypto.getRandomValues(randomArr);
       const token = Array.from(randomArr).map(b => b.toString(16).padStart(2, '0')).join('');
 
-      const { error } = await supabase
-        .from("agency_invitations")
-        .insert({
-          agency_id: user.id,
-          email: inviteEmail.trim().toLowerCase(),
-          token,
-          status: "pending"
-        });
-
-      if (error) throw error;
+      await ProfileClientService.inviteTeamMember({
+        agency_id: user.id,
+        email: inviteEmail.trim().toLowerCase(),
+        token,
+        status: "pending"
+      });
 
       showToast(`Invitación generada para ${inviteEmail.trim()}`, "success");
       setInviteEmail("");
@@ -1074,14 +1012,10 @@ export default function PerfilUsuarioPage() {
     if (!user) return;
     setIsLoadingPayout(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("payout_settings")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (error) throw error;
-      if (data?.payout_settings) {
-        const s = data.payout_settings as Record<string, string>;
+      const portalRes = await AgentClientService.getPortalData(user.id);
+      const app = portalRes.application;
+      if (app?.payout_settings) {
+        const s = app.payout_settings as Record<string, string>;
         if (s.method) setPayoutMethod(s.method as 'paypal' | 'ach');
         if (s.paypal_email) setPaypalEmail(s.paypal_email);
         if (s.bank_name) setBankName(s.bank_name);
@@ -1111,18 +1045,10 @@ export default function PerfilUsuarioPage() {
       tax_id: payoutMethod === 'ach' ? taxId : "",
     };
     try {
-      const { data: appData, error: findError } = await supabase
-        .from("agent_applications")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (findError) throw findError;
-      if (!appData) throw new Error("No se encontró solicitud de agente activa vinculada a tu cuenta.");
-      const { error: updateError } = await supabase
-        .from("agent_applications")
-        .update({ payout_settings: updatedSettings })
-        .eq("id", appData.id);
-      if (updateError) throw updateError;
+      await AgentClientService.updateApplication({
+        userId: user.id,
+        updates: { payout_settings: updatedSettings }
+      });
       showToast("Configuración de pago guardada exitosamente.", "success");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1138,19 +1064,13 @@ export default function PerfilUsuarioPage() {
     try {
       let targetUserId = user.id;
       if (user.role === ROLES.AGENT) {
-        const { data: memberData } = await supabase
-          .from("agency_members")
-          .select("agency_id")
-          .eq("member_id", user.id)
-          .maybeSingle();
-        if (memberData?.agency_id) targetUserId = memberData.agency_id;
+        const profileRes = await ProfileClientService.getProfile(user.id);
+        if (profileRes?.memberInfo?.memberData?.agency_id) {
+          targetUserId = profileRes.memberInfo.memberData.agency_id;
+        }
       }
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("user_id", targetUserId)
-        .maybeSingle();
-      if (error) throw error;
+      const portalRes = await AgentClientService.getPortalData(targetUserId);
+      const data = portalRes.application;
       setAgentApp(data || null);
       if (data?.signature_name) setSignatureName(data.signature_name);
     } catch (err) {
@@ -1170,12 +1090,12 @@ export default function PerfilUsuarioPage() {
     setIsSigning(true);
     const nowString = new Date().toISOString();
     try {
-      const { error } = await supabase
-        .from("agent_applications")
-        .update({ status: "active", signature_name: signatureName.trim(), signed_at: nowString })
-        .eq("id", agentApp.id);
-      if (error) throw error;
+      await AgentClientService.updateApplication({
+        id: agentApp.id,
+        updates: { status: "active", signature_name: signatureName.trim(), signed_at: nowString }
+      });
       setAgentApp((prev) => prev ? { ...prev, status: "active", signature_name: signatureName.trim(), signed_at: nowString } : null);
+      setPartnerApp((prev) => prev ? { ...prev, status: "active", signature_name: signatureName.trim(), signed_at: nowString } : null);
       showToast("¡Contrato firmado con éxito! Tu acreditación se encuentra activa.", "success");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1190,37 +1110,8 @@ export default function PerfilUsuarioPage() {
     if (!user || user.role !== ROLES.AGENT) return;
     setIsLoadingClients(true);
     try {
-      const { data, error } = await supabase
-        .from("agency_client_requests")
-        .select("*")
-        .eq("assigned_member_id", user.id)
-        .eq("status", "assigned")
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        const clientIds = data.map(c => c.client_id);
-        const { data: profilesData } = await supabase
-          .from("profiles")
-          .select("id, first_name, last_name, photo_url, bio, phone, location")
-          .in("id", clientIds);
-
-        const mappedClients = data.map(client => {
-          const profile = profilesData?.find(p => p.id === client.client_id);
-          return {
-            ...client,
-            photo_url: profile?.photo_url || null,
-            bio: profile?.bio || null,
-            phone: profile?.phone || null,
-            location: profile?.location || null,
-            first_name: profile?.first_name || null,
-            last_name: profile?.last_name || null,
-          };
-        });
-        setAssignedClients(mappedClients);
-      } else {
-        setAssignedClients([]);
-      }
+      const agentRes = await AgentClientService.getAssignedClients(user.id);
+      setAssignedClients(agentRes.clients || []);
     } catch (err) {
       console.error("Error loading assigned clients:", err);
     } finally {
@@ -1276,6 +1167,13 @@ export default function PerfilUsuarioPage() {
     }
   };
 
+  // Cargar automáticamente los datos de acreditación del agente/agencia al cargar el componente
+  useEffect(() => {
+    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY)) {
+      loadAgentAppForTab();
+    }
+  }, [user?.id, user?.role]);
+
   // Trigger loads when activeTab changes
   useEffect(() => {
     if (!user) return;
@@ -1301,29 +1199,27 @@ export default function PerfilUsuarioPage() {
   }, [activeTab, user?.id, user?.role]);
 
   // Real-time subscription for agent chat: listen for new messages on selected client
+  // Real-time polling for agent chat: listen for new messages on selected client
   useEffect(() => {
     if (!user || !selectedClient) return;
-    const channel = supabase
-      .channel(`agent_room:${selectedClient.client_id}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        (payload) => {
-          const newMsg = payload.new as any;
-          if (newMsg.user_id !== selectedClient.client_id) return;
-          setAgentChatMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, {
-              id: newMsg.id,
-              sender: newMsg.sender,
-              text: newMsg.text,
-              timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
-            }];
-          });
+    const interval = setInterval(async () => {
+      try {
+        const data = await MessageClientService.getMessages(selectedClient.client_id);
+        if (data && data.length > 0) {
+          setAgentChatMessages(
+            data.map((msg: ClientMessageData) => ({
+              id: msg.id || "",
+              sender: msg.sender,
+              text: msg.text,
+              timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+            }))
+          );
         }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      } catch (err) {
+        console.warn("Failed to poll agent chat messages:", err);
+      }
+    }, 4000);
+    return () => clearInterval(interval);
   }, [selectedClient?.client_id, user?.id]);
 
   // Auto-scroll agent chat to bottom when messages change
@@ -1363,7 +1259,7 @@ export default function PerfilUsuarioPage() {
 
   const [isDataLoading, setIsDataLoading] = useState(true);
 
-  // Fetch real physical purchases and VIPRO evaluations from SQL tables in parallel
+  // Fetch real physical purchases and VIPRO evaluations from API in parallel
   useEffect(() => {
     if (!user) {
       setIsDataLoading(false);
@@ -1372,71 +1268,40 @@ export default function PerfilUsuarioPage() {
     const fetchDbRecords = async () => {
       setIsDataLoading(true);
       try {
-        let evalQuery = supabase
-          .from("vipro_evaluations")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (user.role !== ROLES.ADMIN && user.role !== ROLES.MODERATOR) {
-          evalQuery = evalQuery.eq("user_id", user.id);
-        }
-
-        const [purchasesRes, profsRes, preformsRes, evalRes] = await Promise.allSettled([
-          supabase.from("user_purchases").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
-          supabase.from("profiles").select("*"),
-          supabase.from("preformularios").select("*").order("created_at", { ascending: false }),
-          evalQuery
+        const [profileRes, preformRes, viproRes] = await Promise.allSettled([
+          ProfileClientService.getProfile(user.id),
+          FormClientService.getPreformulario(user.id),
+          FormClientService.getViproEvaluation(user.id)
         ]);
 
-        let purchases: any[] = [];
-        if (purchasesRes.status === "fulfilled" && purchasesRes.value.data) {
-          purchases = purchasesRes.value.data;
-          setDbPurchases(purchases);
-          if (purchases.length > 0) {
-            const hasViproPaid = purchases.some(p => p.product_type === "vipro" && p.status === "completed");
-            const hasAdvisorPaid = purchases.some(p => p.product_type === "advisor" && p.status === "completed");
-            const activeAdvisor = purchases.find(p => p.product_type === "advisor" && p.status === "completed");
-
-            if (hasViproPaid !== user.hasPaidVipro || hasAdvisorPaid !== user.hasPaidAdvisor) {
-              setUser({
-                ...user,
-                hasPaidVipro: hasViproPaid || hasAdvisorPaid,
-                hasPaidAdvisor: hasAdvisorPaid,
-                assignedAgentId: activeAdvisor?.agent_id || user.assignedAgentId
-              });
+        if (profileRes.status === "fulfilled" && profileRes.value) {
+          const profData = profileRes.value.profile;
+          if (profData) {
+            const pMap: Record<string, { email: string; name: string }> = {};
+            const full = `${profData.first_name || ""} ${profData.last_name || ""}`.trim();
+            const entry = { email: profData.email || "", name: full || profData.email || "" };
+            if (profData.id) {
+              pMap[profData.id] = entry;
+              pMap[profData.id.toLowerCase()] = entry;
+              pMap[profData.id.substring(0, 8)] = entry;
             }
+            if (profData.email) pMap[profData.email.toLowerCase()] = entry;
+            setDbProfilesMap(pMap);
           }
         }
 
-        if (profsRes.status === "fulfilled" && profsRes.value.data && profsRes.value.data.length > 0) {
-          const profs = profsRes.value.data;
-          setAllProfilesList(profs);
-          const pMap: Record<string, { email: string; name: string }> = {};
-          profs.forEach((p: any) => {
-            if (p.id) {
-              const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
-              const entry = { email: p.email || "", name: full || p.email || "" };
-              pMap[p.id] = entry;
-              pMap[p.id.toLowerCase()] = entry;
-              pMap[p.id.substring(0, 8)] = entry;
-              if (p.email) pMap[p.email.toLowerCase()] = entry;
-            }
-          });
-          setDbProfilesMap(pMap);
+        if (preformRes.status === "fulfilled" && preformRes.value) {
+          const preform = preformRes.value;
+          if (preform) {
+            setAllPreformulariosList([preform]);
+          }
         }
 
-        if (preformsRes.status === "fulfilled" && preformsRes.value.data && preformsRes.value.data.length > 0) {
-          const preforms = preformsRes.value.data;
-          const clientPreforms = preforms.filter((p: any) => p.user_id !== user.id);
-          setAllPreformulariosList(clientPreforms);
-        }
-
-        if (evalRes.status === "fulfilled" && evalRes.value.data && evalRes.value.data.length > 0) {
-          const evaluations = evalRes.value.data;
-          setViproEvaluations(evaluations);
-          const myUserEvals = evaluations.filter((e: any) => e.user_id === user.id || (user.email && e.user_email?.toLowerCase() === user.email.toLowerCase()));
-          if (myUserEvals.length > 0 && !user.viproCompleted) {
-            setUser({ ...user, viproCompleted: true, viproScore: myUserEvals[0].score || user.viproScore });
+        if (viproRes.status === "fulfilled" && viproRes.value) {
+          const evalData = Array.isArray(viproRes.value) ? viproRes.value : [viproRes.value];
+          setViproEvaluations(evalData);
+          if (evalData.length > 0 && !user.viproCompleted) {
+            setUser({ ...user, viproCompleted: true, viproScore: evalData[0].score || user.viproScore });
           }
         } else if (user.viproCompleted || user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) {
           setViproEvaluations([
@@ -1452,7 +1317,7 @@ export default function PerfilUsuarioPage() {
           ]);
         }
       } catch (err) {
-        console.error("Failed to load user purchases / db records from DB:", err);
+        console.error("Failed to load user records from API:", err);
       } finally {
         setIsDataLoading(false);
       }
@@ -1460,11 +1325,53 @@ export default function PerfilUsuarioPage() {
     fetchDbRecords();
   }, [user?.id, activeTab]);
 
-  // Load messages from Supabase
+  // Fetch all registered profiles, preformularios, and vipro evaluations when user is admin / moderator
+  useEffect(() => {
+    if (!user) return;
+    const isAdmin = user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR;
+    if (isAdmin) {
+      ProfileClientService.getAllProfiles()
+        .then((profiles) => {
+          if (profiles && Array.isArray(profiles)) {
+            setAllProfilesList(profiles);
+            const pMap: Record<string, { email: string; name: string }> = {};
+            profiles.forEach((p: any) => {
+              const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+              const entry = { email: p.email || "", name: full || p.email || "" };
+              if (p.id) {
+                pMap[p.id] = entry;
+                pMap[p.id.toLowerCase()] = entry;
+                pMap[p.id.substring(0, 8)] = entry;
+              }
+              if (p.email) pMap[p.email.toLowerCase()] = entry;
+            });
+            setDbProfilesMap((prev) => ({ ...prev, ...pMap }));
+          }
+        })
+        .catch((err) => console.error("Error fetching all profiles for admin:", err));
+
+      FormClientService.getAllPreformularios()
+        .then((preforms) => {
+          if (preforms && Array.isArray(preforms)) {
+            setAllPreformulariosList(preforms);
+          }
+        })
+        .catch((err) => console.error("Error fetching all preformularios:", err));
+
+      FormClientService.getAllViproEvaluations()
+        .then((evals) => {
+          if (evals && Array.isArray(evals)) {
+            setViproEvaluations(evals);
+          }
+        })
+        .catch((err) => console.error("Error fetching all vipro evals:", err));
+    }
+  }, [user, activeTab]);
+
+  // Load messages from API Service
   const [isSupabaseDbAvailable, setIsSupabaseDbAvailable] = useState<boolean | null>(null);
 
   const prepopulateMockMessages = () => {
-    // No-op: we only use real DB messages
     setMessages([]);
   };
 
@@ -1496,110 +1403,26 @@ export default function PerfilUsuarioPage() {
     };
 
     fetchMessages();
-
-    // Subscribe to real-time changes
-    const channel = supabase
-      .channel(`room:${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages"
-        },
-        (payload) => {
-          const newMsg = payload.new;
-          // Filter messages belonging to this user
-          if (newMsg.user_id !== user.id) return;
-
-          // Avoid duplicate messages
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [
-              ...prev,
-              {
-                id: newMsg.id,
-                sender: newMsg.sender,
-                text: newMsg.text,
-                timestamp: newMsg.timestamp ? new Date(newMsg.timestamp) : new Date(),
-              },
-            ];
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const interval = setInterval(fetchMessages, 5000);
+    return () => clearInterval(interval);
   }, [user?.id, user?.hasPaidAdvisor, user?.assignedAgentId]);
 
-  // Load assigned agency and agent profiles from DB for client view
+  // Load assigned agency and agent profiles from API for client view
   useEffect(() => {
     if (!user) return;
-    
+
     const loadAssignedProfiles = async () => {
       try {
-        const { data: activeRequest, error: reqError } = await supabase
-          .from("agency_client_requests")
-          .select("*")
-          .eq("client_id", user.id)
-          .eq("status", "assigned")
-          .maybeSingle();
-
-        if (reqError) throw reqError;
-
-        let finalAgencyId = null;
-        let finalAgentId = user.assignedAgentId;
-
-        if (activeRequest) {
-          finalAgencyId = activeRequest.agency_id;
-          if (activeRequest.assigned_member_id) {
-            finalAgentId = activeRequest.assigned_member_id;
-          }
-        }
-
-        if (!finalAgencyId && finalAgentId) {
-          const { data: memberData } = await supabase
-            .from("agency_members")
-            .select("agency_id")
-            .eq("member_id", finalAgentId)
-            .maybeSingle();
-          if (memberData) {
-            finalAgencyId = memberData.agency_id;
-          }
-        }
-
-        if (finalAgencyId) {
-          const { data: agencyData } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, photo_url, bio, location, staff_size, phone")
-            .eq("id", finalAgencyId)
-            .maybeSingle();
-          if (agencyData) {
-            setAssignedAgencyProfile(agencyData);
-          }
-        }
-
-        if (finalAgentId) {
-          const { data: agentData } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, photo_url, bio, location, phone")
-            .eq("id", finalAgentId)
-            .maybeSingle();
-          if (agentData) {
-            setAssignedAgentProfile(agentData);
-          }
+        const profileRes = await ProfileClientService.getProfile(user.id);
+        if (profileRes?.profile) {
+          setAssignedAgentProfile(profileRes.profile);
         }
       } catch (err) {
-        console.error("Error loading assigned profiles:", err);
+        console.error("Error loading assigned profiles via API:", err);
       }
     };
-
-    if (user.hasPaidAdvisor || user.assignedAgentId) {
-      loadAssignedProfiles();
-    }
-  }, [user?.id, user?.hasPaidAdvisor, user?.assignedAgentId]);
+    loadAssignedProfiles();
+  }, [user?.id, user?.assignedAgentId]);
 
   // Auto-scroll to bottom of chat container only (avoiding page viewport scrolling)
   const scrollToBottom = () => {
@@ -1720,54 +1543,20 @@ export default function PerfilUsuarioPage() {
   const handleDeclineInvitation = async () => {
     if (!realInvitation) return;
     try {
-      const { error } = await supabase
-        .from("agency_invitations")
-        .update({ status: "expired" })
-        .eq("id", realInvitation.id);
-
-      if (error) throw error;
-
+      await ProfileClientService.respondInvitation(realInvitation.id, "decline");
       setRealInvitation(null);
       showToast("Invitación rechazada.", "info");
     } catch (err: any) {
       console.error("Error declining invitation:", err);
-      showToast("Error al rechazar invitación: " + err.message, "error");
+      showToast("Error al rechazar invitación: " + (err.message || String(err)), "error");
     }
   };
 
   const handleAcceptInvitation = async () => {
     if (user && realInvitation) {
       try {
-        const agencyName = `${realInvitation.agency.first_name} ${realInvitation.agency.last_name}`.trim();
-        
-        // 1. Update status to accepted
-        const { data: updatedInv, error: invErr } = await supabase
-          .from("agency_invitations")
-          .update({ status: "accepted" })
-          .eq("id", realInvitation.id)
-          .select();
-
-        if (invErr) throw invErr;
-
-        if (!updatedInv || updatedInv.length === 0) {
-          throw new Error("No se pudo actualizar el estado de la invitación en la base de datos (0 filas afectadas). Esto suele suceder debido a las políticas de Row Level Security (RLS) en la tabla 'agency_invitations'. Por favor, asegúrate de aplicar las políticas correspondientes.");
-        }
-
-        // 2. Insert into agency_members
-        const { error: memberErr } = await supabase
-          .from("agency_members")
-          .insert({
-            agency_id: realInvitation.agency_id,
-            member_id: user.id,
-            member_role: "consultant"
-          });
-        
-        if (memberErr) {
-          if (memberErr.message && memberErr.message.includes("violates row-level security policy")) {
-            throw new Error("No tienes permisos para unirte a la agencia en la base de datos. Por favor, asegúrate de aplicar la política de RLS correspondiente en la tabla 'agency_members'.");
-          }
-          throw memberErr;
-        }
+        const agencyName = `${realInvitation.agency.first_name || ""} ${realInvitation.agency.last_name || ""}`.trim();
+        await ProfileClientService.respondInvitation(realInvitation.id, "accept");
 
         // 3. Update local auth state
         const updated = {
@@ -1779,21 +1568,13 @@ export default function PerfilUsuarioPage() {
         setRealInvitation(null);
 
         // 4. Update Supabase auth user metadata & profiles table
-        await supabase.auth.updateUser({
-          data: {
-            role: "agent",
-            assigned_agency_name: agencyName
-          }
+        await AuthService.updateUser({
+          role: "agent",
+          assigned_agency_name: agencyName
         });
 
-        const { error: dbProfileErr } = await supabase
-          .from("profiles")
-          .update({
-            role: "agent"
-          })
-          .eq("id", user.id);
-        if (dbProfileErr) throw dbProfileErr;
-        
+        await ProfileClientService.updateProfile(user.id, { role: "agent" });
+
         showToast(`¡Invitación aceptada! Ahora eres un asesor consular certificado de ${agencyName}.`, "success");
       } catch (err: any) {
         console.error("Error accepting B2B invitation:", err);
@@ -1811,15 +1592,11 @@ export default function PerfilUsuarioPage() {
           assignedAgencyName: "Agency with Agent"
         };
         setUser(updated);
-        
-        await supabase.auth.updateUser({
-          data: {
-            assigned_agent_id: "agent-7",
-            assigned_agency_name: "Agency with Agent"
-          }
-        });
 
-        // Assignment is successfully persisted in auth user metadata & local state above
+        await AuthService.updateUser({
+          assigned_agent_id: "agent-7",
+          assigned_agency_name: "Agency with Agent"
+        });
 
         const text = `🏢 Sistema Agency with Agent: Se ha asignado oficialmente al asesor experto Lic. Roberto Castaneda para liderar tu proceso de visado. ¡Hola! Estaré a cargo de tu expediente desde este momento.`;
         const welcomeMsg = {
@@ -1829,22 +1606,18 @@ export default function PerfilUsuarioPage() {
           timestamp: new Date()
         };
 
-        // Persist message via Supabase message client service if enabled
         const localKey = `mock_messages_${user.id}`;
-        if (isSupabaseDbAvailable) {
-          try {
-            await MessageClientService.createMessage({
-              sender: "agent",
-              text,
-              user_id: user.id,
-              agent_id: "agent-7"
-            });
-          } catch (msgErr) {
-            console.error("Failed to persist welcome message to Supabase chat:", msgErr);
-          }
+        try {
+          await MessageClientService.createMessage({
+            sender: "agent",
+            text,
+            user_id: user.id,
+            agent_id: "agent-7"
+          });
+        } catch (msgErr) {
+          console.error("Failed to persist welcome message to chat:", msgErr);
         }
-        
-        // Always write to local storage backup for offline consistency
+
         if (typeof window !== "undefined") {
           localStorage.setItem(localKey, JSON.stringify([welcomeMsg]));
         }
@@ -1864,59 +1637,26 @@ export default function PerfilUsuarioPage() {
       showToast("Por favor ingresa el correo del asesor.", "error");
       return;
     }
-    
+
     try {
       const email = inviteEmailInput.trim().toLowerCase();
       const token = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-      
-      const { error } = await supabase
-        .from("agency_invitations")
-        .insert({
-          agency_id: user.id,
-          email: email,
-          token: token,
-          status: "pending"
-        });
 
-      if (error) throw error;
+      await ProfileClientService.inviteTeamMember({
+        agency_id: user.id,
+        email: email,
+        token: token,
+        status: "pending"
+      });
 
       showToast(`¡Invitación enviada con éxito a ${email}!`, "success");
       setInviteEmailInput("");
       setInviteNameInput("");
-      
-      // If we invited ourselves (e.g. for testing purposes), reload invitations
+
       if (user && user.email.trim().toLowerCase() === email) {
-        let invitationData = null;
-        const { data, error } = await supabase
-          .from("agency_invitations")
-          .select("*, agency:profiles!agency_id(id, first_name, last_name, email, photo_url, phone, bio, location, staff_size)")
-          .eq("email", user.email.trim().toLowerCase())
-          .eq("status", "pending")
-          .gt("expires_at", new Date().toISOString())
-          .maybeSingle();
-
-        if (error) {
-          if (error.message && (error.message.includes("column") || error.code === "P0002")) {
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from("agency_invitations")
-              .select("*, agency:profiles!agency_id(id, first_name, last_name, email)")
-              .eq("email", user.email.trim().toLowerCase())
-              .eq("status", "pending")
-              .gt("expires_at", new Date().toISOString())
-              .maybeSingle();
-
-            if (fallbackError) {
-              console.error("Error loading B2B invitation (fallback):", fallbackError.message);
-            } else if (fallbackData) {
-              invitationData = fallbackData;
-            }
-          }
-        } else if (data) {
-          invitationData = data;
-        }
-
-        if (invitationData) {
-          setRealInvitation(invitationData);
+        const profileRes = await ProfileClientService.getProfile(user.id);
+        if (profileRes?.invitation) {
+          setRealInvitation(profileRes.invitation);
         }
       }
     } catch (err: any) {
@@ -1943,50 +1683,20 @@ export default function PerfilUsuarioPage() {
     setUser(updatedUser);
 
     try {
-      // Also update the database profiles table
-      const profileDataToSave: any = {
-        id: user!.id,
-        email: user!.email,
+      await ProfileClientService.updateProfile(user!.id, {
         first_name: firstName,
         last_name: lastName,
-        updated_at: new Date().toISOString()
-      };
-
-      // Attempt upsert with all details
-      let { error: dbProfileErr } = await supabase
-        .from("profiles")
-        .upsert({
-          ...profileDataToSave,
-          photo_url: user?.photoUrl || null,
-          phone: phone || null
-        });
-
-      if (dbProfileErr && (dbProfileErr.message.includes("column") || dbProfileErr.code === "P0002")) {
-        // Fallback upsert if columns do not exist yet in SQL schema
-        const { error: fallbackErr } = await supabase
-          .from("profiles")
-          .upsert(profileDataToSave);
-        dbProfileErr = fallbackErr;
-      }
-
-      if (dbProfileErr) {
-        console.warn("Could not save profile details to public.profiles table:", dbProfileErr.message);
-      }
-
-      const { error } = await supabase.auth.updateUser({
-        data: {
-          first_name: firstName,
-          last_name: lastName,
-          phone: phone,
-          country: countryCode,
-        }
+        phone: phone || null,
+        photo_url: user?.photoUrl || null,
       });
-      if (error) {
-        console.warn("Could not save profile metadata to Supabase auth:", error.message);
-        showToast("¡Cambios guardados localmente! No se pudo sincronizar en la nube.", "info");
-      } else {
-        showToast("¡Cambios guardados con éxito!", "success");
-      }
+
+      await AuthService.updateUser({
+        first_name: firstName,
+        last_name: lastName,
+        phone: phone,
+        country: countryCode,
+      });
+      showToast("¡Cambios guardados con éxito!", "success");
     } catch (err) {
       console.error("Error saving profile:", err);
       showToast("¡Cambios guardados localmente!", "success");
@@ -2052,16 +1762,11 @@ export default function PerfilUsuarioPage() {
         <div className="w-[80%] mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
           {/* Avatar gigante en el banner (clickable) */}
           <div className="relative group w-20 h-20 bg-brand-light border-4 border-white/20 rounded-full flex items-center justify-center shadow-lg overflow-hidden select-none">
-            {user?.photoUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={user.photoUrl}
-                alt="Foto de Perfil"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span className="text-white font-bold text-3xl">{firstName.charAt(0).toUpperCase()}</span>
-            )}
+            <UserAvatar
+              src={user?.photoUrl}
+              name={firstName + " " + lastName}
+              size="xl"
+            />
             {/* Hover overlay para cambiar foto */}
             <label className="absolute inset-0 bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center cursor-pointer text-[9px] font-bold">
               <span className="text-sm">📸</span>
@@ -2076,14 +1781,14 @@ export default function PerfilUsuarioPage() {
           </div>
 
           <div className="text-center md:text-left text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5">
-              {user?.role === ROLES.ADMIN || user?.role === ROLES.MODERATOR
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5 flex items-center justify-center md:justify-start gap-2 min-h-[16px]">
+              {isLoadingPartnerApp ? (
+                <span className="inline-block w-24 h-3 bg-white/20 rounded animate-pulse"></span>
+              ) : user?.role === ROLES.ADMIN || user?.role === ROLES.MODERATOR
                 ? "Panel de Administración"
-                : user?.role === ROLES.AGENCY
-                  ? "Panel de Agencia"
-                  : user?.role === ROLES.AGENT
-                    ? "Panel de Asesor"
-                    : "Panel del Aplicante"}
+                : (user?.role === ROLES.AGENT || user?.role === ROLES.AGENCY) && agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at)
+                  ? (user?.role === ROLES.AGENCY ? "Panel de Agencia" : "Panel de Asesor")
+                  : "Panel del Aplicante"}
             </p>
 
             <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
@@ -2123,83 +1828,144 @@ export default function PerfilUsuarioPage() {
 
             {/* Navegación Vertical */}
             <nav className="p-2 flex flex-col gap-1">
-              {(() => {
-                const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
-                const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
+              {isLoadingPartnerApp ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <div
+                    key={`sidebar-skeleton-${index}`}
+                    className="w-full flex items-center gap-3 px-4 py-3 animate-pulse"
+                  >
+                    <div className="w-4 h-4 bg-slate-100 rounded-full shrink-0"></div>
+                    <div className="h-4 bg-slate-100 rounded-md w-32"></div>
+                  </div>
+                ))
+              ) : (
+                (() => {
+                  const isAgent = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
+                  const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
 
-                // --- Tabs for agents / agencies ---
-                if (isAgent) {
-                  const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
+                  const svgIcons: Record<string, React.ReactNode> = {
+                    datos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+                    proceso: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>,
+                    vipro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
+                    asesor: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+                    pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
+                    admin_dashboard: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 13a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1v-6z" /></svg>,
+                    admin_socios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
+                    admin_usuarios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+                    admin_expedientes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>,
+                    admin_vipro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
+                    admin_pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
+                    mi_acreditacion: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
+                    panel_empresa: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+                    invitar_agentes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>,
+                    chat_agente: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>,
+                    comisiones: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+                    metodos_cobro: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+                    solicitud: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+                  };
 
-                  if (user.role === ROLES.AGENCY) {
-                    return [
-                      { id: "datos", label: "Personalizar Perfil", icon: "👤" },
-                      { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
-                      ...(isAccredited ? [
-                        { id: "panel_empresa", label: "Panel de Empresa", icon: "💻", isLink: true, url: "/agents/portal" },
-                        { id: "invitar_agentes", label: "Link de Referidos", icon: "🔗" },
-                        { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
-                      ] : []),
-                    ];
-                  } else {
-                    return [
-                      { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                      { id: "mi_acreditacion", label: isAccredited ? "Mi Acreditación 🏅" : "Acreditación Requerida ⚠️", icon: "🏅" },
-                      ...(isAccredited ? [
-                        { id: "chat_agente", label: "Chat con Clientes", icon: "💬" },
-                        { id: "comisiones", label: "Comisiones Realizadas", icon: "💰" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro", icon: "⚙️" },
-                      ] : []),
-                    ];
-                  }
-                }
-
-
-                // --- Tabs for admin / moderator ---
-                if (isStaff) {
-                  return [
-                    { id: "admin_dashboard", label: "Panel de Control Global", icon: "📊" },
-                    { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderación de Socios 🛡️" : "Administrar Socios y Agentes 🛠️", icon: "🤝" },
-                    { id: "admin_usuarios", label: "Gestión de Usuarios", icon: "👥" },
-                    { id: "admin_expedientes", label: "Monitor de Expedientes", icon: "📋" },
-                    { id: "admin_vipro", label: "Evaluaciones VIPRO", icon: "📈" },
-                    { id: "admin_pagos", label: "Historial de Pagos", icon: "💳" },
-                    { id: "datos", label: "Mis Datos Personales", icon: "👤" },
+                  const baseUserTabs = [
+                    { id: "datos", label: "Mis Datos Personales" },
+                    { id: "proceso", label: "Seguimiento de Trámite" },
+                    { id: "vipro", label: "Evaluación VIPRO" },
+                    { id: "asesor", label: "Mi Asesor Asignado" },
+                    { id: "pagos", label: "Pagos y Comprobantes" },
                   ];
-                }
 
+                  // --- Tabs for admin / moderator ---
+                  if (isStaff) {
+                    return [
+                      { id: "datos", label: "Mis Datos Personales" },
+                      { id: "admin_dashboard", label: "Panel de Control Global" },
+                      { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderación de Socios" : "Administrar Socios y Agentes" },
+                      { id: "admin_usuarios", label: "Gestión de Usuarios" },
+                      { id: "admin_expedientes", label: "Monitor de Expedientes" },
+                      { id: "admin_vipro", label: "Evaluaciones VIPRO" },
+                      { id: "admin_pagos", label: "Historial de Pagos" },
+                    ].map(t => ({ ...t, svgIcon: svgIcons[t.id] }));
+                  }
 
-                // --- Default tabs for regular users ---
-                return [
-                  { id: "datos", label: "Mis Datos Personales", icon: "👤" },
-                  { id: "proceso", label: "Seguimiento de Trámite", icon: "✈️" },
-                  { id: "vipro", label: "Evaluación VIPRO", icon: "📊" },
-                  { id: "asesor", label: "Mi Asesor Asignado", icon: "🤝" },
-                  { id: "pagos", label: "Pagos y Comprobantes", icon: "💳" },
-                  ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio", icon: "💼" }] : []),
-                ];
-              })().map((tab: { id: string; label: string; icon: string; isLink?: boolean; url?: string }) => (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    if (tab.isLink && tab.url) {
-                      router.push(tab.url);
-                    } else {
-                      handleTabChange(tab.id);
+                  // --- Tabs for agents / agencies ---
+                  if (isAgent) {
+                    const isAccredited = agentApp && (agentApp.status === "active" || agentApp.status === "approved") && Boolean(agentApp.signed_at);
+                    
+                    if (user.role === ROLES.AGENCY) {
+                      const agencyTabs: any[] = [
+                        { id: "datos", label: "Mis Datos Personales" }
+                      ];
+                      if (isAccredited) {
+                        agencyTabs.push(
+                          { id: "invitar_agentes", label: "Link de Referidos" },
+                          { id: "comisiones", label: "Comisiones Realizadas" },
+                          { id: "metodos_cobro", label: "Métodos de Cobro" }
+                        );
+                      }
+                      agencyTabs.push({ id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" });
+                      return agencyTabs.map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                     }
 
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${
-                    activeTab === tab.id
-                      ? "bg-brand-light text-brand-primary font-semibold"
-                      : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
-                  }`}
-                >
-                  <span className="text-base">{tab.icon}</span>
-                  <span>{tab.label}</span>
-                </button>
-              ))}
+                    // For standard Agent (advisor)
+                    const agentTabs: any[] = [
+                      { id: "datos", label: "Mis Datos Personales" }
+                    ];
+
+                    const isViproCompleted = Boolean(
+                      user.viproCompleted ||
+                      viproEvaluations.some((ev: any) => ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase())) ||
+                      (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+                    );
+
+                    const hasPurchases = dbPurchases.length > 0 || user.hasPaidAdvisor || user.hasPaidVipro || isViproCompleted;
+                    
+                    if (hasPurchases) {
+                      const hasViproPurchase = user.hasPaidVipro || isViproCompleted || dbPurchases.some((p: any) => p.product_type === "vipro");
+                      if (hasViproPurchase) {
+                        agentTabs.push({ id: "vipro", label: "Evaluación VIPRO" });
+                      }
+                      agentTabs.push({ id: "pagos", label: "Pagos y Comprobantes" });
+                    }
+
+                    if (isAccredited) {
+                      agentTabs.push(
+                        { id: "chat_agente", label: "Chat con Clientes" },
+                        { id: "comisiones", label: "Comisiones Realizadas" },
+                        { id: "metodos_cobro", label: "Métodos de Cobro" }
+                      );
+                    }
+
+                    // "Mi Acreditación" always at the very end
+                    agentTabs.push({ id: "mi_acreditacion", label: "Mi Acreditación" });
+
+                    return agentTabs.map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
+                  }
+
+                  // --- Default tabs for regular users ---
+                  return [
+                    ...baseUserTabs,
+                    ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
+                  ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
+                })().map((tab: { id: string; label: string; svgIcon?: React.ReactNode; isLink?: boolean; url?: string }) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      if (tab.isLink && tab.url) {
+                        router.push(tab.url);
+                      } else {
+                        handleTabChange(tab.id);
+                      }
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
+                        ? "bg-brand-light text-brand-primary font-semibold"
+                        : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
+                      }`}
+                  >
+                    <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"}`}>
+                      {tab.svgIcon || <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg>}
+                    </span>
+                    <span>{tab.label}</span>
+                  </button>
+                ))
+              )}
             </nav>
           </div>
         </aside>
@@ -2207,29 +1973,25 @@ export default function PerfilUsuarioPage() {
         {/* Columna Derecha: Contenido del Tab Activo */}
         <section className="w-full lg:w-3/4">
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
-
-            {/* UNACCREDITED AGENT / AGENCY ALERT BANNER */}
-            {user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (!agentApp || (agentApp.status !== "active" && agentApp.status !== "approved") || !agentApp.signed_at) && (
-              <div className="bg-amber-50 border border-amber-300 rounded-md p-4 mb-6 text-left shadow-xs flex items-start gap-3">
-                <span className="text-2xl">⚠️</span>
-                <div className="flex-1">
-                  <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Areditación Requerida para Operar</h3>
-                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                    Para habilitar todas tus funciones como <strong>{user.role === ROLES.AGENCY ? "Agencia" : "Asesor"}</strong> (enlaces de referidos, comisiones y panel comercial), debes contar con tu <strong>acreditación aprobada y firma de contrato digital completada</strong>.
-                  </p>
-                  <button
-                    onClick={() => setActiveTab("mi_acreditacion")}
-                    className="mt-3 px-4 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded transition-colors cursor-pointer border-none"
-                  >
-                    Completar Mi Acreditación →
-                  </button>
+            {isLoadingPartnerApp ? (
+              <div className="space-y-6 text-left animate-pulse">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-light pb-4">
+                  <div className="space-y-2">
+                    <div className="h-6 bg-slate-200 rounded-lg w-64"></div>
+                    <div className="h-4 bg-slate-100 rounded-lg w-80"></div>
+                  </div>
+                  <div className="h-10 bg-slate-200 rounded-lg w-24"></div>
+                </div>
+                <div className="space-y-4 pt-4">
+                  <div className="h-10 bg-slate-200 rounded-xl w-full"></div>
+                  <div className="h-10 bg-slate-100 rounded-xl w-full"></div>
+                  <div className="h-10 bg-slate-100 rounded-xl w-full"></div>
                 </div>
               </div>
-            )}
-
-
-            {/* TAB: DATOS PERSONALES */}
-            {activeTab === "datos" && (
+            ) : (
+              <>
+                {/* TAB: DATOS PERSONALES */}
+                {activeTab === "datos" && (
               <div>
                 <div className="mb-6 pb-4 border-b border-border-light">
                   <h2 className="text-lg font-bold text-text-primary">Datos Personales</h2>
@@ -2386,15 +2148,15 @@ export default function PerfilUsuarioPage() {
                           {hasPaidAdvisor
                             ? "Seguimiento de Trámite de Visa (Servicio Completo)"
                             : isViproOnly
-                            ? "Seguimiento de Evaluación VIPRO Express"
-                            : "Seguimiento de Trámite de Visa"}
+                              ? "Seguimiento de Evaluación VIPRO Express"
+                              : "Seguimiento de Trámite de Visa"}
                         </h2>
                         <p className="text-xs text-text-secondary mt-1">
                           {hasPaidAdvisor
                             ? "Monitorea el avance en tiempo real de tu expediente consular paso a paso."
                             : isViproOnly
-                            ? "Monitorea el estado de tu diagnóstico de perfilamiento consular."
-                            : "No has contratado un servicio aún. Selecciona una opción para activar tu línea de seguimiento."}
+                              ? "Monitorea el estado de tu diagnóstico de perfilamiento consular."
+                              : "No has contratado un servicio aún. Selecciona una opción para activar tu línea de seguimiento."}
                         </p>
                       </div>
                       <div className="flex items-center gap-3 bg-brand-light/60 border border-brand-primary/20 p-3 rounded-lg">
@@ -2424,7 +2186,7 @@ export default function PerfilUsuarioPage() {
                           {isViproCompleted ? "Completado" : hasVipro ? "Disponible" : "No Adquirido"}
                         </span>
                       </div>
-                      <h4 className="text-sm font-bold text-text-primary mb-1">Diagnóstico de Probabilidad Consular ($19.99 USD)</h4>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Diagnóstico de Probabilidad Consular (${viproPrice.toFixed(2)} USD)</h4>
                       <p className="text-xs text-text-secondary leading-relaxed mb-4">
                         Evaluación expres para analizar solvencia, arraigo y perfil de viabilidad.
                       </p>
@@ -2454,7 +2216,7 @@ export default function PerfilUsuarioPage() {
                           onClick={() => router.push("/vipro-form")}
                           className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer shadow-xs"
                         >
-                          Adquirir VIPRO por $19.99 USD &rarr;
+                          Adquirir VIPRO por ${viproPrice.toFixed(2)} USD &rarr;
                         </button>
                       )}
                     </div>
@@ -2469,7 +2231,7 @@ export default function PerfilUsuarioPage() {
                           {user.hasPaidAdvisor ? "Activo" : "No Adquirido"}
                         </span>
                       </div>
-                      <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento ($112.50 USD)</h4>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento (${(fullServicePrice * 0.75).toFixed(2)} USD)</h4>
                       <p className="text-xs text-text-secondary leading-relaxed mb-4">
                         Asesoría 1-a-1, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
                       </p>
@@ -2497,7 +2259,7 @@ export default function PerfilUsuarioPage() {
                           onClick={() => router.push("/agents")}
                           className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-sm hover:bg-brand-hover transition-colors cursor-pointer shadow-xs"
                         >
-                          Seleccionar Asesor ($112.50 USD) &rarr;
+                          Seleccionar Asesor (${(fullServicePrice * 0.75).toFixed(2)} USD) &rarr;
                         </button>
                       )}
 
@@ -2514,7 +2276,7 @@ export default function PerfilUsuarioPage() {
                       <div className="space-y-1.5 max-w-lg mx-auto">
                         <h3 className="text-base font-bold text-text-primary">Línea de Seguimiento No Activa</h3>
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Para habilitar los pasos interactivos de seguimiento en tu perfil, debes contratar la **Evaluación Diagnóstica VIPRO ($19.99 USD)** o la **Asesoría Consular Completa con Asesor ($112.50 USD)**.
+                          Para habilitar los pasos interactivos de seguimiento en tu perfil, debes contratar la **Evaluación Diagnóstica VIPRO ($${viproPrice.toFixed(2)} USD)** o la **Asesoría Consular Completa con Asesor (${(fullServicePrice * 0.75).toFixed(2)} USD)**.
                         </p>
                       </div>
                     </div>
@@ -2612,7 +2374,7 @@ export default function PerfilUsuarioPage() {
                           onClick={() => router.push("/agents")}
                           className="px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0"
                         >
-                          Seleccionar Asesor ($112.50 USD) &rarr;
+                          Seleccionar Asesor (${(fullServicePrice * 0.75).toFixed(2)} USD) &rarr;
                         </button>
                       </div>
                     </div>
@@ -2895,7 +2657,7 @@ export default function PerfilUsuarioPage() {
                         <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
                           <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
                             <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                              Paso 5: Programación de Cita y Simulacro Consular por Zoom
+                              Paso 5: Programación de Cita / Entrega Drop Box y Simulacro Consular por Zoom
                             </h4>
                             {expedienteStatus === 'approved' && (
                               <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
@@ -2904,7 +2666,9 @@ export default function PerfilUsuarioPage() {
                             )}
                           </div>
                           <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
-                            Asignación de fechas consulares en CAS / Embajada y entrenamiento de simulacro de entrevista por Zoom. Ponte en contacto con tu asesor por chat para coordinar las fechas de tu sesión en vivo.
+                            <strong>Primera Vez:</strong> Agendamiento de cita en CAS y Embajada con entrenamiento de simulacro por Zoom.<br />
+                            <strong>Renovación EE.UU. (Interview Waiver):</strong> Depósito de paquete en buzón CAS sin cita presencial ante cónsul (si vence &lt;48 meses).<br />
+                            <strong>Renovación México / Canadá / Australia / China:</strong> Flujo de cita regular o biométricos asistidos con alta seguridad de aprobación por historial positivo.
                           </p>
                           {expedienteStatus === 'approved' && (
                             <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
@@ -2912,7 +2676,7 @@ export default function PerfilUsuarioPage() {
                                 onClick={() => setActiveTab("asesor")}
                                 className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
                               >
-                                🎥 Colectar Fechas de Simulacro por Chat &rarr;
+                                🎥 Coordinar Fechas / Buzón por Chat &rarr;
                               </button>
                             </div>
                           )}
@@ -2925,9 +2689,9 @@ export default function PerfilUsuarioPage() {
                           6
                         </div>
                         <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                          <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención (Waiver)</h4>
+                          <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención de Entrevista (Drop Box)</h4>
                           <p className="text-xs text-text-muted leading-relaxed">
-                            Asistencia formal a tu cita de huellas/fotografía (CAS) y entrevista con el oficial consular o entrega de expediente físico en caso de renovación sin entrevista.
+                            Presentación formal a tu cita consular oficial (biométricos y entrevista) o entrega del sobre cerrado en buzón de courier para renovaciones sin entrevista de EE.UU.
                           </p>
                         </div>
                       </div>
@@ -3030,8 +2794,8 @@ export default function PerfilUsuarioPage() {
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-muted">Puntaje Consular</span>
                               <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase border ${(latestEval?.score || user.viproScore || 85) >= 80
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                  : "bg-amber-50 text-amber-800 border-amber-200"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-amber-50 text-amber-800 border-amber-200"
                                 }`}>
                                 {(latestEval?.score || user.viproScore || 85) >= 80 ? "Favorable" : "Revisión"}
                               </span>
@@ -3110,54 +2874,61 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="bg-gradient-to-b from-blue-50/60 via-white to-white rounded-2xl border border-blue-200 p-8 md:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.03)] text-left max-w-2xl mx-auto mt-4 animate-in fade-in slide-in-from-bottom duration-300">
-                      <div className="flex flex-col md:flex-row items-center md:items-start gap-6 mb-6">
-                        <div className="w-16 h-16 bg-brand-primary text-white rounded-2xl flex items-center justify-center text-3xl font-bold shadow-md shrink-0">
-                          📊
-                        </div>
-                        <div className="space-y-2 text-center md:text-left">
-                          <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full">
-                            Inteligencia Consular Predictiva
-                          </span>
-                          <h3 className="font-serif font-bold text-text-primary text-2xl">
-                            Habilita tu Evaluación Diagnóstica VIPRO
-                          </h3>
-                          <p className="text-xs text-text-secondary leading-relaxed">
-                            Conoce tu nivel de riesgo y tu puntaje de viabilidad consular de 0 a 100 puntos antes de iniciar cualquier solicitud oficial de visa.
-                          </p>
-                        </div>
-                      </div>
+                    <div className="bg-white rounded-xl border border-border-light shadow-sm text-left max-w-2xl mx-auto mt-4 overflow-hidden animate-in fade-in slide-in-from-bottom duration-300">
+                      {/* Top bar accent */}
+                      <div className="h-1 w-full bg-[#113E5F]" />
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8 bg-white border border-blue-100 rounded-xl p-4">
-                        <div className="flex items-start gap-2 text-xs text-text-primary">
-                          <span className="text-emerald-600 font-bold">✓</span>
-                          <span><strong>Scoring Consular (0-100 pts)</strong> de lazo laboral y bancario.</span>
+                      <div className="p-7 md:p-8">
+                        {/* Header */}
+                        <div className="flex items-start gap-4 mb-6">
+                          <div className="w-11 h-11 bg-[#EFF6FF] rounded-lg flex items-center justify-center flex-shrink-0">
+                            <svg className="w-6 h-6 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#113E5F] opacity-70">
+                              Inteligencia Consular Predictiva
+                            </span>
+                            <h3 className="font-bold text-text-primary text-lg leading-snug mt-0.5">
+                              Habilita tu Evaluación Diagnóstica VIPRO
+                            </h3>
+                            <p className="text-xs text-text-secondary leading-relaxed mt-1.5">
+                              Conoce tu puntaje de viabilidad consular de 0 a 100 puntos antes de iniciar cualquier solicitud oficial de visa.
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex items-start gap-2 text-xs text-text-primary">
-                          <span className="text-emerald-600 font-bold">✓</span>
-                          <span><strong>Detección de Riesgos 214(b)</strong> de rechazo consular.</span>
-                        </div>
-                        <div className="flex items-start gap-2 text-xs text-text-primary">
-                          <span className="text-emerald-600 font-bold">✓</span>
-                          <span><strong>Checklist Probatorio</strong> de documentos sugeridos.</span>
-                        </div>
-                        <div className="flex items-start gap-2 text-xs text-text-primary">
-                          <span className="text-emerald-600 font-bold">✓</span>
-                          <span><strong>Diagnóstico Inmediato</strong> con recomendaciones claras.</span>
-                        </div>
-                      </div>
 
-                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-border-light">
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Precio Único</span>
-                          <span className="text-2xl font-extrabold text-brand-primary font-mono">$19.99 USD</span>
+                        {/* Features — 2 col inline list */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2.5 gap-x-6 mb-7">
+                          {[
+                            "Scoring Consular (0–100 pts) de lazo laboral y bancario",
+                            "Detección de Riesgos 214(b) de rechazo consular",
+                            "Checklist Probatorio de documentos sugeridos",
+                            "Diagnóstico Inmediato con recomendaciones claras",
+                          ].map((item) => (
+                            <div key={item} className="flex items-start gap-2 text-xs text-text-secondary">
+                              <svg className="w-3.5 h-3.5 text-[#113E5F] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span>{item}</span>
+                            </div>
+                          ))}
                         </div>
-                        <button
-                          onClick={() => router.push("/vipro-form")}
-                          className="w-full sm:w-auto px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all focus:outline-none shadow-sm text-center cursor-pointer font-sans"
-                        >
-                          Adquirir Evaluación VIPRO ($19.99 USD) &rarr;
-                        </button>
+
+                        {/* Footer: price + CTA */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-5 border-t border-border-light">
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">Precio Único</span>
+                            <span className="text-xl font-extrabold text-[#113E5F] font-mono">${viproPrice.toFixed(2)} USD</span>
+                          </div>
+                          <button
+                            onClick={() => router.push("/vipro-form")}
+                            className="w-full sm:w-auto px-6 py-2.5 bg-[#113E5F] hover:bg-[#0f3755] text-white text-xs font-bold rounded-sm transition-all focus:outline-none shadow-sm text-center cursor-pointer font-sans tracking-wide"
+                          >
+                            Adquirir Evaluación VIPRO &rarr;
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3187,7 +2958,7 @@ export default function PerfilUsuarioPage() {
                           Has contratado los servicios globales de nuestra agencia. El equipo de directores de <strong>Agency with Agent</strong> está revisando tu expediente y tu Evaluación VIPRO para asignarte el asesor especialista idóneo según tu perfil.
                         </p>
                       </div>
-                      
+
                       <div className="w-full bg-[#FAF9F6] border border-border-light rounded-2xl p-6 text-left space-y-4">
                         <h4 className="font-bold text-text-primary text-sm">Estado de tu Asignación:</h4>
                         <div className="flex items-center gap-3">
@@ -3330,8 +3101,8 @@ export default function PerfilUsuarioPage() {
                                     )}
                                     <div className="flex flex-col">
                                       <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
-                                          ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
-                                          : "bg-white border border-border-light text-text-primary rounded-tl-none"
+                                        ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
+                                        : "bg-white border border-border-light text-text-primary rounded-tl-none"
                                         }`}>
                                         <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
                                       </div>
@@ -3465,8 +3236,8 @@ export default function PerfilUsuarioPage() {
                                     </td>
                                     <td className="py-4 px-4">
                                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${isFavorable
-                                          ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                          : "bg-amber-50 text-amber-800 border-amber-100"
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                        : "bg-amber-50 text-amber-800 border-amber-100"
                                         }`}>
                                         {isFavorable ? "FAVORABLE" : "REVISIÓN"}
                                       </span>
@@ -3497,57 +3268,77 @@ export default function PerfilUsuarioPage() {
             )}
 
             {/* TAB: PAGOS Y COMPROBANTES */}
-            {activeTab === "pagos" && (
-              <div>
-                <div className="mb-6 pb-4 border-b border-border-light">
-                  <h2 className="text-lg font-bold text-text-primary">Historial de Transacciones</h2>
-                  <p className="text-xs text-text-secondary mt-1">Revisa el detalle de tus compras de servicios y descarga tus comprobantes.</p>
-                </div>
+            {activeTab === "pagos" && (() => {
+              const actualPurchases: any[] = [];
+              if (user.hasPaidVipro) {
+                actualPurchases.push({
+                  id: "purch-vipro",
+                  reference_id: "TV-VIPRO-8429",
+                  product_type: "vipro",
+                  payment_method: "Tarjeta",
+                  created_at: new Date().toISOString(),
+                  amount: String(viproPrice),
+                  status: "completed"
+                });
+              }
+              if (user.hasPaidAdvisor) {
+                actualPurchases.push({
+                  id: "purch-advisor",
+                  reference_id: "TV-ASES-3820",
+                  product_type: "advisor",
+                  payment_method: "Tarjeta",
+                  created_at: new Date().toISOString(),
+                  amount: String(fullServicePrice * 0.75),
+                  status: "completed"
+                });
+              }
+              return (
+                <div>
+                  <div className="mb-6 pb-4 border-b border-border-light">
+                    <h2 className="text-lg font-bold text-text-primary">Historial de Transacciones</h2>
+                    <p className="text-xs text-text-secondary mt-1">Revisa el detalle de tus compras de servicios y descarga tus comprobantes.</p>
+                  </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
-                        <th className="py-3 px-4">Referencia</th>
-                        <th className="py-3 px-4">Concepto</th>
-                        <th className="py-3 px-4">Fecha</th>
-                        <th className="py-3 px-4">Monto</th>
-                        <th className="py-3 px-4">Estado</th>
-                        <th className="py-3 px-4 text-right">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border-light text-xs">
-                      {dbPurchases.length > 0 ? (
-                        dbPurchases.map((purchase) => {
-                          const isViproItem = purchase.product_type === "vipro";
-                          return (
-                            <tr key={purchase.id} className="hover:bg-background-main/20 transition-colors">
-                              <td className="py-4 px-4 font-mono font-medium text-text-primary">{purchase.reference_id}</td>
-                              <td className="py-4 px-4">
-                                <div>
-                                  <p className="font-bold text-text-primary">
-                                    {isViproItem ? "Evaluación VIPRO Diagnóstica" : "Asesoría de Visa Premium (Completa)"}
-                                  </p>
-                                  <p className="text-[10px] text-text-secondary">Método: {purchase.payment_method}</p>
-                                </div>
-                              </td>
-                              <td className="py-4 px-4 text-text-secondary">
-                                {new Date(purchase.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
-                              </td>
-                              <td className="py-4 px-4 font-bold text-text-primary">
-                                ${parseFloat(purchase.amount).toFixed(2)} USD
-                              </td>
-                              <td className="py-4 px-4">
-                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${purchase.status === "completed"
-                                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                    : "bg-amber-50 text-amber-800 border-amber-100"
-                                  }`}>
-                                  {purchase.status.toUpperCase()}
-                                </span>
-                              </td>
-                              <td className="py-4 px-4 text-right">
-                                {purchase.status === "completed" ? (
-                                  isViproItem ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
+                          <th className="py-3 px-4">Referencia</th>
+                          <th className="py-3 px-4">Concepto</th>
+                          <th className="py-3 px-4">Fecha</th>
+                          <th className="py-3 px-4">Monto</th>
+                          <th className="py-3 px-4">Estado</th>
+                          <th className="py-3 px-4 text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-light text-xs">
+                        {actualPurchases.length > 0 ? (
+                          actualPurchases.map((purchase) => {
+                            const isViproItem = purchase.product_type === "vipro";
+                            return (
+                              <tr key={purchase.id} className="hover:bg-background-main/20 transition-colors">
+                                <td className="py-4 px-4 font-mono font-medium text-text-primary">{purchase.reference_id}</td>
+                                <td className="py-4 px-4">
+                                  <div>
+                                    <p className="font-bold text-text-primary">
+                                      {isViproItem ? "Evaluación VIPRO Diagnóstica" : "Asesoría de Visa Premium (Completa)"}
+                                    </p>
+                                    <p className="text-[10px] text-text-secondary">Método: {purchase.payment_method}</p>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-4 text-text-secondary">
+                                  {new Date(purchase.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </td>
+                                <td className="py-4 px-4 font-bold text-text-primary">
+                                  ${parseFloat(purchase.amount).toFixed(2)} USD
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-100">
+                                    PAGADO
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-right">
+                                  {isViproItem ? (
                                     <button
                                       onClick={() => showToast("Generando PDF de factura...", "info")}
                                       className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
@@ -3561,117 +3352,36 @@ export default function PerfilUsuarioPage() {
                                     >
                                       Ver Chat
                                     </button>
-                                  )
-                                ) : (
-                                  <span className="text-text-muted italic">Pendiente</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <>
-                          {/* Fallback mock UI when DB has no purchases registered */}
-                          <tr className={user.hasPaidVipro || user.hasPaidAdvisor ? "" : "opacity-90"}>
-                            <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-VIPRO-8429</td>
-                            <td className="py-4 px-4">
-                              <div>
-                                <p className="font-bold text-text-primary">Evaluación VIPRO Diagnóstica</p>
-                                <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                            <td className="py-4 px-4 font-bold text-text-primary">$19.99 USD</td>
-                            <td className="py-4 px-4">
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidVipro || user.hasPaidAdvisor
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                  : "bg-amber-50 text-amber-800 border-amber-100"
-                                }`}>
-                                {user.hasPaidVipro || user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-right">
-                              {user.hasPaidVipro || user.hasPaidAdvisor ? (
-                                <button
-                                  onClick={() => showToast("Generando PDF de factura...", "info")}
-                                  className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
-                                >
-                                  Descargar
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setCheckoutProduct("vipro");
-                                    setCheckoutAgent(null);
-                                    setIsCheckoutOpen(true);
-                                  }}
-                                  className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                                >
-                                  Pagar
-                                </button>
-                              )}
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="py-8 px-4 text-center text-text-muted italic bg-background-main/10">
+                              No has realizado ningún pago todavía.
                             </td>
                           </tr>
-
-                          <tr className={user.hasPaidAdvisor ? "" : "opacity-90"}>
-                            <td className="py-4 px-4 font-mono font-medium text-text-primary">TV-ASES-3820</td>
-                            <td className="py-4 px-4">
-                              <div>
-                                <p className="font-bold text-text-primary">Asesoría de Visa Premium (Completa)</p>
-                                <p className="text-[10px] text-text-secondary">Destino: Estados Unidos</p>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 text-text-secondary">14 Jun, 2026</td>
-                            <td className="py-4 px-4 font-bold text-text-primary">
-                              {user.hasPaidAdvisor ? "$112.50 USD" : "$150.00 USD"}
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${user.hasPaidAdvisor
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                  : "bg-amber-50 text-amber-800 border-amber-100"
-                                }`}>
-                                {user.hasPaidAdvisor ? "PAGADO" : "PENDIENTE"}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-right">
-                              {user.hasPaidAdvisor ? (
-                                <button
-                                  onClick={() => setActiveTab("asesor")}
-                                  className="text-brand-primary hover:underline font-semibold"
-                                >
-                                  Ver Chat
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setCheckoutAgent(assignedAgent);
-                                    setCheckoutProduct("advisor");
-                                    setIsCheckoutOpen(true);
-                                  }}
-                                  className="bg-brand-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-sm hover:bg-brand-hover transition-colors shadow-sm cursor-pointer"
-                                >
-                                  Pagar
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        </>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-8 bg-brand-light/30 border border-brand-primary/10 rounded-md p-5 flex items-start gap-4">
-                  <span className="text-xl">💡</span>
-                  <div>
-                    <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
-                    <p className="text-[11px] text-text-secondary leading-relaxed">
-                      Como completaste tu evaluación VIPRO de $19.99 USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
-                    </p>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
+
+                  {actualPurchases.length > 0 && actualPurchases.some(p => p.product_type === "vipro") && (
+                    <div className="mt-8 bg-brand-light/30 border border-brand-primary/10 rounded-md p-5 flex items-start gap-4">
+                      <span className="text-xl">💡</span>
+                      <div>
+                        <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
+                        <p className="text-[11px] text-text-secondary leading-relaxed">
+                          Como completaste tu evaluación VIPRO de ${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* TAB: MI SOLICITUD DE SOCIO */}
             {activeTab === "solicitud" && (
@@ -3699,7 +3409,7 @@ export default function PerfilUsuarioPage() {
                     {/* Agency Profile Details */}
                     <div className="border border-border-light rounded-md p-6 bg-white text-left space-y-4 shadow-sm">
                       <h4 className="font-bold text-text-primary text-xs uppercase tracking-wider pb-2 border-b border-border-light">Información de la Empresa Respaldo</h4>
-                      
+
                       <div className="flex items-start gap-4">
                         {myAgency.photo_url || myAgency.avatar_url ? (
                           <img
@@ -3745,9 +3455,9 @@ export default function PerfilUsuarioPage() {
                   </div>
                 </div>
               ) : isLoadingAgencyInfo || isLoadingPartnerApp ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-                  <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-                  <span className="text-xs text-text-secondary font-medium">Cargando detalles de tu acreditación...</span>
+                <div className="space-y-4 py-4 animate-pulse">
+                  <div className="h-32 bg-gray-200 rounded-2xl w-full"></div>
+                  <div className="h-48 bg-gray-100 rounded-2xl w-full"></div>
                 </div>
               ) : partnerApp ? (
                 <div className="animate-fadeIn">
@@ -3757,12 +3467,12 @@ export default function PerfilUsuarioPage() {
                       <p className="text-xs text-text-secondary mt-1">Revisa el estado de tu postulación para unirte como agente consultor o agencia socia.</p>
                     </div>
                     <span className={`self-start sm:self-center text-xs font-bold px-3 py-1 rounded-full border ${partnerApp.status === "approved" || partnerApp.status === "active"
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                        : partnerApp.status === "rejected"
-                          ? "bg-red-50 text-red-700 border-red-100"
-                          : partnerApp.status === "pending"
-                            ? "bg-amber-50 text-amber-700 border-amber-100"
-                            : "bg-gray-50 text-gray-700 border-gray-200"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                      : partnerApp.status === "rejected"
+                        ? "bg-red-50 text-red-700 border-red-100"
+                        : partnerApp.status === "pending"
+                          ? "bg-amber-50 text-amber-700 border-amber-100"
+                          : "bg-gray-50 text-gray-700 border-gray-200"
                       }`}>
                       {partnerApp.status === "approved" || partnerApp.status === "active"
                         ? "✓ Aprobada"
@@ -3777,10 +3487,10 @@ export default function PerfilUsuarioPage() {
                   <div className="space-y-6">
                     {/* Status Banner */}
                     <div className={`p-4 rounded-md border text-left ${partnerApp.status === "approved" || partnerApp.status === "active"
-                        ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
-                        : partnerApp.status === "rejected"
-                          ? "bg-red-50/50 border-red-200 text-red-800"
-                          : "bg-amber-50/50 border-amber-200 text-amber-800"
+                      ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
+                      : partnerApp.status === "rejected"
+                        ? "bg-red-50/50 border-red-200 text-red-800"
+                        : "bg-amber-50/50 border-amber-200 text-amber-800"
                       }`}>
                       <h4 className="font-bold text-sm mb-1">
                         {partnerApp.status === "approved" || partnerApp.status === "active"
@@ -3820,7 +3530,7 @@ export default function PerfilUsuarioPage() {
                           <p><span className="text-text-secondary font-semibold">Correo de Contacto:</span> {partnerApp.email}</p>
                           <p><span className="text-text-secondary font-semibold">Teléfono:</span> {partnerApp.phone}</p>
                           <p><span className="text-text-secondary font-semibold">País de Residencia:</span> {partnerApp.country_residence}</p>
-                          <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {partnerApp.experience_years} años</p>
+                          <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {/^\d+$/.test(String(partnerApp.experience_years).trim()) ? `${partnerApp.experience_years} años` : partnerApp.experience_years}</p>
                         </div>
                       </div>
 
@@ -3902,8 +3612,8 @@ export default function PerfilUsuarioPage() {
                         key={filter.id}
                         onClick={() => setStatusFilter(filter.id)}
                         className={`px-3 py-1.5 text-[10px] font-bold rounded uppercase tracking-wider transition-all cursor-pointer ${statusFilter === filter.id
-                            ? "bg-brand-primary text-white shadow-sm"
-                            : "bg-gray-100 text-text-secondary hover:bg-gray-200"
+                          ? "bg-brand-primary text-white shadow-sm"
+                          : "bg-gray-100 text-text-secondary hover:bg-gray-200"
                           }`}
                       >
                         {filter.label}
@@ -3956,10 +3666,10 @@ export default function PerfilUsuarioPage() {
                                   </td>
                                   <td className="py-4 px-4">
                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${app.status === "approved" || app.status === "active"
-                                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                        : app.status === "rejected"
-                                          ? "bg-red-50 text-red-700 border-red-100"
-                                          : "bg-amber-50 text-amber-700 border-amber-100"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                      : app.status === "rejected"
+                                        ? "bg-red-50 text-red-700 border-red-100"
+                                        : "bg-amber-50 text-amber-700 border-amber-100"
                                       }`}>
                                       {app.status === "approved" || app.status === "active"
                                         ? "APROBADO"
@@ -4037,7 +3747,7 @@ export default function PerfilUsuarioPage() {
                             <p><span className="text-text-secondary font-semibold">Correo:</span> {selectedApp.email}</p>
                             <p><span className="text-text-secondary font-semibold">Teléfono:</span> {selectedApp.phone}</p>
                             <p><span className="text-text-secondary font-semibold">País Residencia:</span> {selectedApp.country_residence}</p>
-                            <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {selectedApp.experience_years} años</p>
+                            <p><span className="text-text-secondary font-semibold">Años de Experiencia:</span> {/^\d+$/.test(String(selectedApp.experience_years).trim()) ? `${selectedApp.experience_years} años` : selectedApp.experience_years}</p>
                             <p><span className="text-text-secondary font-semibold">Enlace Profesional/Sitio:</span> {selectedApp.linkedin ? <a href={selectedApp.linkedin} target="_blank" rel="noopener noreferrer" className="text-brand-primary hover:underline">{selectedApp.linkedin}</a> : "No provisto"}</p>
                           </div>
 
@@ -4080,7 +3790,7 @@ export default function PerfilUsuarioPage() {
                                 <div key={key} className="flex flex-col gap-1 py-2 border-b border-gray-100 last:border-0">
                                   <span className="font-bold text-text-secondary text-[10px] uppercase tracking-wider">{displayLabel}:</span>
                                   {url ? (
-                                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-bold hover:underline flex items-center gap-1 mt-0.5">
+                                    <a href={url} onClick={(e) => handleViewDocument(e, url)} className="text-brand-primary font-bold hover:underline flex items-center gap-1 mt-0.5 cursor-pointer">
                                       <span>📎</span>
                                       <span>Ver documento adjunto</span>
                                     </a>
@@ -4124,10 +3834,12 @@ export default function PerfilUsuarioPage() {
                 {/* SECURITY CONFIRMATION POPUP MODAL */}
                 {securityModalData && (
                   <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
-                    <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-border-light text-left space-y-5 animate-in zoom-in-95 duration-200">
+                    <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border border-border-light text-left space-y-5 animate-in zoom-in-95 duration-200">
                       <div className="flex items-center gap-3 border-b border-border-light pb-4">
-                        <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-lg flex-shrink-0">
-                          🔒
+                        <div className="w-10 h-10 rounded-lg bg-[#EFF6FF] text-[#113E5F] flex items-center justify-center flex-shrink-0">
+                          <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
                         </div>
                         <div>
                           <h3 className="font-bold text-text-primary text-base">Confirmar Cambio de Estado</h3>
@@ -4135,29 +3847,31 @@ export default function PerfilUsuarioPage() {
                         </div>
                       </div>
 
-                      <div className="bg-gray-50 border border-border-light/80 p-4 rounded-xl space-y-2.5 text-xs">
+                      <div className="bg-[#FAFAFA] border border-border-light p-4 rounded-lg space-y-2.5 text-xs">
                         <div className="flex justify-between">
                           <span className="text-text-secondary font-medium">Postulante / Entidad:</span>
                           <span className="font-bold text-text-primary">{securityModalData.app.full_name}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-text-secondary font-medium">Tipo de Solicitud:</span>
-                          <span className="font-semibold text-brand-primary">
-                            {securityModalData.app.documents?.partner_type === "b2b_agency" ? "🏢 Agencia" : "👤 Consultor Independiente"}
+                          <span className="font-semibold text-[#113E5F] flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d={securityModalData.app.documents?.partner_type === "b2b_agency" ? "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" : "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"} />
+                            </svg>
+                            {securityModalData.app.documents?.partner_type === "b2b_agency" ? "Agencia" : "Consultor Independiente"}
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-text-secondary font-medium">Estado Actual:</span>
                           <span className="uppercase font-bold text-text-muted">{securityModalData.app.status || "Pendiente"}</span>
                         </div>
-                        <div className="flex justify-between pt-2 border-t border-gray-200">
+                        <div className="flex justify-between pt-2 border-t border-border-light">
                           <span className="text-text-secondary font-bold">Nuevo Estado Propuesto:</span>
-                          <span className={`uppercase font-black px-2 py-0.5 rounded text-[11px] ${
-                            securityModalData.targetAction === "approved"
-                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                              : "bg-red-100 text-red-800 border border-red-300"
-                          }`}>
-                            {securityModalData.targetAction === "approved" ? "✓ APROBADO" : "✕ RECHAZADO / OBSERVADO"}
+                          <span className={`uppercase font-black px-2 py-0.5 rounded text-[11px] border ${securityModalData.targetAction === "approved"
+                              ? "bg-[#EFF6FF] text-[#113E5F] border-[#113E5F]/20"
+                              : "bg-gray-100 text-gray-700 border-gray-300"
+                            }`}>
+                            {securityModalData.targetAction === "approved" ? "✓ APROBADO" : "✕ RECHAZADO"}
                           </span>
                         </div>
                       </div>
@@ -4169,19 +3883,19 @@ export default function PerfilUsuarioPage() {
                           value={adminNotesInput}
                           onChange={(e) => setAdminNotesInput(e.target.value)}
                           placeholder="Escribe comentarios u observaciones para el socio..."
-                          className="w-full text-xs p-3 border border-border-light rounded-lg focus:outline-none focus:border-brand-primary font-sans"
+                          className="w-full text-xs p-3 border border-border-light rounded-lg focus:outline-none focus:border-[#113E5F] font-sans"
                         />
                       </div>
 
-                      <div className="bg-amber-50/70 border border-amber-200 p-3 rounded-xl flex items-start gap-2 text-xs">
+                      <div className="bg-[#FAFAFA] border border-border-light p-3 rounded-lg flex items-start gap-2 text-xs">
                         <input
                           type="checkbox"
                           id="confirmSecurityCheck"
                           checked={securityConfirmed}
                           onChange={(e) => setSecurityConfirmed(e.target.checked)}
-                          className="mt-0.5 rounded text-brand-primary focus:ring-brand-primary cursor-pointer"
+                          className="mt-0.5 rounded text-[#113E5F] focus:ring-[#113E5F] cursor-pointer"
                         />
-                        <label htmlFor="confirmSecurityCheck" className="text-amber-900 font-medium cursor-pointer text-[11px] leading-tight select-none">
+                        <label htmlFor="confirmSecurityCheck" className="text-text-secondary font-medium cursor-pointer text-[11px] leading-tight select-none">
                           Entiendo que esta acción modificará los credenciales, permisos y estado del socio en la plataforma de manera inmediata.
                         </label>
                       </div>
@@ -4189,20 +3903,17 @@ export default function PerfilUsuarioPage() {
                       <div className="flex justify-end gap-3 pt-2">
                         <button
                           onClick={() => setSecurityModalData(null)}
-                          className="px-4 py-2 bg-gray-100 text-text-secondary text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+                          className="px-4 py-2 bg-white border border-border-light text-text-secondary text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
                         >
                           Cancelar
                         </button>
                         <button
                           disabled={!securityConfirmed || isSavingAdmin}
                           onClick={() => executeAdminAction(securityModalData.app.id, securityModalData.targetAction)}
-                          className={`px-5 py-2 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer ${
-                            !securityConfirmed || isSavingAdmin
+                          className={`px-5 py-2 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer ${!securityConfirmed || isSavingAdmin
                               ? "bg-gray-300 opacity-60 cursor-not-allowed"
-                              : securityModalData.targetAction === "approved"
-                                ? "bg-emerald-600 hover:bg-emerald-700"
-                                : "bg-red-600 hover:bg-red-700"
-                          }`}
+                              : "bg-[#113E5F] hover:bg-[#0f3755]"
+                            }`}
                         >
                           {isSavingAdmin ? "Procesando..." : "Confirmar Cambio de Estado"}
                         </button>
@@ -4221,70 +3932,88 @@ export default function PerfilUsuarioPage() {
                     <h2 className="text-xl font-bold text-text-primary">Panel de Control General del Sistema</h2>
                     <p className="text-xs text-text-secondary mt-1">Supervisión en tiempo real de operaciones, usuarios, expedientes e ingresos de TodoVisa.</p>
                   </div>
-                  <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-1.5 rounded-full text-xs font-bold shadow-xs">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                    <span>Sistema Supabase & PayPal Online</span>
-                  </div>
+
                 </div>
 
                 {/* KPI Metrics Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-gradient-to-br from-blue-50 to-white p-5 border border-blue-200 rounded-2xl shadow-xs">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Usuarios</span>
-                      <span className="text-2xl">👥</span>
+                  <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Usuarios</span>
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                      </div>
                     </div>
-                    <div className="text-2xl font-black text-text-primary font-mono">
+                    <div className="text-3xl font-black text-[#113E5F] font-mono">
                       {(allProfilesList.length + 1).toLocaleString()}
                     </div>
-                    <p className="text-[11px] text-text-secondary mt-1 font-medium">Clientes y Agentes en Supabase</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-medium">Clientes y Agentes Registrados</p>
                   </div>
 
-                  <div className="bg-gradient-to-br from-indigo-50 to-white p-5 border border-indigo-200 rounded-2xl shadow-xs">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">VIPRO</span>
-                      <span className="text-2xl">📊</span>
+                  <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">VIPRO</span>
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                        </svg>
+                      </div>
                     </div>
-                    <div className="text-2xl font-black text-text-primary font-mono">
+                    <div className="text-3xl font-black text-[#113E5F] font-mono">
                       {viproEvaluations.length.toLocaleString()}
                     </div>
-                    <p className="text-[11px] text-text-secondary mt-1 font-medium">Evaluaciones expres completadas</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-medium">Evaluaciones expres completadas</p>
                   </div>
 
-                  <div className="bg-gradient-to-br from-amber-50 to-white p-5 border border-amber-200 rounded-2xl shadow-xs">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded">Socios</span>
-                      <span className="text-2xl">🤝</span>
+                  <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Socios</span>
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                      </div>
                     </div>
-                    <div className="text-2xl font-black text-amber-900 font-mono">
-                      {allApplications.filter((a: any) => a.status === "pending").length} Pendientes
+                    <div className="text-3xl font-black text-[#113E5F] font-mono">
+                      {allApplications.filter((a: any) => a.status === "pending").length}
+                      <span className="text-base font-semibold text-text-muted ml-1">pendientes</span>
                     </div>
-
-                    <p className="text-[11px] text-amber-800 mt-1 font-medium">Solicitudes de agentes a evaluar</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-medium">Solicitudes de agentes a evaluar</p>
                   </div>
 
-                  <div className="bg-gradient-to-br from-emerald-50 to-white p-5 border border-emerald-200 rounded-2xl shadow-xs">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Ingresos</span>
-                      <span className="text-2xl">💰</span>
+                  <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Ingresos</span>
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
                     </div>
-                    <div className="text-2xl font-black text-emerald-700 font-mono">
+                    <div className="text-3xl font-black text-[#113E5F] font-mono">
                       ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <p className="text-[11px] text-emerald-800 mt-1 font-medium font-sans">USD procesados en Supabase</p>
+                    <p className="text-[11px] text-text-muted mt-1 font-medium">USD procesados</p>
                   </div>
-
                 </div>
 
                 {/* Direct Action Hub */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                   <button
                     onClick={() => setActiveTab("admin_socios")}
-                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-brand-primary hover:shadow-md transition-all cursor-pointer group"
+                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xl">🛠️</span>
-                      <span className="text-xs font-bold text-brand-primary group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                      </div>
+                      <svg className="w-4 h-4 text-[#113E5F] group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
                     </div>
                     <h4 className="text-sm font-bold text-text-primary">Administrar Solicitudes de Socios</h4>
                     <p className="text-xs text-text-secondary mt-1 leading-relaxed">
@@ -4294,11 +4023,17 @@ export default function PerfilUsuarioPage() {
 
                   <button
                     onClick={() => setActiveTab("admin_usuarios")}
-                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-brand-primary hover:shadow-md transition-all cursor-pointer group"
+                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xl">👥</span>
-                      <span className="text-xs font-bold text-brand-primary group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                      </div>
+                      <svg className="w-4 h-4 text-[#113E5F] group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
                     </div>
                     <h4 className="text-sm font-bold text-text-primary">Gestión de Usuarios y Roles</h4>
                     <p className="text-xs text-text-secondary mt-1 leading-relaxed">
@@ -4308,17 +4043,86 @@ export default function PerfilUsuarioPage() {
 
                   <button
                     onClick={() => setActiveTab("admin_expedientes")}
-                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-brand-primary hover:shadow-md transition-all cursor-pointer group"
+                    className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xl">📋</span>
-                      <span className="text-xs font-bold text-brand-primary group-hover:translate-x-1 transition-transform">&rarr;</span>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
+                        <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                      </div>
+                      <svg className="w-4 h-4 text-[#113E5F] group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
                     </div>
                     <h4 className="text-sm font-bold text-text-primary">Monitor de Expedientes Consulares</h4>
                     <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                      Supervisar preformularios completados, auditoría de formularios DS-160 y documentos en Supabase.
+                      Supervisar preformularios completados, auditoría de formularios DS-160 y documentos cargados.
                     </p>
                   </button>
+                </div>
+
+                {/* System Configuration Panel */}
+                <div className="bg-white p-6 border border-border-light rounded-2xl shadow-xs space-y-4">
+                  <div className="flex items-center gap-2 border-b border-border-light pb-3">
+                    <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    </svg>
+                    <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider">Configuración de Precios del Sistema</h3>
+                  </div>
+                  <div className="flex flex-col gap-4 max-w-md text-left">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                        Precio Asesoría Consular Completa ($ USD)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={fullServicePrice}
+                        onChange={(e) => setFullServicePrice(Number(e.target.value))}
+                        className="w-full text-xs px-3.5 py-2 border border-border-light rounded-lg focus:outline-none focus:border-[#113E5F] font-mono font-bold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                        Precio Evaluación VIPRO ($ USD)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={viproPrice}
+                        onChange={(e) => setViproPrice(Number(e.target.value))}
+                        className="w-full text-xs px-3.5 py-2 border border-border-light rounded-lg focus:outline-none focus:border-[#113E5F] font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-start">
+                    <button
+                      onClick={async () => {
+                        try {
+                          // Guardar en la base de datos de Supabase primero
+                          await SettingsClientService.updateSettings({
+                            vipro_price: String(viproPrice),
+                            full_service_price: String(fullServicePrice),
+                          });
+
+                          // Guardar en localStorage para reactividad local instantánea
+                          localStorage.setItem("fullServicePrice", String(fullServicePrice));
+                          localStorage.setItem("viproPrice", String(viproPrice));
+
+                          showToast(`Precios actualizados correctamente en base de datos. Asesoría: $${Number(fullServicePrice).toFixed(2)} USD, VIPRO: $${Number(viproPrice).toFixed(2)} USD.`, "success");
+                          window.dispatchEvent(new Event("storage"));
+                        } catch (err: any) {
+                          showToast(`Error al guardar precios en la base de datos: ${err.message || err}`, "error");
+                        }
+                      }}
+                      className="px-6 py-2 bg-[#113E5F] hover:bg-[#0f3755] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Guardar Precios
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -4340,16 +4144,32 @@ export default function PerfilUsuarioPage() {
                         <th className="py-3 px-4">Usuario / Email</th>
                         <th className="py-3 px-4">Rol en Sistema</th>
                         <th className="py-3 px-4">Estado</th>
-                        <th className="py-3 px-4 text-right">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border-light font-sans">
                       {(() => {
+                        if (isDataLoading) {
+                          return [1, 2, 3].map((i) => (
+                            <tr key={i} className="animate-pulse">
+                              <td className="py-3.5 px-4">
+                                <div className="h-4 bg-gray-200 rounded w-36 mb-1.5"></div>
+                                <div className="h-3 bg-gray-100 rounded w-24"></div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="h-5 bg-gray-200 rounded-full w-20"></div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="h-4 bg-gray-200 rounded w-14"></div>
+                              </td>
+                            </tr>
+                          ));
+                        }
+
                         if (!allProfilesList || allProfilesList.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={4} className="py-8 text-center text-text-muted italic">
-                                No se encontraron usuarios registrados en la tabla profiles de Supabase.
+                              <td colSpan={3} className="py-8 text-center text-text-muted italic">
+                                No se encontraron usuarios registrados en el sistema.
                               </td>
                             </tr>
                           );
@@ -4388,14 +4208,6 @@ export default function PerfilUsuarioPage() {
                               <td className="py-3.5 px-4">
                                 <span className="text-emerald-700 font-bold">Activo</span>
                               </td>
-                              <td className="py-3.5 px-4 text-right">
-                                <button
-                                  onClick={() => router.push(`/preformulario?userId=${pItem.id}`)}
-                                  className="text-brand-primary font-bold hover:underline"
-                                >
-                                  Inspeccionar &rarr;
-                                </button>
-                              </td>
                             </tr>
                           );
                         });
@@ -4415,7 +4227,7 @@ export default function PerfilUsuarioPage() {
                 <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-lg font-bold text-text-primary">Monitor de Expedientes Consulares y Documentos</h2>
-                    <p className="text-xs text-text-secondary mt-1">Revisión centralizada de preformularios, estado de DS-160 y archivos cargados en Supabase Storage.</p>
+                    <p className="text-xs text-text-secondary mt-1">Revisión centralizada de preformularios, estado de DS-160 y archivos cargados.</p>
                   </div>
                 </div>
 
@@ -4425,21 +4237,105 @@ export default function PerfilUsuarioPage() {
                       <tr>
                         <th className="py-3 px-4">Solicitante</th>
                         <th className="py-3 px-4">Preformulario</th>
-                        <th className="py-3 px-4">Documentos en Supabase Storage</th>
+                        <th className="py-3 px-4">Documentos Cargados</th>
                         <th className="py-3 px-4 text-center">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border-light font-sans">
-                      {allPreformulariosList && allPreformulariosList.length > 0 ? (
-                        allPreformulariosList.map((preform: any, idx: number) => {
-                          const userProf = preform.user_id ? dbProfilesMap[preform.user_id] : null;
-                          const clientName = preform.answers?.["0"] || preform.answers?.["Nombre completo"] || userProf?.name || preform.user_name || "Cliente Solicitante";
-                          const clientEmail = preform.user_email || userProf?.email || (preform.answers && typeof preform.answers === "object" ? preform.answers["email"] : null) || `usuario_${preform.user_id?.substring(0, 6)}@todovisa.com`;
-                          const userIdShort = preform.user_id ? preform.user_id.substring(0, 8) : "N/A";
-                          const isComp = preform.is_completed ?? true;
+                      {(() => {
+                        if (isDataLoading) {
+                          return [1, 2, 3].map((i) => (
+                            <tr key={i} className="animate-pulse">
+                              <td className="py-3.5 px-4">
+                                <div className="h-4 bg-gray-200 rounded w-40 mb-1.5"></div>
+                                <div className="h-3 bg-gray-100 rounded w-28"></div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="h-4 bg-gray-200 rounded w-36 mb-1.5"></div>
+                                <div className="h-4 bg-gray-100 rounded-full w-24"></div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="h-6 bg-gray-100 rounded w-48 font-mono"></div>
+                              </td>
+                              <td className="py-3.5 px-4 text-center">
+                                <div className="h-9 bg-gray-200 rounded-lg w-32 mx-auto"></div>
+                              </td>
+                            </tr>
+                          ));
+                        }
+
+                        const solicitudesMap = new Map<string, any>();
+
+                        // Add real preformularios (solicitudes de preformulario/asesoría consular)
+                        if (allPreformulariosList && Array.isArray(allPreformulariosList)) {
+                          allPreformulariosList.forEach((pf: any) => {
+                            if (pf.user_id) {
+                              solicitudesMap.set(pf.user_id, {
+                                id: pf.id,
+                                user_id: pf.user_id,
+                                type: "Preformulario Consular DS-160",
+                                is_completed: pf.is_completed ?? true,
+                                answers: pf.answers || pf.form_data || {},
+                                updated_at: pf.updated_at || pf.created_at,
+                                raw: pf,
+                              });
+                            }
+                          });
+                        }
+
+                        // Add Agent/Partner Applications (solicitudes de asesoría/socio)
+                        if (allApplications && Array.isArray(allApplications)) {
+                          allApplications.forEach((app: any) => {
+                            const uid = app.user_id || app.id;
+                            if (uid && !solicitudesMap.has(uid)) {
+                              solicitudesMap.set(uid, {
+                                id: app.id,
+                                user_id: uid,
+                                type: app.application_type === "agency" ? "Acreditación de Agencia" : "Solicitud de Asesor",
+                                status: app.status,
+                                is_completed: true,
+                                answers: app,
+                                documents: app.documents,
+                                updated_at: app.updated_at || app.created_at,
+                                raw: app,
+                              });
+                            }
+                          });
+                        }
+
+                        const solicitudes = Array.from(solicitudesMap.values());
+
+                        if (solicitudes.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={4} className="py-12 text-center text-text-muted italic">
+                                <div className="text-2xl mb-2">📋</div>
+                                <div className="font-bold text-text-primary text-sm">No hay solicitudes ni expedientes enviados actualmente.</div>
+                                <div className="text-xs text-text-secondary mt-1">Los expedientes aparecerán aquí únicamente cuando los clientes completen y envíen su preformulario o evaluación.</div>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return solicitudes.map((sol: any, idx: number) => {
+                          const userProf = sol.user_id ? dbProfilesMap[sol.user_id] || dbProfilesMap[String(sol.user_id).toLowerCase()] : null;
+                          const fullUser = allProfilesList.find((p: any) => p.id === sol.user_id);
+                          const clientName = fullUser ? `${fullUser.first_name || ""} ${fullUser.last_name || ""}`.trim() || fullUser.email || "Cliente Solicitante" : (userProf?.name || sol.answers?.["0"] || sol.answers?.full_name || "Cliente Solicitante");
+                          
+                          const emailFromAnswers = sol.answers && typeof sol.answers === "object"
+                            ? (Object.values(sol.answers).find((v: any) => typeof v === "string" && v.includes("@") && v.includes(".")) as string)
+                            : null;
+
+                          const rawEmail = fullUser?.email || userProf?.email || sol.answers?.user_email || sol.answers?.email || sol.user_email || emailFromAnswers;
+                          const clientEmail = rawEmail || (clientName && clientName !== "Cliente Solicitante"
+                            ? `${clientName.toLowerCase().trim().replace(/[^a-z0-9]/g, ".")}@gmail.com`
+                            : "cliente@todovisa.com");
+
+                          const userIdShort = sol.user_id ? String(sol.user_id).substring(0, 8) : "N/A";
+                          const isComp = sol.is_completed ?? true;
 
                           return (
-                            <tr key={preform.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                            <tr key={sol.id || idx} className="hover:bg-gray-50/80 transition-colors">
                               <td className="py-3.5 px-4 font-semibold">
                                 <div className="text-sm font-bold text-text-primary">{clientName}</div>
                                 <div className="text-[11px] text-text-muted font-normal">{clientEmail}</div>
@@ -4450,16 +4346,17 @@ export default function PerfilUsuarioPage() {
                                 </div>
                               </td>
                               <td className="py-3.5 px-4">
-                                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${isComp ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
+                                <div className="font-bold text-text-primary text-xs">{sol.type}</div>
+                                <span className={`inline-block mt-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${isComp ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
                                   {isComp ? "COMPLETADO (100%)" : "EN PROGRESO"}
                                 </span>
                               </td>
                               <td className="py-3.5 px-4 text-xs font-mono">
-                                Bucket <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{userIdShort}</code>
+                                <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{userIdShort}</code>
                               </td>
                               <td className="py-3.5 px-4 text-center">
                                 <button
-                                  onClick={() => router.push(`/preformulario?userId=${preform.user_id}&preformId=${preform.id}`)}
+                                  onClick={() => router.push(`/profile/dossier/${sol.user_id || sol.id}`)}
                                   className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm inline-flex items-center gap-1.5"
                                 >
                                   <span>Auditar Expediente</span>
@@ -4468,51 +4365,8 @@ export default function PerfilUsuarioPage() {
                               </td>
                             </tr>
                           );
-                        })
-                      ) : allProfilesList && allProfilesList.length > 0 ? (
-                        allProfilesList.map((prof: any, idx: number) => {
-                          const profName = `${prof.first_name || ""} ${prof.last_name || ""}`.trim() || prof.email || "Cliente Solicitante";
-                          const profEmail = prof.email || `usuario_${prof.id?.substring(0, 6)}@todovisa.com`;
-                          const profIdShort = prof.id ? prof.id.substring(0, 8) : "N/A";
-
-                          return (
-                            <tr key={prof.id || idx} className="hover:bg-gray-50/80 transition-colors">
-                              <td className="py-3.5 px-4 font-semibold">
-                                <div className="text-sm font-bold text-text-primary">{profName}</div>
-                                <div className="text-[11px] text-text-muted font-normal">{profEmail}</div>
-                                <div className="mt-1">
-                                  <span className="text-[9px] font-mono text-text-muted bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                                    ID: {profIdShort}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="py-3.5 px-4">
-                                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-200">
-                                  COMPLETADO (100%)
-                                </span>
-                              </td>
-                              <td className="py-3.5 px-4 text-xs font-mono">
-                                Bucket <code className="bg-gray-100 px-1.5 py-0.5 rounded text-brand-primary font-bold border border-gray-200">todovisa/expedientes/{profIdShort}</code>
-                              </td>
-                              <td className="py-3.5 px-4 text-center">
-                                <button
-                                  onClick={() => router.push(`/preformulario?userId=${prof.id}`)}
-                                  className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm inline-flex items-center gap-1.5"
-                                >
-                                  <span>Auditar Expediente</span>
-                                  <span>&rarr;</span>
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={4} className="py-8 text-center text-text-secondary italic">
-                            No hay expedientes de preformulario registrados por clientes en la plataforma.
-                          </td>
-                        </tr>
-                      )}
+                        });
+                      })()}
                     </tbody>
 
 
@@ -4623,7 +4477,7 @@ export default function PerfilUsuarioPage() {
                         <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-948271</td>
                         <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
                         <td className="py-3.5 px-4">Evaluación Diagnóstica VIPRO</td>
-                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">$19.99 USD</td>
+                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">${viproPrice.toFixed(2)} USD</td>
                         <td className="py-3.5 px-4">
                           <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
                         </td>
@@ -4632,7 +4486,7 @@ export default function PerfilUsuarioPage() {
                         <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-827410</td>
                         <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
                         <td className="py-3.5 px-4">Servicio Completo con Asesor Acreditado</td>
-                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">$112.50 USD</td>
+                        <td className="py-3.5 px-4 font-extrabold text-emerald-700">${(fullServicePrice * 0.75).toFixed(2)} USD</td>
                         <td className="py-3.5 px-4">
                           <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
                         </td>
@@ -4680,35 +4534,25 @@ export default function PerfilUsuarioPage() {
                               setSelectedClientProfile(null);
                               setAgentChatMessages([]);
                               loadAgentChatMessages(client.client_id);
-                              
+
                               // Load profile information of the client
-                              supabase
-                                .from("profiles")
-                                .select("first_name, last_name, photo_url, bio, phone, location")
-                                .eq("id", client.client_id)
-                                .maybeSingle()
-                                .then(({ data }) => {
-                                  if (data) setSelectedClientProfile(data);
-                                });
+                              ProfileClientService.getProfile(client.client_id)
+                                .then((res) => {
+                                  if (res?.profile) setSelectedClientProfile(res.profile);
+                                })
+                                .catch(() => null);
                             }}
-                            className={`w-full text-left p-3 transition-colors focus:outline-none ${
-                              selectedClient?.id === client.id
+                            className={`w-full text-left p-3 transition-colors focus:outline-none ${selectedClient?.id === client.id
                                 ? "bg-brand-light border-l-2 border-brand-primary"
                                 : "hover:bg-white"
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center gap-2.5">
-                              {client.photo_url ? (
-                                <img
-                                  src={client.photo_url}
-                                  alt={client.client_name || "Cliente"}
-                                  className="w-8 h-8 rounded-full object-cover border border-border-light flex-shrink-0"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-xs flex-shrink-0">
-                                  {(client.client_name || "?").charAt(0).toUpperCase()}
-                                </div>
-                              )}
+                              <UserAvatar
+                                src={client.photo_url}
+                                name={client.first_name ? `${client.first_name} ${client.last_name || ""}` : client.client_name}
+                                size="sm"
+                              />
                               <div className="min-w-0">
                                 <p className="text-xs font-semibold text-text-primary truncate">
                                   {client.first_name ? `${client.first_name} ${client.last_name || ""}`.trim() : (client.client_name || "Cliente")}
@@ -4774,15 +4618,14 @@ export default function PerfilUsuarioPage() {
                                 agentChatMessages.map((msg) => (
                                   <div
                                     key={msg.id}
-                                    className={`flex ${ msg.sender === "agent" ? "justify-end" : "justify-start" }`}
+                                    className={`flex ${msg.sender === "agent" ? "justify-end" : "justify-start"}`}
                                   >
-                                    <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
-                                      msg.sender === "agent"
+                                    <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${msg.sender === "agent"
                                         ? "bg-brand-primary text-white rounded-br-sm"
                                         : "bg-white border border-border-light text-text-primary rounded-bl-sm"
-                                    }`}>
+                                      }`}>
                                       <p>{msg.text}</p>
-                                      <p className={`text-[9px] mt-1 ${ msg.sender === "agent" ? "text-white/60" : "text-text-muted" }`}>
+                                      <p className={`text-[9px] mt-1 ${msg.sender === "agent" ? "text-white/60" : "text-text-muted"}`}>
                                         {msg.timestamp.toLocaleTimeString("es-SV", { hour: "2-digit", minute: "2-digit" })}
                                       </p>
                                     </div>
@@ -4892,15 +4735,14 @@ export default function PerfilUsuarioPage() {
                           <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Folio de Postulación</span>
                           <h3 className="text-base font-mono font-bold text-text-primary mt-0.5">{agentApp.application_id}</h3>
                         </div>
-                        <span className={`px-3 py-1 rounded-sm text-xs font-bold uppercase ${
-                          agentApp.status === "active"
+                        <span className={`px-3 py-1 rounded-sm text-xs font-bold uppercase ${agentApp.status === "active"
                             ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                             : agentApp.status === "approved"
-                            ? "bg-blue-50 text-blue-700 border border-blue-200"
-                            : agentApp.status === "rejected"
-                            ? "bg-red-50 text-red-700 border border-red-200"
-                            : "bg-amber-50 text-amber-700 border border-amber-200"
-                        }`}>
+                              ? "bg-blue-50 text-blue-700 border border-blue-200"
+                              : agentApp.status === "rejected"
+                                ? "bg-red-50 text-red-700 border border-red-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                          }`}>
                           {agentApp.status === "active" ? "ACTIVA" : agentApp.status === "approved" ? "APROBADA" : agentApp.status === "rejected" ? "RECHAZADA" : "PENDIENTE DE REVISIÓN"}
                         </span>
                       </div>
@@ -4924,33 +4766,101 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
+                    {/* Documentos Presentados */}
+                    <div className="border border-border-light rounded-sm p-6 bg-white space-y-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Documentos Presentados</h3>
+                        <p className="text-xs text-text-secondary">Expediente de acreditación adjunto al folio.</p>
+                      </div>
+
+                      <div className="space-y-3.5 text-xs text-text-primary">
+                        {agentApp.documents && Object.entries(agentApp.documents).map(([key, val]) => {
+                          const docUrl = typeof val === 'string' ? val : (val as any)?.url;
+                          const hasDoc = !!docUrl;
+                          const isValidUrl = hasDoc && (docUrl.startsWith("http://") || docUrl.startsWith("https://") || docUrl.startsWith("/"));
+                          const displayLabel = key === "dui" ? "Documento Identidad (DUI)"
+                            : key === "certificacion" ? "Certificación Profesional"
+                              : key === "antecedentes" ? "Antecedentes Penales"
+                                : key === "domicilio" ? "Comprobante de Domicilio"
+                                  : key === "titulo" ? "Título Profesional / Brochure"
+                                    : key === "cv" ? "Currículum Vitae (CV)"
+                                      : key.toUpperCase();
+
+                          return (
+                            <div key={key} className="flex justify-between items-center border-b border-border-light pb-2 last:border-0 last:pb-0">
+                              <span className="font-semibold text-text-secondary">{displayLabel}</span>
+                              {hasDoc ? (
+                                isValidUrl ? (
+                                  <a
+                                    href={docUrl}
+                                    onClick={(e) => handleViewDocument(e, docUrl)}
+                                    className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline cursor-pointer"
+                                  >
+                                    Ver Documento ✓
+                                  </a>
+                                ) : (
+                                  <span className="text-[10px] text-emerald-600 font-bold">Cargado ✓</span>
+                                )
+                              ) : (
+                                <span className="text-[10px] text-text-muted">No presentado</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     {/* Firma / Commercial agreement */}
-                    {agentApp.status === "approved" && !agentApp.signed_at && (
-                      <div className="border border-amber-200 rounded-sm p-6 bg-amber-50 space-y-4">
+                    {(agentApp.status === "approved" || agentApp.status === "pending") && !agentApp.signed_at && (
+                      <div className={`border rounded-sm p-6 space-y-4 bg-white ${agentApp.status === "approved"
+                          ? "border-amber-200"
+                          : "border-border-light"
+                        }`}>
                         <div>
-                          <h3 className="text-sm font-bold text-amber-900">⚠️ Firma de Acuerdo Comercial Pendiente</h3>
-                          <p className="text-xs text-amber-700 mt-1">Tu postulación ha sido aprobada. Para activar tu cuenta y comenzar a gestionar casos, debes firmar el acuerdo de adhesión comercial.</p>
+                          <h3 className={`text-sm font-bold ${agentApp.status === "approved" ? "text-amber-900" : "text-text-primary"
+                            }`}>
+                            {agentApp.status === "approved"
+                              ? "Firma de Acuerdo Comercial Pendiente"
+                              : "Contrato de Adhesión Comercial"}
+                          </h3>
+                          <p className="text-xs text-text-secondary mt-1">
+                            {agentApp.status === "approved"
+                              ? "Tu postulación ha sido aprobada. Para activar tu cuenta y comenzar a gestionar casos, debes firmar el acuerdo de adhesión comercial."
+                              : "El acuerdo de adhesión comercial estará disponible para revisión y firma digital una vez que tu expediente de postulación sea aprobado por la administración de TodoVisa."}
+                          </p>
                         </div>
                         <form onSubmit={handleSignAgreementInline} className="space-y-3">
-                          <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-800 mb-1">
-                              Firma con tu nombre completo (tal como aparece en el folio)
+                          <div className={agentApp.status === "pending" ? "opacity-60" : ""}>
+                            <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${agentApp.status === "approved" ? "text-amber-800" : "text-text-secondary"
+                              }`}>
+                              Firma Digital (Nombre Completo)
                             </label>
                             <input
                               type="text"
-                              required
+                              required={agentApp.status === "approved"}
+                              disabled={agentApp.status === "pending"}
                               value={signatureName}
                               onChange={(e) => setSignatureName(e.target.value)}
-                              placeholder="Escribe tu nombre completo para firmar"
-                              className="w-full px-3 py-2 bg-white border border-amber-300 rounded-sm text-sm focus:border-amber-500 focus:outline-none transition-all text-text-primary"
+                              placeholder={
+                                agentApp.status === "pending"
+                                  ? "Disponible al aprobarse la postulación"
+                                  : "Escribe tu nombre completo para firmar"
+                              }
+                              className={`w-full px-3 py-2 border rounded-sm text-sm focus:outline-none transition-all text-text-primary ${agentApp.status === "approved"
+                                  ? "bg-white border-amber-300 focus:border-amber-500"
+                                  : "bg-background-main border-border-light cursor-not-allowed text-text-muted"
+                                }`}
                             />
                           </div>
                           <button
                             type="submit"
-                            disabled={isSigning}
-                            className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center gap-2"
+                            disabled={isSigning || agentApp.status === "pending"}
+                            className={`px-5 py-2 text-white text-xs font-bold rounded-sm transition-all border-none flex items-center gap-2 ${agentApp.status === "approved"
+                                ? "bg-amber-600 hover:bg-amber-700 cursor-pointer"
+                                : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                              }`}
                           >
-                            {isSigning ? "Firmando..." : "✍️ Firmar Acuerdo Comercial"}
+                            {isSigning ? "Firmando..." : agentApp.status === "pending" ? "Pendiente de Aprobación" : "Firmar Acuerdo Comercial"}
                           </button>
                         </form>
                       </div>
@@ -4972,35 +4882,53 @@ export default function PerfilUsuarioPage() {
             {/* TAB: COMISIONES REALIZADAS */}
             {activeTab === "comisiones" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
               <div className="animate-fadeIn">
-                <div className="mb-6 pb-4 border-b border-border-light">
+                <div className="mb-6 pb-4 border-b border-border-light text-left">
                   <h2 className="text-lg font-bold text-text-primary">Historial y Control de Comisiones</h2>
                   <p className="text-xs text-text-secondary mt-1">Revisa el detalle, tasa de comisiones y balances netos acumulados de tus expedientes cerrados.</p>
                 </div>
 
+                {/* Info Card explaining how commissions work */}
+                <div className="bg-brand-light/30 border border-brand-primary/10 rounded-sm p-5 mb-6 text-left space-y-2">
+                  <div className="flex items-center gap-2 text-brand-primary font-bold text-xs">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 111.085 1.085l-.04.02-.086.041a.25.25 0 00-.115.1l-.014.032m-3.56 3.85a9 9 0 1112.728 0M12 20.25a8.25 8.25 0 100-16.5 8.25 8.25 0 000 16.5z" />
+                    </svg>
+                    <span>¿Cómo funciona el esquema de comisiones?</span>
+                  </div>
+                  {user.role === ROLES.AGENCY ? (
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Como Agencia/Socio Comercial, recibes el <strong>30% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                    </p>
+                  )}
+                </div>
+
                 {/* Financial metrics */}
                 {(() => {
-                  const rate = user.role === ROLES.AGENCY ? 0.85 : 0.80;
-                  const gross = agentCommissions.filter(c => c.status === "paid").reduce((sum, c) => sum + (c.commission_amount || 0), 0);
-                  const share = gross * rate;
-                  const fee = share * 0.05;
-                  const net = share - fee;
+                  const rateLabel = user.role === ROLES.AGENCY ? "30% (Referido)" : "60% (Asesor)";
+                  const gross = agentCommissions.reduce((sum, c) => sum + (c.gross_amount || (user.role === ROLES.AGENCY ? c.commission_amount / 0.30 : c.commission_amount / 0.60) || 0), 0);
+                  const net = agentCommissions.reduce((sum, c) => sum + (c.commission_amount || 0), 0);
+                  const platformShare = gross - net;
                   return (
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
                       <div className="p-4 bg-background-main border border-border-light rounded-sm">
                         <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Facturación Bruta</span>
-                        <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)}</p>
+                        <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)} USD</p>
                       </div>
                       <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Tasa de Comisión</span>
-                        <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{(rate * 100).toFixed(0)}%</p>
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Esquema de Comisión</span>
+                        <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{rateLabel}</p>
                       </div>
                       <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Deducción TodoVisa (5%)</span>
-                        <p className="text-lg font-bold text-red-600 font-mono mt-1">-${fee.toFixed(2)}</p>
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Parte TodoVisa</span>
+                        <p className="text-lg font-bold text-text-secondary font-mono mt-1">${platformShare.toFixed(2)} USD</p>
                       </div>
                       <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
                         <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Liquidación Neta</span>
-                        <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)}</p>
+                        <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)} USD</p>
                       </div>
                     </div>
                   );
@@ -5037,13 +4965,12 @@ export default function PerfilUsuarioPage() {
                               <td className="py-3 text-text-secondary">{c.service_type}</td>
                               <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
                               <td className="py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
-                                  c.status === "paid"
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid"
                                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                                     : c.status === "processing"
-                                    ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                    : "bg-gray-100 text-gray-500"
-                                }`}>
+                                      ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                      : "bg-gray-100 text-gray-500"
+                                  }`}>
                                   {c.status === "paid" ? "Pagado" : c.status === "processing" ? "En Proceso" : "Pendiente"}
                                 </span>
                               </td>
@@ -5070,87 +4997,144 @@ export default function PerfilUsuarioPage() {
                     <div className="w-8 h-8 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
                   </div>
                 ) : (
-                  <form onSubmit={handleSavePayoutSettings} className="space-y-6 max-w-2xl">
-                    <div className="space-y-2">
+                  <form onSubmit={handleSavePayoutSettings} className="space-y-6 max-w-2xl text-left">
+                    <div className="space-y-3">
                       <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary">Método de Cobro</label>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <button
                           type="button"
                           onClick={() => setPayoutMethod('paypal')}
-                          className={`py-3 px-4 rounded-sm border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
-                            payoutMethod === 'paypal'
-                              ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
-                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
-                          }`}
+                          className={`group py-4 px-5 rounded-sm border text-xs font-bold transition-all text-left flex items-center justify-between cursor-pointer focus:outline-none ${payoutMethod === 'paypal'
+                              ? 'bg-brand-light/30 text-brand-primary border-brand-primary ring-2 ring-brand-primary/10 shadow-sm'
+                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30 hover:bg-white'
+                            }`}
                         >
-                          <span>💙</span><span>PayPal</span>
+                          <div className="flex items-center gap-3">
+                            <span className={`p-2 rounded-sm transition-colors ${payoutMethod === 'paypal' ? 'bg-brand-primary text-white' : 'bg-white border border-border-light text-text-secondary'}`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-6.18-11.25h16.86c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125H2.82c-.621 0-1.125-.504-1.125-1.125V3.87c0-.621.504-1.125 1.125-1.125z" />
+                              </svg>
+                            </span>
+                            <span className="font-bold text-text-primary text-xs">PayPal Express</span>
+                          </div>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${payoutMethod === 'paypal' ? 'border-brand-primary bg-brand-primary' : 'border-gray-300'}`}>
+                            {payoutMethod === 'paypal' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
                         </button>
+                        
                         <button
                           type="button"
                           onClick={() => setPayoutMethod('ach')}
-                          className={`py-3 px-4 rounded-sm border text-xs font-bold transition-all text-center flex items-center justify-center gap-2 cursor-pointer ${
-                            payoutMethod === 'ach'
-                              ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
-                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30'
-                          }`}
+                          className={`group py-4 px-5 rounded-sm border text-xs font-bold transition-all text-left flex items-center justify-between cursor-pointer focus:outline-none ${payoutMethod === 'ach'
+                              ? 'bg-brand-light/30 text-brand-primary border-brand-primary ring-2 ring-brand-primary/10 shadow-sm'
+                              : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/30 hover:bg-white'
+                            }`}
                         >
-                          <span>🏦</span><span>Transferencia ACH</span>
+                          <div className="flex items-center gap-3">
+                            <span className={`p-2 rounded-sm transition-colors ${payoutMethod === 'ach' ? 'bg-brand-primary text-white' : 'bg-white border border-border-light text-text-secondary'}`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-3.75h16.5M2.25 9l9.75-6 9.75 6m-18.75 3v6.75M5.25 12v6.75m4.5-6.75v6.75m3-6.75v6.75m4.5-6.75v6.75m3-6.75v6.75" />
+                              </svg>
+                            </span>
+                            <span className="font-bold text-text-primary text-xs">Transferencia ACH</span>
+                          </div>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${payoutMethod === 'ach' ? 'border-brand-primary bg-brand-primary' : 'border-gray-300'}`}>
+                            {payoutMethod === 'ach' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
                         </button>
                       </div>
                     </div>
-
+ 
                     {payoutMethod === 'paypal' ? (
-                      <div className="p-4 bg-background-main rounded-sm border border-border-light space-y-3">
+                      <div className="p-5 bg-background-main rounded-sm border border-border-light space-y-3">
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Correo Electrónico de PayPal</label>
-                        <input
-                          type="email"
-                          required
-                          value={paypalEmail}
-                          onChange={(e) => setPaypalEmail(e.target.value)}
-                          placeholder="correo@paypal.com"
-                          className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary"
-                        />
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                            </svg>
+                          </span>
+                          <input
+                            type="email"
+                            required
+                            value={paypalEmail}
+                            onChange={(e) => setPaypalEmail(e.target.value)}
+                            placeholder="correo@paypal.com"
+                            className="w-full pl-9 pr-3 py-2.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary"
+                          />
+                        </div>
                         <span className="text-[9px] text-text-muted block">Tus fondos se transferirán de inmediato a esta cuenta.</span>
                       </div>
                     ) : (
-                      <div className="p-4 bg-background-main rounded-sm border border-border-light space-y-4">
+                      <div className="p-5 bg-background-main rounded-sm border border-border-light space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Nombre del Banco</label>
-                            <input type="text" required value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Banco Agrícola, BAC, etc." className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-3.75h16.5M2.25 9l9.75-6 9.75 6m-18.75 3v6.75M5.25 12v6.75m4.5-6.75v6.75m3-6.75v6.75m4.5-6.75v6.75m3-6.75v6.75" />
+                                </svg>
+                              </span>
+                              <input type="text" required value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Banco Agrícola, BAC, etc." className="w-full pl-9 pr-3 py-2 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary" />
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Tipo de Cuenta</label>
-                            <select value={accountType} onChange={(e) => setAccountType(e.target.value)} className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary cursor-pointer h-[38px]">
-                              <option value="Ahorros">Ahorros</option>
-                              <option value="Corriente">Corriente</option>
-                            </select>
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.879c1.003 1.003 2.63 1.003 3.633 0L14 13.5a2.56 2.56 0 00-2-2.5h-.5a2.56 2.56 0 01-2-2.5L10 6.5a2.56 2.56 0 012-2.5h.5c.875 0 1.625.5 2 1.25" />
+                                </svg>
+                              </span>
+                              <select value={accountType} onChange={(e) => setAccountType(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary cursor-pointer h-[38px]">
+                                <option value="Ahorros">Ahorros</option>
+                                <option value="Corriente">Corriente</option>
+                              </select>
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Número de Cuenta</label>
-                            <input type="text" required value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Nº de cuenta bancaria" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </span>
+                              <input type="text" required value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Nº de cuenta bancaria" className="w-full pl-9 pr-3 py-2.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary" />
+                            </div>
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Código de Ruta / IBAN</label>
-                            <input type="text" required value={routingCode} onChange={(e) => setRoutingCode(e.target.value)} placeholder="Código bancario" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Identificación Tributaria / NIT / DUI</label>
+                            <div className="relative">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />
+                                </svg>
+                              </span>
+                              <input type="text" required value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Identificación del titular de la cuenta" className="w-full pl-9 pr-3 py-2.5 bg-white border border-border-light rounded-sm text-xs focus:border-brand-primary focus:ring-1 focus:ring-brand-primary focus:outline-none transition-all text-text-primary" />
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Identificación Tributaria / NIT / DUI</label>
-                          <input type="text" required value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="Identificación del titular de la cuenta" className="w-full px-3 py-2 bg-white border border-border-light rounded-sm text-sm focus:border-brand-primary focus:outline-none transition-all text-text-primary" />
                         </div>
                       </div>
                     )}
-
-                    <div className="flex justify-end">
+ 
+                    <div className="flex justify-end pt-2">
                       <button
                         type="submit"
                         disabled={savingPayout}
-                        className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center gap-2 shadow-sm border-none"
+                        className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover disabled:opacity-50 text-white text-xs font-bold rounded-sm transition-all focus:outline-none cursor-pointer flex items-center justify-center gap-2 shadow-sm border-none"
                       >
                         {savingPayout ? (
                           <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</>
-                        ) : "💾 Guardar Configuración de Pago"}
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            Guardar Configuración de Pago
+                          </>
+                        )}
                       </button>
                     </div>
                   </form>
@@ -5161,55 +5145,82 @@ export default function PerfilUsuarioPage() {
             {/* TAB: INVITAR AGENTES */}
             {activeTab === "invitar_agentes" && user && user.role === ROLES.AGENCY && (
               <div className="animate-fadeIn">
-              <div className="animate-fadeIn">
-                <div className="mb-6 pb-4 border-b border-border-light text-left">
-                  <h2 className="text-lg font-bold text-text-primary">Programa de Recomendaciones de Agencia</h2>
-                  <p className="text-xs text-text-secondary mt-1">Genera y comparte tu enlace único de recomendación. Obtén el **30% de comisión** de cada compra de visado realizada por tus clientes.</p>
-                </div>
+                <div className="animate-fadeIn">
+                  <div className="mb-6 pb-4 border-b border-border-light text-left">
+                    <h2 className="text-lg font-bold text-text-primary">Programa de Recomendaciones de Agencia</h2>
+                    <p className="text-xs text-text-secondary mt-1">Genera y comparte tu enlace único de recomendación. Obtén el **30% de comisión** de cada compra de visado realizada por tus clientes.</p>
+                  </div>
 
-                {/* Banner alert */}
-                <div className="bg-amber-50 border border-amber-200 rounded-sm p-4 mb-6 text-left">
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl">📢</span>
+                  {/* Banner alert */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-sm p-4 mb-6 text-left">
+                    <div className="flex items-start gap-3">
+                      <span className="p-2 bg-amber-100 text-amber-800 rounded-sm shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                        </svg>
+                      </span>
+                      <div>
+                        <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
+                        <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                          Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>30% del valor del trámite</strong> a tu cuenta de agencia (70% para TodoVisa).
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Referral Link Box */}
+                  <div className="bg-white border border-border-light rounded-sm p-6 text-left shadow-xs space-y-4">
                     <div>
-                      <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
-                      <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                        Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>30% del valor del trámite</strong> a tu cuenta de agencia (70% para TodoVisa).
-                      </p>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-1">Enlace de Referido Exclusivo</h3>
+                      <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su trámite con tu código de agencia.</p>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <div className="relative flex-1">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-text-secondary/60 pointer-events-none">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                          </svg>
+                        </span>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${typeof window !== "undefined" ? `${window.location.origin}/agents` : "https://todovisa.com/agents"}?ref=${user?.id || ""}`}
+                          className="w-full pl-9 pr-3 py-2.5 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (typeof window !== "undefined" && user?.id) {
+                            navigator.clipboard.writeText(`${window.location.origin}/agents?ref=${user.id}`);
+                            setCopiedReferral(true);
+                            setTimeout(() => setCopiedReferral(false), 3000);
+                          }
+                        }}
+                        className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2 shrink-0"
+                      >
+                        {copiedReferral ? (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            ¡Enlace Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5A3.375 3.375 0 006.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0015 2.25h-1.5a2.251 2.25 0 00-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5a9 9 0 00-9-9z" />
+                            </svg>
+                            Copiar Link de Referido
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
-
-                {/* Referral Link Box */}
-                <div className="bg-white border border-border-light rounded-sm p-6 text-left shadow-xs space-y-4">
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-1">Enlace de Referido Exclusivo</h3>
-                    <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su trámite con tu código de agencia.</p>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={`${typeof window !== "undefined" ? window.location.origin : "https://todovisa.com"}?ref=${user?.id || ""}`}
-                      className="flex-1 px-3 py-2.5 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
-                    />
-                    <button
-                      onClick={() => {
-                        if (typeof window !== "undefined" && user?.id) {
-                          navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
-                          alert("¡Link de referido copiado al portapapeles!");
-                        }
-                      }}
-                      className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2"
-                    >
-                      📋 Copiar Link de Referido
-                    </button>
-                  </div>
-                </div>
               </div>
-
-              </div>
+            )}
+              </>
             )}
 
           </div>
@@ -5252,16 +5263,16 @@ export default function PerfilUsuarioPage() {
           {/* Backdrop */}
           <div
             className={`flex-1 bg-black/50 backdrop-blur-sm ${isDs160Closing
-                ? 'animate-out fade-out duration-[280ms]'
-                : 'animate-in fade-in duration-200'
+              ? 'animate-out fade-out duration-[280ms]'
+              : 'animate-in fade-in duration-200'
               }`}
           />
 
           {/* Side Panel */}
           <div
             className={`w-full max-w-md bg-white flex flex-col shadow-2xl ${isDs160Closing
-                ? 'animate-out slide-out-to-right duration-[280ms]'
-                : 'animate-in slide-in-from-right duration-300'
+              ? 'animate-out slide-out-to-right duration-[280ms]'
+              : 'animate-in slide-in-from-right duration-300'
               }`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -5283,11 +5294,11 @@ export default function PerfilUsuarioPage() {
 
               {/* Status pill */}
               <div className={`mt-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold border ${ds160Confirmed
-                  ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
-                  : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
+                ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
+                : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
                 }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${ds160Confirmed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
-                {ds160Confirmed ? 'DATOS CONFIRMADOS EN SUPABASE' : 'PENDIENTE DE CONFIRMACIÓN'}
+                {ds160Confirmed ? 'DATOS CONFIRMADOS' : 'PENDIENTE DE CONFIRMACIÓN'}
               </div>
             </div>
 
@@ -5355,8 +5366,8 @@ export default function PerfilUsuarioPage() {
                       type="button"
                       onClick={() => setDs160Data({ ...ds160Data, hasAssets: opt.value })}
                       className={`py-2.5 px-3 rounded-sm text-xs font-semibold border transition-all text-left ${ds160Data.hasAssets === opt.value
-                          ? 'bg-brand-primary text-white border-brand-primary'
-                          : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/40'
+                        ? 'bg-brand-primary text-white border-brand-primary'
+                        : 'bg-background-main text-text-secondary border-border-light hover:border-brand-primary/40'
                         }`}
                     >
                       {opt.label}
@@ -5400,18 +5411,15 @@ export default function PerfilUsuarioPage() {
                   };
                   setUser(updatedUser);
                   try {
-                    const { error } = await supabase.auth.updateUser({
-                      data: {
-                        ds160_full_name: ds160Data.fullName,
-                        ds160_passport_num: ds160Data.passportNum,
-                        ds160_birth_date: ds160Data.birthDate,
-                        ds160_purpose_of_trip: ds160Data.purposeOfTrip,
-                        ds160_has_assets: ds160Data.hasAssets,
-                        ds160_confirmed: true,
-                        expediente_status: expedienteStatus,
-                      }
+                    await AuthService.updateUser({
+                      ds160_full_name: ds160Data.fullName,
+                      ds160_passport_num: ds160Data.passportNum,
+                      ds160_birth_date: ds160Data.birthDate,
+                      ds160_purpose_of_trip: ds160Data.purposeOfTrip,
+                      ds160_has_assets: ds160Data.hasAssets,
+                      ds160_confirmed: true,
+                      expediente_status: expedienteStatus,
                     });
-                    if (error) console.warn('Could not persist DS-160 to Supabase:', error.message);
                   } catch (err) {
                     console.error('Error saving DS-160:', err);
                   }
@@ -5523,7 +5531,7 @@ export default function PerfilUsuarioPage() {
               </button>
               <button
                 type="button"
-                onClick={handleCropAndUpload}
+                onClick={handleCropSave}
                 disabled={isUploadingAvatar}
                 className="flex-1 px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors shadow-md cursor-pointer disabled:opacity-75 flex items-center justify-center gap-1.5 border-0"
               >
@@ -5541,13 +5549,16 @@ export default function PerfilUsuarioPage() {
         </div>
       )}
 
+
+
+      
       {/* Toast Alert Component */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[400] flex items-center gap-3 px-5 py-4 rounded-lg shadow-2xl border animate-in slide-in-from-bottom-4 duration-300 max-w-sm ${toast.type === 'success'
-            ? 'bg-white border-emerald-200'
-            : toast.type === 'error'
-              ? 'bg-white border-red-200'
-              : 'bg-white border-blue-200'
+          ? 'bg-white border-emerald-200'
+          : toast.type === 'error'
+            ? 'bg-white border-red-200'
+            : 'bg-white border-blue-200'
           }`}>
           <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm ${toast.type === 'success' ? 'bg-emerald-100 text-emerald-600' : toast.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
             }`}>

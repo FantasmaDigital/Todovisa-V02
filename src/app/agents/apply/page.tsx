@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import supabase from "@/app/lib/supabase";
+import { StorageClientService } from "@/services/client/StorageClientService";
+import { AgentClientService } from "@/services/client/AgentClientService";
+import { useAuthStore } from "../../store/authStore";
+import { ROLES } from "../../constants/roles";
 
 interface FormData {
   fullName: string;
@@ -23,6 +26,14 @@ interface FormData {
 
 export default function AgentApplyPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
+
+  useEffect(() => {
+    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY || user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
+      router.replace("/profile");
+    }
+  }, [user, router]);
+
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<FormData>({
     fullName: "",
@@ -43,8 +54,8 @@ export default function AgentApplyPage() {
   const [applicationId, setApplicationId] = useState("");
   const [showTermsModal, setShowTermsModal] = useState(false);
 
-  // Document uploads: key -> { name, progress }
-  type DocFile = { name: string; progress: number | null };
+  // Document uploads: key -> { name, progress, url, rawFile }
+  type DocFile = { name: string; progress: number | null; url?: string; rawFile?: File };
   const [docs, setDocs] = useState<Record<string, DocFile | null>>({
     dui: null,
     certificacion: null,
@@ -55,31 +66,19 @@ export default function AgentApplyPage() {
   });
 
   const handleDocUpload = async (key: string, file: File) => {
-    setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 10 } }));
+    setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: 10, rawFile: file } }));
     if (errors[`doc_${key}`]) setErrors((prev) => ({ ...prev, [`doc_${key}`]: "" }));
 
     try {
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const filePath = `postulaciones_agentes/${key}/${Date.now()}_${cleanFileName}`;
+      const isAgencyApp = formData.specialties.includes("Agencia B2B") || formData.fullName.toLowerCase().includes("agencia");
+      const tempId = "temp-" + Date.now();
+      const uploadResult = await StorageClientService.uploadAgentDocument(file, tempId, key, isAgencyApp);
+      const publicUrl = uploadResult.publicUrl || file.name;
 
-      let storageBucket = "todovisa";
-      let uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-
-      if (uploadResult.error) {
-        storageBucket = "client-documents";
-        uploadResult = await supabase.storage.from(storageBucket).upload(filePath, file, { upsert: true });
-      }
-
-      let publicUrl = file.name;
-      if (!uploadResult.error) {
-        const { data: urlData } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
-        if (urlData?.publicUrl) publicUrl = urlData.publicUrl;
-      }
-
-      setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null, url: publicUrl } }));
+      setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null, url: publicUrl, rawFile: file } }));
     } catch (err) {
-      console.error("Error uploading document to Supabase storage:", err);
-      setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null } }));
+      console.error("Error uploading document via API storage:", err);
+      setDocs((prev) => ({ ...prev, [key]: { name: file.name, progress: null, rawFile: file } }));
     }
   };
 
@@ -171,9 +170,28 @@ export default function AgentApplyPage() {
     setErrors({});
 
     const randomId = "TDA-" + Math.floor(100000 + Math.random() * 900000);
+    const uploadedDocUrls: Record<string, string | null> = {};
+    const isAgencyApp = formData.specialties.includes("Agencia B2B") || formData.fullName.toLowerCase().includes("agencia");
+
+    // Upload attached document files to Supabase Storage under asesores/agencias folder
+    const docKeys = ["dui", "certificacion", "antecedentes", "domicilio", "titulo", "cv"] as const;
+    for (const key of docKeys) {
+      const doc = docs[key];
+      if (doc?.rawFile) {
+        try {
+          const res = await StorageClientService.uploadAgentDocument(doc.rawFile, randomId, key, isAgencyApp);
+          uploadedDocUrls[key] = res.publicUrl || doc.url || doc.name;
+        } catch (e) {
+          console.warn(`Fallback for doc ${key}:`, e);
+          uploadedDocUrls[key] = doc.url || doc.name;
+        }
+      } else {
+        uploadedDocUrls[key] = doc?.url || doc?.name || null;
+      }
+    }
 
     try {
-      const { error } = await supabase.from("agent_applications").insert({
+      await AgentClientService.submitApplication({
         application_id: randomId,
         full_name: formData.fullName,
         email: formData.email,
@@ -188,18 +206,14 @@ export default function AgentApplyPage() {
         terms_accepted: formData.termsAccepted,
         status: "pending",
         documents: {
-          dui: docs.dui?.name || null,
-          certificacion: docs.certificacion?.name || null,
-          antecedentes: docs.antecedentes?.name || null,
-          domicilio: docs.domicilio?.name || null,
-          titulo: docs.titulo?.name || null,
-          cv: docs.cv?.name || null,
+          dui: uploadedDocUrls.dui,
+          certificacion: uploadedDocUrls.certificacion,
+          antecedentes: uploadedDocUrls.antecedentes,
+          domicilio: uploadedDocUrls.domicilio,
+          titulo: uploadedDocUrls.titulo,
+          cv: uploadedDocUrls.cv,
         }
       });
-
-      if (error) {
-        throw new Error(error.message);
-      }
 
       setApplicationId(randomId);
       setIsSubmitted(true);

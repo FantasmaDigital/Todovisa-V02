@@ -5,8 +5,12 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { ROLES } from "../../constants/roles";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { AgentClientService } from "@/services/client/AgentClientService";
+import { AuthClientService } from "@/services/client/AuthClientService";
+import { Skeleton, CardSkeleton } from "@/app/components/shared/Skeleton";
+import supabase from "@/app/lib/supabase";
 
 interface AgentApplication {
   id: string;
@@ -53,6 +57,32 @@ export default function AcreditacionPage() {
     }, 4500);
   };
 
+  const handleViewDocument = async (e: React.MouseEvent<HTMLAnchorElement>, docUrl: string) => {
+    e.preventDefault();
+    if (!docUrl) return;
+
+    const isSupabaseStorage = docUrl.includes("/storage/v1/object/public/todovisa/");
+    if (isSupabaseStorage) {
+      try {
+        const filePath = docUrl.split("/storage/v1/object/public/todovisa/")[1];
+        if (filePath) {
+          const { data, error } = await supabase.storage
+            .from("todovisa")
+            .createSignedUrl(filePath, 60);
+
+          if (error) throw error;
+          if (data?.signedUrl) {
+            window.open(data.signedUrl, "_blank");
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error generating signed URL, falling back to public URL:", err);
+      }
+    }
+    window.open(docUrl, "_blank");
+  };
+
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -62,43 +92,31 @@ export default function AcreditacionPage() {
     if (!user) return;
     setLoading(true);
     try {
+      // Validate role with the API
+      const profileData = await ProfileClientService.getProfile(user.id);
+      const apiRole = profileData?.profile?.role;
+      if (apiRole !== ROLES.AGENT && apiRole !== ROLES.AGENCY) {
+        router.push("/profile");
+        return;
+      }
+
       let agencyId = null;
-      if (user.role === "agent") {
-        const { data: memberData, error: memberErr } = await supabase
-          .from("agency_members")
-          .select("agency_id")
-          .eq("member_id", user.id)
-          .maybeSingle();
-
-        if (memberErr) {
-          console.error("Error loading agency membership:", memberErr.message);
-        } else if (memberData && memberData.agency_id) {
-          agencyId = memberData.agency_id;
-          const { data: agencyProfile, error: agencyErr } = await supabase
-            .from("profiles")
-            .select("id, first_name, last_name, email, photo_url, phone, bio, location, staff_size")
-            .eq("id", agencyId)
-            .maybeSingle();
-
-          if (agencyProfile) {
-            setMyAgency({ ...agencyProfile, joined_at: null });
+      if (apiRole === "agent") {
+        const memberInfo = profileData?.memberInfo;
+        if (memberInfo?.memberData?.agency_id) {
+          agencyId = memberInfo.memberData.agency_id;
+          if (memberInfo.agencyProfile) {
+            setMyAgency({ ...memberInfo.agencyProfile, joined_at: null });
           }
         }
       }
 
       const targetUserId = agencyId || user.id;
-
-      // Fetch agent application (direct or agency's)
-      const { data, error } = await supabase
-        .from("agent_applications")
-        .select("*")
-        .eq("user_id", targetUserId)
-        .maybeSingle();
-
-      if (error) throw error;
-      setAgent(data || null);
+      const portalRes = await AgentClientService.getPortalData(targetUserId);
+      setAgent(portalRes.application || null);
     } catch (err) {
       console.error("Error loading agent application or agency info:", err);
+      router.push("/profile");
     } finally {
       setLoading(false);
     }
@@ -106,13 +124,9 @@ export default function AcreditacionPage() {
 
   useEffect(() => {
     if (isMounted && user) {
-      if (user.role !== ROLES.AGENT && user.role !== ROLES.AGENCY) {
-        router.push("/profile");
-        return;
-      }
       loadAgentApplication();
     }
-  }, [isMounted, user?.id, user?.role]);
+  }, [isMounted, user?.id]);
 
   // Handle commercial agreement digital signature
   const handleSignAgreement = async (e: React.FormEvent) => {
@@ -126,19 +140,17 @@ export default function AcreditacionPage() {
     setSigning(true);
     const nowString = new Date().toISOString();
     try {
-      const { error: updateErr } = await supabase
-        .from("agent_applications")
-        .update({
+      await AgentClientService.updateApplication({
+        id: agent.id,
+        updates: {
           status: "active",
           signature_name: signatureName.trim(),
           signed_at: nowString
-        })
-        .eq("id", agent.id);
-
-      if (updateErr) throw updateErr;
+        }
+      });
 
       // Update user role if needed
-      await supabase.auth.refreshSession();
+      await AuthClientService.getUser().catch(() => null);
 
       setAgent((prev) =>
         prev
@@ -180,7 +192,7 @@ export default function AcreditacionPage() {
         {/* Back navigation */}
         <div className="mb-6">
           <button
-            onClick={() => router.push("/profile?tab=portal_agente")}
+            onClick={() => router.push("/agents/portal")}
             className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1 cursor-pointer border-none bg-transparent"
           >
             &larr; Volver al Panel
@@ -193,8 +205,16 @@ export default function AcreditacionPage() {
         </div>
 
         {loading ? (
-          <p className="text-xs text-text-muted">Cargando acreditación...</p>
-                ) : !agent ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-4">
+              <CardSkeleton rows={4} />
+              <CardSkeleton rows={3} />
+            </div>
+            <div className="lg:col-span-1">
+              <CardSkeleton rows={5} />
+            </div>
+          </div>
+        ) : !agent ? (
           <div className="border border-border-light rounded-sm p-8 bg-white text-center">
             <p className="text-sm text-text-secondary italic">No se ha encontrado ninguna solicitud de acreditación vinculada a esta cuenta.</p>
           </div>
@@ -381,16 +401,39 @@ export default function AcreditacionPage() {
                   </div>
 
                   <div className="space-y-3.5 text-xs text-text-primary">
-                    {agent.documents && Object.entries(agent.documents).map(([key, val]) => (
-                      <div key={key} className="flex justify-between items-center border-b border-border-light pb-2">
-                        <span className="font-semibold uppercase text-[10px] text-text-secondary">{key}</span>
-                        {val ? (
-                          <span className="text-[10px] text-emerald-600 font-bold">Cargado ✓</span>
-                        ) : (
-                          <span className="text-[10px] text-text-muted">No presentado</span>
-                        )}
-                      </div>
-                    ))}
+                    {agent.documents && Object.entries(agent.documents).map(([key, val]) => {
+                      const docUrl = typeof val === 'string' ? val : (val as any)?.url;
+                      const hasDoc = !!docUrl;
+                      const isValidUrl = hasDoc && (docUrl.startsWith("http://") || docUrl.startsWith("https://") || docUrl.startsWith("/"));
+                      const displayLabel = key === "dui" ? "Documento Identidad (DUI)"
+                        : key === "certificacion" ? "Certificación Profesional"
+                          : key === "antecedentes" ? "Antecedentes Penales"
+                            : key === "domicilio" ? "Comprobante de Domicilio"
+                              : key === "titulo" ? "Título Profesional / Brochure"
+                                : key === "cv" ? "Currículum Vitae (CV)"
+                                  : key.toUpperCase();
+                      
+                      return (
+                        <div key={key} className="flex justify-between items-center border-b border-border-light pb-2">
+                          <span className="font-semibold text-text-secondary">{displayLabel}</span>
+                          {hasDoc ? (
+                            isValidUrl ? (
+                              <a
+                                href={docUrl}
+                                onClick={(e) => handleViewDocument(e, docUrl)}
+                                className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline cursor-pointer"
+                              >
+                                Ver Documento ✓
+                              </a>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 font-bold">Cargado ✓</span>
+                            )
+                          ) : (
+                            <span className="text-[10px] text-text-muted">No presentado</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

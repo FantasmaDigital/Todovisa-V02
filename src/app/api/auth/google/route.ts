@@ -1,24 +1,19 @@
-import { NextResponse } from 'next/server';
-import supabase from '@/app/lib/supabase';
+import { AuthRepository } from "@/lib/repositories/auth.repository";
+import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-    try {
-        const body = await request.json();
-        const { redirectTo } = body;
-        
-        const { data, error } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: redirectTo || undefined
-            }
-        });
+  try {
+    const { redirectTo } = await request.json();
 
-        if (error) {
-            return NextResponse.json({ error: error.message }, { status: 400 });
-        }
+    const { data, error } = await AuthRepository.signInWithOAuth("google", redirectTo);
 
-        return NextResponse.json({ url: data.url }, { status: 200 });
-    } catch (err: any) {
-        return NextResponse.json({ error: err.message || 'Error interno del servidor' }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
+
+    return NextResponse.json({ url: data.url }, { status: 200 });
+  } catch (err: any) {
+    console.error("Google OAuth catch error:", err);
+    return NextResponse.json({ error: err.message || "Error interno del servidor" }, { status: 500 });
+  }
 }

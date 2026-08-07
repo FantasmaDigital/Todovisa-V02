@@ -5,8 +5,8 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
-import supabase from "../../lib/supabase";
 import { ROLES } from "../../constants/roles";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
 
 interface AgentCommission {
   id: string;
@@ -41,19 +41,24 @@ export default function ComisionesPage() {
     setIsMounted(true);
   }, []);
 
-  // Fetch agent commissions from Supabase
+  // Fetch agent commissions from API
   const loadCommissions = async () => {
     if (!user) return;
     setIsLoadingCommissions(true);
     try {
-      const { data, error } = await supabase
-        .from("agent_commissions")
-        .select("*, profile:agent_id(first_name, last_name, email)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+      // Validate role with the API
+      const profileRes = await ProfileClientService.getProfile(user.id);
+      const apiRole = profileRes?.profile?.role;
+      if (apiRole !== ROLES.AGENT && apiRole !== ROLES.AGENCY) {
+        router.push("/profile");
+        return;
+      }
+
+      const data = await ProfileClientService.getCommissions(user.id);
       setAgentCommissions(data || []);
     } catch (err) {
       console.error("Error fetching commissions:", err);
+      router.push("/profile");
     } finally {
       setIsLoadingCommissions(false);
     }
@@ -61,10 +66,6 @@ export default function ComisionesPage() {
 
   useEffect(() => {
     if (isMounted && user) {
-      if (user.role !== ROLES.AGENT && user.role !== ROLES.AGENCY) {
-        router.push("/profile");
-        return;
-      }
       loadCommissions();
     }
   }, [isMounted, user?.id]);
@@ -74,7 +75,7 @@ export default function ComisionesPage() {
     if (user?.role === ROLES.AGENCY) {
       return "30% (Referido)";
     }
-    return "60% / 40%";
+    return "60% (Asesor)";
   };
 
   const getGrossEarnings = () => {
@@ -114,7 +115,7 @@ export default function ComisionesPage() {
         {/* Back navigation */}
         <div className="mb-6">
           <button
-            onClick={() => router.push("/profile?tab=portal_agente")}
+            onClick={() => router.push("/agents/portal")}
             className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1 cursor-pointer border-none bg-transparent"
           >
             &larr; Volver al Panel
@@ -124,6 +125,25 @@ export default function ComisionesPage() {
         <div className="mb-8 pb-4 border-b border-border-light text-left">
           <h1 className="text-2xl font-bold text-text-primary">Historial y Control de Comisiones</h1>
           <p className="text-xs text-text-secondary mt-1">Revisa el detalle, tasa de comisiones y balances netos acumulados de tus expedientes cerrados.</p>
+        </div>
+
+        {/* Info Card explaining how commissions work */}
+        <div className="bg-brand-light/30 border border-brand-primary/10 rounded-sm p-5 mb-6 text-left space-y-2">
+          <div className="flex items-center gap-2 text-brand-primary font-bold text-xs">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 111.085 1.085l-.04.02-.086.041a.25.25 0 00-.115.1l-.014.032m-3.56 3.85a9 9 0 1112.728 0M12 20.25a8.25 8.25 0 100-16.5 8.25 8.25 0 000 16.5z" />
+            </svg>
+            <span>¿Cómo funciona el esquema de comisiones?</span>
+          </div>
+          {user.role === ROLES.AGENCY ? (
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Como Agencia/Socio Comercial, recibes el <strong>30% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+            </p>
+          ) : (
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+            </p>
+          )}
         </div>
 
         {/* Financial metrics block */}
@@ -158,7 +178,11 @@ export default function ComisionesPage() {
           </div>
 
           {isLoadingCommissions ? (
-            <p className="text-xs text-text-muted">Cargando comisiones...</p>
+            <div className="space-y-3 py-4">
+              <div className="h-6 bg-gray-100 rounded animate-pulse w-full"></div>
+              <div className="h-6 bg-gray-100 rounded animate-pulse w-full"></div>
+              <div className="h-6 bg-gray-100 rounded animate-pulse w-full"></div>
+            </div>
           ) : agentCommissions.length === 0 ? (
             <div className="py-8 text-center text-text-muted italic border-t border-border-light text-xs">
               No se han encontrado registros de comisiones aprobadas para tu cuenta.

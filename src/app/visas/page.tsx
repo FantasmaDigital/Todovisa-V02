@@ -4,72 +4,17 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { visaDestinations } from "../constants/visas/destinations";
 
-const countries = [
-    {
-        code: "US",
-        name: "Estados Unidos",
-        flag: "/images/flag_us.png",
-        type: "Visa B1/B2 (Turismo / Negocios)",
-        description: "Requisitos de solvencia, llenado técnico de formulario DS-160, arancel de $185 USD y preparación de entrevista consular presencial.",
-        available: true,
-        badge: "Más Solicitada"
-    },
-    {
-        code: "UK",
-        name: "Inglaterra (Reino Unido)",
-        flag: "/images/flag_uk.png",
-        type: "Standard Visitor Visa",
-        description: "Solicitud online UKVI, arancel de £115 GBP, comprobante de liquidez bancaria de 6 meses y toma de biométricos.",
-        available: true,
-        badge: "Trámite Online"
-    },
-    {
-        code: "CA",
-        name: "Canadá",
-        flag: "/images/flag_ca.png",
-        type: "Visa de Visitante (TRV) / eTA",
-        description: "Postulación mediante portal IRCC, enrolamiento de datos biométricos VAC ($185 CAD) y envío de pasaporte para estampado.",
-        available: true,
-        badge: "Alta Aprobación"
-    },
-    {
-        code: "MX",
-        name: "México",
-        flag: "/images/flag_mx.png",
-        type: "Visa de Visitante sin Permiso Laboral",
-        description: "Atención por cita en MiConsulado, exención con visa estadounidense o canadiense vigente y estancia de hasta 180 días.",
-        available: true,
-        badge: "Cita Presencial"
-    },
-    {
-        code: "AU",
-        name: "Australia",
-        flag: "/images/flag_aus.png",
-        type: "Visitor Visa (Subclass 600)",
-        description: "Trámite 100% digital a través de ImmiAccount ($190 AUD), vinculación electrónica al pasaporte sin viñeta física.",
-        available: true,
-        badge: "100% Digital"
-    },
-    {
-        code: "IN",
-        name: "India",
-        flag: "/images/flag_in.png",
-        type: "e-Tourist Visa (ETA)",
-        description: "Autorización de viaje electrónica expedida en 72 horas para estancias de turismo, negocios o tratamientos médicos.",
-        available: true,
-        badge: "Procesamiento Express"
-    },
-    {
-        code: "CN",
-        name: "China",
-        flag: "/images/flag_ch.png",
-        type: "Visa L (Turismo)",
-        description: "Formulario COAV, carta de invitación formal de agencia o residente y atención consular previa cita.",
-        available: false,
-        badge: "Próximamente"
-    }
-];
+const countries = visaDestinations.map(d => ({
+    code: d.code.toUpperCase(),
+    name: d.name,
+    flag: d.flagImage,
+    type: d.type,
+    description: d.description,
+    available: d.enabled,
+    badge: d.badge
+}));
 
 export default function VisasPage() {
     const headerRef = useRef(null);

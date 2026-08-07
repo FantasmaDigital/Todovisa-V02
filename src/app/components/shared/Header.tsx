@@ -2,10 +2,13 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { UserAvatar } from "./UserAvatar"
 import { useState, useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
-import supabase from "@/app/lib/supabase"
+import { AuthService } from "@/app/service/AuthService"
+import { ProfileClientService } from "@/services/client/ProfileClientService"
 import { ROLES } from "@/app/constants/roles"
+import { visaDestinations } from "@/app/constants/visas/destinations"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
     const user = useAuthStore((state) => state.user);
@@ -16,6 +19,60 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
     useEffect(() => {
         setIsMounted(true);
         if (typeof window !== "undefined") {
+            if (!(window as any).__fetch_intercepted__) {
+                (window as any).__fetch_intercepted__ = true;
+                const originalFetch = window.fetch;
+                window.fetch = async function (input, init) {
+                    let url = "";
+                    if (typeof input === "string") {
+                        url = input;
+                    } else if (input instanceof URL) {
+                        url = input.href;
+                    } else if (input && typeof input === "object" && "url" in input) {
+                        url = (input as any).url;
+                    }
+
+                    const isRelativeApi = url.startsWith("/api/") || url.startsWith("api/");
+                    const isAbsoluteLocalApi = url.startsWith(window.location.origin + "/api/");
+                    
+                    if (isRelativeApi || isAbsoluteLocalApi) {
+                        init = init || {};
+                        let headers: Headers;
+                        if (init.headers) {
+                            headers = new Headers(init.headers);
+                        } else if (input && typeof input === "object" && "headers" in input) {
+                            headers = new Headers((input as any).headers);
+                        } else {
+                            headers = new Headers();
+                        }
+                        
+                        let sessionToken: string | null = null;
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const key = localStorage.key(i);
+                            if (key && (key.includes("auth-token") || key.startsWith("sb-"))) {
+                                const sessionStr = localStorage.getItem(key);
+                                if (sessionStr) {
+                                    try {
+                                        const parsed = JSON.parse(sessionStr);
+                                        const tok = parsed?.access_token || parsed?.currentSession?.access_token;
+                                        if (tok) {
+                                            sessionToken = tok;
+                                            break;
+                                        }
+                                    } catch (e) {}
+                                }
+                            }
+                        }
+                        if (sessionToken && !headers.has("Authorization")) {
+                            headers.set("Authorization", `Bearer ${sessionToken}`);
+                        }
+                        
+                        init.headers = headers;
+                    }
+                    return originalFetch.call(this, input, init);
+                };
+            }
+
             const params = new URLSearchParams(window.location.search);
             const refParam = params.get("ref") || params.get("agency_ref");
             if (refParam) {
@@ -31,52 +88,97 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
     useEffect(() => {
         const syncSession = async () => {
-            if (!user) {
-                try {
-                    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-                    if (supabaseUser) {
-                        const { data: profileData } = await supabase
-                            .from("profiles")
-                            .select("role")
-                            .eq("id", supabaseUser.id)
-                            .maybeSingle();
+            try {
+                // Pre-check if any supabase session token exists in localStorage to avoid useless 401 calls
+                let hasToken = false;
+                if (typeof window !== "undefined") {
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                            const val = localStorage.getItem(key);
+                            if (val) {
+                                try {
+                                    const parsed = JSON.parse(val);
+                                    if (parsed?.access_token) {
+                                        hasToken = true;
+                                    }
+                                } catch (e) {}
+                            }
+                            break;
+                        }
+                    }
+                }
 
-                        const metadata = supabaseUser.user_metadata || {};
-                        const updatedUser = {
-                            id: supabaseUser.id,
-                            email: supabaseUser.email || '',
-                            firstName: metadata.first_name || metadata.full_name?.split(' ')[0] || metadata.name?.split(' ')[0] || '',
-                            lastName: metadata.last_name || metadata.full_name?.split(' ').slice(1).join(' ') || metadata.name?.split(' ').slice(1).join(' ') || '',
-                            phone: metadata.phone || '',
-                            country: metadata.country || '',
-                            viproScore: metadata.vipro_score || null,
-                            viproCompleted: metadata.vipro_completed || false,
-                            viproDestination: metadata.vipro_destination || null,
-                            hasPaidAdvisor: metadata.has_paid_advisor || false,
-                            assignedAgentId: metadata.assigned_agent_id || null,
-                            photoUrl: metadata.photo_url || metadata.avatar_url || null,
-                            avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-                            lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
-                            ds160FullName: metadata.ds160_full_name || null,
-                            ds160PassportNum: metadata.ds160_passport_num || null,
-                            ds160BirthDate: metadata.ds160_birth_date || null,
-                            ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
-                            ds160HasAssets: metadata.ds160_has_assets ?? true,
-                            ds160Confirmed: metadata.ds160_confirmed || false,
-                            expedienteStatus: metadata.expediente_status || 'draft',
-                            role: (profileData?.role as typeof ROLES[keyof typeof ROLES]) || metadata.role || ROLES.USER,
-                        };
+                if (!hasToken) {
+                    return;
+                }
+
+                // ⚡ Parallel fetch: user + profile role in one round-trip instead of two sequential calls
+                const [userRes, profileResRaw] = await Promise.all([
+                    AuthService.getUser().catch(() => null),
+                    // We don't have the userId yet, so we kick off a small pre-fetch that resolves
+                    // after we have the id — using a dummy that will be replaced below if needed.
+                    Promise.resolve(null),
+                ]);
+
+                const supabaseUser = userRes?.data?.user;
+                if (supabaseUser) {
+                    // Fetch profile role now that we have the userId — this is the only call we can't parallelize
+                    // without the user id, but we avoided the getSession() call above being repeated.
+                    let profileRole = null;
+                    try {
+                        const profileRes = await ProfileClientService.getProfile(supabaseUser.id);
+                        profileRole = profileRes?.profile?.role;
+                    } catch (pErr) {
+                        console.warn("Could not fetch profile role:", pErr);
+                    }
+
+                    const metadata = supabaseUser.user_metadata || {};
+                    const updatedUser = {
+                        id: supabaseUser.id,
+                        email: supabaseUser.email || '',
+                        firstName: metadata.first_name || metadata.full_name?.split(' ')[0] || metadata.name?.split(' ')[0] || '',
+                        lastName: metadata.last_name || metadata.full_name?.split(' ').slice(1).join(' ') || metadata.name?.split(' ').slice(1).join(' ') || '',
+                        phone: metadata.phone || '',
+                        country: metadata.country || '',
+                        viproScore: metadata.vipro_score || null,
+                        viproCompleted: metadata.vipro_completed || false,
+                        viproDestination: metadata.vipro_destination || null,
+                        hasPaidAdvisor: metadata.has_paid_advisor || false,
+                        assignedAgentId: metadata.assigned_agent_id || null,
+                        photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
+                        avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
+                        lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
+                        ds160FullName: metadata.ds160_full_name || null,
+                        ds160PassportNum: metadata.ds160_passport_num || null,
+                        ds160BirthDate: metadata.ds160_birth_date || null,
+                        ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
+                        ds160HasAssets: metadata.ds160_has_assets ?? true,
+                        ds160Confirmed: metadata.ds160_confirmed || false,
+                        expedienteStatus: metadata.expediente_status || 'draft',
+                        role: (profileRole as typeof ROLES[keyof typeof ROLES]) || ROLES.USER,
+                    };
+
+                    const currentUser = useAuthStore.getState().user;
+                    const isDifferent = !currentUser || 
+                        currentUser.id !== updatedUser.id || 
+                        currentUser.role !== updatedUser.role || 
+                        currentUser.email !== updatedUser.email || 
+                        currentUser.firstName !== updatedUser.firstName ||
+                        currentUser.lastName !== updatedUser.lastName;
+
+                    if (isDifferent) {
                         useAuthStore.getState().setUser(updatedUser);
                     }
-                } catch (e) {
-                    console.error("Error syncing Google/OAuth user session in Header:", e);
                 }
+            } catch (e) {
+                console.error("Error syncing Google/OAuth user session in Header:", e);
             }
         };
         if (isMounted) {
             syncSession();
         }
-    }, [user, isMounted]);
+    }, [isMounted]);
 
     const userData = isMounted ? user : null;
 
@@ -86,7 +188,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                 <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-main transition-opacity duration-300 ${isMounted ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                 </div>
             )}
-            <header ref={headerRef} className="w-full bg-background-main sticky top-0 z-50 flex flex-col justify-center border-b border-border-light/50">
+            <header ref={headerRef} className="w-full bg-background-main sticky top-0 z-50 flex flex-col justify-center">
                 {/* Promo Banner */}
                 <div className="bg-brand-primary w-full p-2.5 flex justify-center font-bold text-white text-xs md:text-sm text-center">
                     {userData?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))) ? (
@@ -95,7 +197,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         </Link>
                     ) : (
                         <Link href="/vipro-form" className="hover:underline flex items-center gap-1">
-                            <span>Evaluación VIPRO — Obtén un 25% de descuento al completar tu perfil &nbsp;→</span>
+                            <span>Evaluación VIPRO — Completa tu perfil &nbsp;→</span>
                         </Link>
                     )}
                 </div>
@@ -112,6 +214,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                         width={72}
                                         height={72}
                                         className="object-contain"
+                                        style={{ width: "auto", height: "auto" }}
                                     />
                                 </Link>
                             </div>
@@ -138,16 +241,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-[10px] text-text-secondary mt-1">Todos los destinos disponibles</span>
                                             </div>
                                         </Link>
-                                        {[
-                                            { code: "us", flag: "🇺🇸", name: "Estados Unidos", disabled: true },
-                                            { code: "ca", flag: "🇨🇦", name: "Canadá" },
-                                            { code: "mx", flag: "🇲🇽", name: "México" },
-                                            { code: "uk", flag: "🇬🇧", name: "Inglaterra" },
-                                            { code: "cn", flag: "🇨🇳", name: "China", disabled: true },
-                                            { code: "au", flag: "🇦🇺", name: "Australia" },
-                                            { code: "in", flag: "🇮🇳", name: "India" },
-                                        ].map((c) => (
-                                            c.disabled ? (
+                                        {visaDestinations.map((c) => (
+                                            !c.enabled ? (
                                                 <div key={c.code} className="flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-gray-300 cursor-not-allowed">
                                                     <span className="text-base">{c.flag}</span>
                                                     <span className="text-xs">{c.name}</span>
@@ -197,23 +292,25 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             </Link>
                                         )}
 
-                                        <Link href="/agents/apply" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
-                                            <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                                                </svg>
-                                            </span>
-                                            <div className="flex flex-col text-left">
-                                                <span className="font-semibold text-xs leading-none">Unirte a la red</span>
-                                                <span className="text-[10px] text-text-secondary mt-1">Aplica como experto</span>
-                                            </div>
-                                        </Link>
+                                        {(!userData || (userData.role !== ROLES.AGENT && userData.role !== ROLES.AGENCY && userData.role !== ROLES.ADMIN && userData.role !== ROLES.MODERATOR)) && (
+                                            <Link href="/agents/apply" className="flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm text-text-primary hover:bg-brand-light hover:text-brand-primary transition-all duration-200">
+                                                <span className="p-1.5 bg-brand-light rounded-sm text-brand-primary">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                                                    </svg>
+                                                </span>
+                                                <div className="flex flex-col text-left">
+                                                    <span className="font-semibold text-xs leading-none">Unirte a la red</span>
+                                                    <span className="text-[10px] text-text-secondary mt-1">Aplica como experto</span>
+                                                </div>
+                                            </Link>
+                                        )}
                                     </div>
                                 </div>
 
                                 <Link href="/vipro-form" className="hover:text-brand-primary transition-colors duration-200">Evaluación VIPRO</Link>
                                 <Link href="/about-us" className="hover:text-brand-primary transition-colors duration-200">Sobre TodoVisa</Link>
-                                <Link href="/about-us" className="hover:text-brand-primary transition-colors duration-200">Noticias</Link>
+                                <Link href="/sobre-todovisa" className="hover:text-brand-primary transition-colors duration-200">Noticias</Link>
                             </div>
                         </div>
 
@@ -230,18 +327,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-brand-dark font-bold text-sm">{userData.firstName + " " + userData.lastName}</span>
                                                 <span className="text-brand-primary font-semibold text-xs">{userData.email}</span>
                                             </div>
-                                            <div className="w-11 h-11 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/10 group-hover:border-brand-primary/30 transition-colors overflow-hidden">
-                                                {userData.photoUrl ? (
-                                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                                    <img
-                                                        src={userData.photoUrl}
-                                                        alt="Avatar"
-                                                        className="w-full h-full object-cover"
-                                                    />
-                                                ) : (
-                                                    <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
-                                                )}
-                                            </div>
+                                            <UserAvatar
+                                                src={userData.photoUrl}
+                                                name={userData.firstName + " " + userData.lastName}
+                                                size="md"
+                                            />
                                         </button>
 
                                         {/* User Dropdown */}
@@ -259,7 +349,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                             </Link>
                                             <button
                                                 onClick={async () => {
-                                                    await supabase.auth.signOut();
+                                                    await AuthService.signOut();
                                                     useAuthStore.getState().clearUser();
                                                     window.location.href = "/";
                                                 }}
@@ -344,7 +434,9 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                     {userData?.hasPaidAdvisor && (
                                         <Link href="/profile?tab=asesor" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Mi asesor asignado</Link>
                                     )}
-                                    <Link href="/agents/apply" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Unirte a la red</Link>
+                                    {(!userData || (userData.role !== ROLES.AGENT && userData.role !== ROLES.AGENCY && userData.role !== ROLES.ADMIN && userData.role !== ROLES.MODERATOR)) && (
+                                        <Link href="/agents/apply" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary pl-2.5 py-1 border-l border-border-light">Unirte a la red</Link>
+                                    )}
 
                                 </div>
 
@@ -352,7 +444,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                                 <Link href="/vipro-form" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Evaluación VIPRO</Link>
                                 <Link href="/about-us" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Sobre TodoVisa</Link>
-                                <Link href="/about-us" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Noticias</Link>
+                                <Link href="/sobre-todovisa" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Noticias</Link>
                             </div>
 
                             <hr className="border-border-light/60" />
@@ -380,7 +472,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                         <button
                                             onClick={async () => {
                                                 setIsMenuOpen(false);
-                                                await supabase.auth.signOut();
+                                                await AuthService.signOut();
                                                 useAuthStore.getState().clearUser();
                                                 window.location.href = "/";
                                             }}

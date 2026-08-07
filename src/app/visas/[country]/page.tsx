@@ -33,18 +33,8 @@ export default function VisaDetailPage() {
             <div className="w-full bg-brand-primary px-6 py-16 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
                 <div className="w-[80%] mx-auto flex flex-col md:flex-row gap-10 items-center relative z-10">
-                    {/* Flag */}
-                    <div className="w-40 h-28 rounded-xl overflow-hidden shadow-xl flex-shrink-0 border border-white/20">
-                        {country.flag ? (
-                            <img src={country.flag} alt={country.name} className="w-full h-full object-cover" />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center text-6xl bg-white/10">
-                                {country.flagEmoji}
-                            </div>
-                        )}
-                    </div>
                     {/* Text */}
-                    <div>
+                    <div className="text-left">
                         <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-2">Guía de Visa</p>
                         <h1 className="text-4xl md:text-5xl font-semibold font-serif italic text-white leading-tight mb-3">
                             {country.name}
@@ -52,12 +42,6 @@ export default function VisaDetailPage() {
                         <p className="text-white/95 text-base max-w-2xl leading-relaxed">
                             {country.heroDescription}
                         </p>
-                        <Link
-                            href={`/vipro-form?country=${country.code}`}
-                            className="inline-block mt-6 bg-white text-brand-primary text-sm font-bold px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors shadow-md"
-                        >
-                            Iniciar Evaluación VIPRO →
-                        </Link>
                     </div>
                 </div>
             </div>

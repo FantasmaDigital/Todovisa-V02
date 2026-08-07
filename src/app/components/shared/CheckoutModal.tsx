@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/authStore";
-import supabase from "../../lib/supabase";
+import { AuthService } from "../../service/AuthService";
+import { AgentClientService } from "@/services/client/AgentClientService";
 
 interface Agent {
   id: string;
@@ -26,11 +27,40 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   const { user, setUser } = useAuthStore();
   const [step, setStep] = useState<"billing" | "processing" | "success">("billing");
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const agencyRef = localStorage.getItem("todovisa_agency_ref");
+      if (agencyRef) {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("ref") !== agencyRef) {
+          url.searchParams.set("ref", agencyRef);
+          window.history.replaceState(null, "", url.toString());
+        }
+      }
+    }
+  }, []);
+
   const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
   const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";
   const isSandbox = paypalMode !== "live" || paypalClientId === "test";
 
-  const amountToPay = product === "vipro" ? 19.99 : 112.50;
+  const [basePrice, setBasePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("fullServicePrice");
+    if (savedPrice) {
+      setBasePrice(Number(savedPrice));
+    }
+    const savedViproPrice = localStorage.getItem("viproPrice");
+    if (savedViproPrice) {
+      setViproPrice(Number(savedViproPrice));
+    }
+  }, []);
+
+  const discountAmount = basePrice * 0.25;
+  const finalPrice = basePrice * 0.75;
+  const amountToPay = product === "vipro" ? viproPrice : finalPrice;
 
   const processSuccessfulPayment = async (paypalTransactionId?: string) => {
     setStep("processing");
@@ -50,9 +80,9 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           }
         }
 
-        // Persist to Supabase Auth metadata
+        // Persist to Supabase Auth metadata via API
         try {
-          await supabase.auth.updateUser({ data: updateData });
+          await AuthService.updateUser(updateData);
           console.log("Status successfully saved to Supabase user metadata.");
         } catch (err) {
           console.error("Failed to save status to Supabase:", err);
@@ -61,29 +91,19 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         // ── B2B AGENCY FLOW ──────────────────────────────────────────────────────
         if (product === "advisor" && agent && agent.partnerType === "b2b_agency_entity") {
           try {
-            const { data: agencyProfile } = await supabase
-              .from("profiles")
-              .select("id")
-              .ilike("first_name", `%${agent.agencyName}%`)
-              .single();
-
-            if (agencyProfile?.id) {
-              await supabase.from("agency_client_requests").insert({
-                agency_id: agencyProfile.id,
-                client_id: user.id,
-                client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-                client_email: user.email,
-                status: "pending",
-                service_type: "Full Advisor Concierge",
-                created_at: new Date().toISOString()
-              });
-            }
+            await AgentClientService.createClientRequest({
+              agencyName: agent.agencyName,
+              client_id: user.id,
+              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+              client_email: user.email,
+              service_type: "Full Advisor Concierge",
+            });
           } catch (agencyErr) {
-            console.warn("Notice: agency_client_requests table query:", agencyErr);
+            console.warn("Notice: agency_client_requests API error:", agencyErr);
           }
         }
 
-        // ── COMMISSION LOGGING TO SUPABASE ───────────────────────────────────────
+        // ── COMMISSION LOGGING ───────────────────────────────────────
         if (product === "advisor" && agent?.id) {
           try {
             const agencyRef = typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null;
@@ -101,7 +121,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
             const agentCommissionAmount = amountToPay * commissionRate;
             const todovisaShareAmount = amountToPay - agentCommissionAmount;
 
-            await supabase.from("agent_commissions").insert({
+            await AgentClientService.createCommission({
               agent_id: agencyRef || agent.id,
               client_id: user.id,
               client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
@@ -114,7 +134,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               created_at: new Date().toISOString()
             });
           } catch (commErr) {
-            console.warn("Notice: agent_commissions table insert:", commErr);
+            console.warn("Notice: agent_commissions API error:", commErr);
           }
         }
 
@@ -206,28 +226,28 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
                     <span>Evaluación Diagnóstica VIPRO</span>
-                    <span>$19.99 USD</span>
+                    <span>${viproPrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
                     <span>Total a pagar vía PayPal</span>
-                    <span className="text-[#003087] text-lg font-mono font-extrabold">$19.99 USD</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${viproPrice.toFixed(2)} USD</span>
                   </div>
                 </>
               ) : (
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
                     <span>Asesoría Consular Completa (Plan Concierge)</span>
-                    <span>$150.00 USD</span>
+                    <span>${basePrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-xs text-emerald-600 font-medium">
                     <span className="flex items-center gap-1">
                       🏷️ Descuento Especial
                     </span>
-                    <span>-$37.50 USD</span>
+                    <span>-${discountAmount.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
                     <span>Total a pagar vía PayPal</span>
-                    <span className="text-[#003087] text-lg font-mono font-extrabold">$112.50 USD</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${finalPrice.toFixed(2)} USD</span>
                   </div>
                 </>
               )}
@@ -316,12 +336,15 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               </h4>
               {product === "vipro" ? (
                 <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                  Tu pago de <span className="font-bold text-text-primary">$19.99 USD</span> vía PayPal se ha registrado exitosamente.
+                  Tu pago de <span className="font-bold text-text-primary">${viproPrice.toFixed(2)} USD</span> vía PayPal se ha registrado exitosamente.
                 </p>
               ) : (
-                <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                  Tu pago de <span className="font-bold text-text-primary">$112.50 USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
+                <>
+                <h3 className="text-sm font-bold text-text-primary">Pago Exitoso</h3>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  Tu pago de <span className="font-bold text-text-primary">${finalPrice.toFixed(2)} USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
                 </p>
+                </>
               )}
             </div>
 
