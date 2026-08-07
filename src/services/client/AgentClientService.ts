@@ -36,9 +36,14 @@ export class AgentClientService {
     return handleResponse(res);
   }
 
-  static async getPortalData(userId?: string) {
+  static async getPortalData(userId?: string, applicationId?: string) {
     const headers = await getAuthHeaders();
-    const url = userId ? `/api/agents/portal?userId=${encodeURIComponent(userId)}` : "/api/agents/portal";
+    let url = "/api/agents/portal";
+    if (applicationId) {
+      url = `/api/agents/portal?id=${encodeURIComponent(applicationId)}`;
+    } else if (userId) {
+      url = `/api/agents/portal?userId=${encodeURIComponent(userId)}`;
+    }
     const res = await fetch(url, { headers });
     const result = await handleResponse(res);
     return result.data;

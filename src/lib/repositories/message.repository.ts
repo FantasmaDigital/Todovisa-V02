@@ -17,9 +17,18 @@ export class MessageRepository {
       .eq("user_id", userId)
       .order("timestamp", { ascending: true });
 
-    if (error) {
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
+  static async getMessagesByAgentId(agentId: string): Promise<MessageRecord[]> {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("agent_id", agentId)
+      .order("timestamp", { ascending: true });
+
+    if (error) throw new Error(error.message);
     return data || [];
   }
 

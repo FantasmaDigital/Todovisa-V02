@@ -358,14 +358,10 @@ export default function AgentApplyPage() {
                         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/75">Modelo de Ingresos</span>
                         <h3 className="text-lg font-bold font-serif italic text-white mt-0.5">Detalles de Ganancia</h3>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-3 text-xs">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-3 text-xs">
                         <div className="text-center">
-                          <span className="block text-2xl font-bold text-white">70%</span>
+                          <span className="block text-2xl font-bold text-white">60%</span>
                           <span className="text-white/60 leading-tight">Comisión base</span>
-                        </div>
-                        <div className="text-center">
-                          <span className="block text-2xl font-bold text-white">+10%</span>
-                          <span className="text-white/60 leading-tight">Bono excelencia</span>
                         </div>
                         <div className="text-center">
                           <span className="block text-sm font-bold text-white mt-1">Semanal</span>
@@ -377,7 +373,6 @@ export default function AgentApplyPage() {
                         </div>
                       </div>
                     </div>
-                    <p className="text-[10px] text-white/50 mt-4 leading-normal">* Bono de excelencia aplicable al mantener calificación promedio ≥ 4.8 estrellas en ciclos mensuales.</p>
                   </div>
                 </div>
               )}
@@ -875,14 +870,11 @@ export default function AgentApplyPage() {
                 </p>
                 <ul className="list-disc pl-5 mt-2 space-y-1.5">
                   <li>
-                    <strong>Comisión Base:</strong> El agente percibirá el <strong>70% del valor neto</strong> cobrado al cliente por la asesoría de visado.
+                    <strong>Comisión Base:</strong> El agente percibirá el <strong>60% del valor neto</strong> cobrado al cliente por la asesoría de visado.
                   </li>
-                  <li>
-                    <strong>Bono de Excelencia:</strong> TodoVisa otorga un <strong>+10% adicional (total de 80%)</strong> para aquellos agentes que mantengan una calificación promedio de satisfacción del cliente de 4.8/5.0 estrellas o superior, medida en ciclos mensuales.
-                  </li>
-                  <li>
+                  {/* <li>
                     <strong>Cuota de Plataforma:</strong> TodoVisa retiene un 5% sobre el valor del servicio para cubrir costos administrativos, procesamiento seguro de pagos, soporte en línea y mantenimiento de herramientas de IA.
-                  </li>
+                  </li> */}
                 </ul>
               </div>
 

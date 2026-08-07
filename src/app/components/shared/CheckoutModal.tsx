@@ -58,9 +58,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     }
   }, []);
 
-  const discountAmount = basePrice * 0.25;
-  const finalPrice = basePrice * 0.75;
-  const amountToPay = product === "vipro" ? viproPrice : finalPrice;
+  const amountToPay = product === "vipro" ? viproPrice : basePrice;
 
   const processSuccessfulPayment = async (paypalTransactionId?: string) => {
     setStep("processing");
@@ -75,7 +73,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         } else {
           updateData.has_paid_advisor = true;
           if (agent) {
-            updateData.assigned_agent_id = agent.id;
+            // Store the real Supabase user UUID (agent.userId), NOT the computed "agent-{id}" string
+            updateData.assigned_agent_id = agent.userId || agent.id;
             updateData.assigned_agency_name = agent.agencyName || null;
           }
         }
@@ -122,7 +121,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
             const todovisaShareAmount = amountToPay - agentCommissionAmount;
 
             await AgentClientService.createCommission({
-              agent_id: agencyRef || agent.id,
+              // Use real Supabase UUID for agent commission tracking
+              agent_id: agencyRef || agent.userId || agent.id,
               client_id: user.id,
               client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
               service_type: commissionType,
@@ -146,7 +146,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         } else {
           updatedStoreUser.hasPaidAdvisor = true;
           if (agent) {
-            updatedStoreUser.assignedAgentId = agent.id;
+            // Store the real UUID so messages and agent portal can find the client
+            updatedStoreUser.assignedAgentId = agent.userId || agent.id;
             updatedStoreUser.assignedAgencyName = agent.agencyName || null;
           }
         }
@@ -239,15 +240,9 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                     <span>Asesoría Consular Completa (Plan Concierge)</span>
                     <span>${basePrice.toFixed(2)} USD</span>
                   </div>
-                  <div className="flex justify-between text-xs text-emerald-600 font-medium">
-                    <span className="flex items-center gap-1">
-                      🏷️ Descuento Especial
-                    </span>
-                    <span>-${discountAmount.toFixed(2)} USD</span>
-                  </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
                     <span>Total a pagar vía PayPal</span>
-                    <span className="text-[#003087] text-lg font-mono font-extrabold">${finalPrice.toFixed(2)} USD</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${basePrice.toFixed(2)} USD</span>
                   </div>
                 </>
               )}
@@ -342,7 +337,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 <>
                 <h3 className="text-sm font-bold text-text-primary">Pago Exitoso</h3>
                 <p className="text-xs text-text-secondary leading-relaxed">
-                  Tu pago de <span className="font-bold text-text-primary">${finalPrice.toFixed(2)} USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
+                  Tu pago de <span className="font-bold text-text-primary">${amountToPay.toFixed(2)} USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
                 </p>
                 </>
               )}

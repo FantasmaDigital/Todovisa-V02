@@ -196,11 +196,28 @@ function AgentPortalContent() {
 
       // INTERRUPTOR B2B MOCK
       if (cleanId.startsWith("B2B-")) {
+        let currentUser = user;
+        if (!currentUser) {
+          try {
+            const authStorage = localStorage.getItem("auth-storage");
+            if (authStorage) {
+              const parsed = JSON.parse(authStorage);
+              currentUser = parsed?.state?.user || null;
+            }
+          } catch (_) {}
+        }
+        const mockEmail = cleanId === "B2B-MUNDO" ? "b2b@mundojoven.com" : "reservas1@volamosviajes.com";
+        if (!currentUser || (currentUser.email?.toLowerCase() !== mockEmail.toLowerCase() && currentUser.role !== "admin" && currentUser.role !== "moderator")) {
+          console.warn("Acceso no autorizado a la postulación B2B. Redireccionando al perfil.");
+          router.push("/profile");
+          return;
+        }
+
         const mockAgency: AgentApplication = {
           id: "agency-b2b-volamos",
           application_id: cleanId,
           full_name: cleanId === "B2B-MUNDO" ? "Mundo Joven B2B S.A." : "Volamos Viajes S.A. de C.V.",
-          email: cleanId === "B2B-MUNDO" ? "b2b@mundojoven.com" : "reservas1@volamosviajes.com",
+          email: mockEmail,
           phone: "+503 7020-0976",
           country_residence: "El Salvador",
           experience_years: "12",
@@ -230,52 +247,35 @@ function AgentPortalContent() {
         return;
       }
 
-      // INTERRUPTOR ASESOR INDEPENDIENTE MOCK
-      if (cleanId === "TDA-SOFIA7") {
-        const mockSofia: AgentApplication = {
-          id: "agent-1",
-          application_id: "TDA-SOFIA7",
-          full_name: "Lic. Sofía Rodríguez",
-          email: "sofia.rodriguez@todovisa.com",
-          phone: "+503 7890-1234",
-          country_residence: "México",
-          experience_years: "7",
-          linkedin: "https://linkedin.com/in/sofiarodriguez",
-          specialties: ["Turismo", "Estudio", "Negocios"],
-          target_countries: ["Estados Unidos", "Canadá"],
-          languages: ["Español", "Inglés"],
-          biography: "Asesora experta en perfiles consulares complejos. Especialista en la red TodoVisa con más de 500 casos aprobados.",
-          status: "approved",
-          terms_accepted: false,
-          documents: {},
-          is_local: true,
-          created_at: new Date().toISOString()
-        };
+      // Fetch agent application data from API
+      const portalDetails = await AgentClientService.getPortalData(undefined, cleanId);
+      const appData = portalDetails?.application;
 
-        const localSave = localStorage.getItem(`agent_app_${cleanId}`);
-        if (localSave) {
-          const parsed = JSON.parse(localSave);
-          setAgent(parsed);
-          if (parsed.signature_name) setSignatureName(parsed.signature_name);
-        } else {
-          setAgent(mockSofia);
-          localStorage.setItem(`agent_app_${cleanId}`, JSON.stringify(mockSofia));
-          if (mockSofia.full_name) setSignatureName(mockSofia.full_name);
-        }
-        setLoading(false);
-        return;
-      }
-
-      const portalData = await AgentClientService.getPortalData();
-      const data = portalData.application || portalData.fallbackData;
-
-      if (!data) {
+      if (!appData) {
         throw new Error("No se encontró ninguna postulación con el Folio provisto. Por favor verifique el código.");
       }
 
-      setAgent(data);
-      if (data.full_name) {
-        setSignatureName(data.full_name);
+      // Authorization Check
+      let currentUser = user;
+      if (!currentUser) {
+        try {
+          const authStorage = localStorage.getItem("auth-storage");
+          if (authStorage) {
+            const parsed = JSON.parse(authStorage);
+            currentUser = parsed?.state?.user || null;
+          }
+        } catch (_) {}
+      }
+
+      if (!currentUser || (currentUser.email?.toLowerCase() !== appData.email?.toLowerCase() && currentUser.role !== "admin" && currentUser.role !== "moderator")) {
+        console.warn("Acceso no autorizado a la postulación. Redireccionando al perfil.");
+        router.push("/profile");
+        return;
+      }
+
+      setAgent(appData);
+      if (appData.full_name) {
+        setSignatureName(appData.full_name);
       }
     } catch (err: unknown) {
       console.error(err);
@@ -786,21 +786,10 @@ function AgentPortalContent() {
                 <div className="flex bg-background-main p-1 rounded-sm border border-border-light">
                   <button
                     type="button"
-                    onClick={() => setLookupId("TDA-SOFIA7")}
-                    className={`flex-1 py-1.5 text-[10px] font-bold rounded-sm transition-all cursor-pointer ${
-                      lookupId.startsWith("TDA") ? "bg-white text-brand-primary border border-border-light shadow-sm" : "text-text-secondary"
-                    }`}
-                  >
-                    💼 Asesor de prueba
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setLookupId("B2B-VOLAMOS")}
-                    className={`flex-1 py-1.5 text-[10px] font-bold rounded-sm transition-all cursor-pointer ${
-                      lookupId.startsWith("B2B") ? "bg-white text-brand-primary border border-border-light shadow-sm" : "text-text-secondary"
-                    }`}
+                    className="flex-1 py-1.5 text-[10px] font-bold rounded-sm transition-all cursor-pointer bg-white text-brand-primary border border-border-light shadow-sm"
                   >
-                    🏢 Agencia de prueba
+                    🏢 Agencia de prueba (B2B-VOLAMOS)
                   </button>
                 </div>
                 <form onSubmit={handleLookupSubmit} className="space-y-3">
@@ -808,7 +797,7 @@ function AgentPortalContent() {
                     type="text"
                     value={lookupId}
                     onChange={(e) => setLookupId(e.target.value)}
-                    placeholder="TDA-SOFIA7 o B2B-VOLAMOS"
+                    placeholder="Escribe el Folio (ej: B2B-VOLAMOS)"
                     className="w-full text-center px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs font-mono font-bold focus:border-brand-primary focus:outline-none text-text-primary"
                     required
                   />
@@ -882,28 +871,108 @@ function AgentPortalContent() {
 
 
                   {/* Submission Details Summary */}
-                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
-                    <h3 className="text-md font-bold text-text-primary mb-6 pb-2 border-b border-border-light">Resumen del Expediente Enviado</h3>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs text-text-secondary">
-                      <div>
-                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Nombre Completo</span>
-                        <p>{agent.full_name}</p>
-                      </div>
-                      <div>
-                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Email</span>
-                        <p>{agent.email}</p>
-                      </div>
-                      <div>
-                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Teléfono</span>
-                        <p>{agent.phone}</p>
-                      </div>
-                      <div>
-                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Años de Experiencia</span>
-                        <p>{/^\d+$/.test(agent.experience_years.trim()) ? `${agent.experience_years} Años` : agent.experience_years}</p>
-                      </div>
+                  <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8 space-y-8">
+                    <div>
+                      <h3 className="text-md font-bold text-text-primary mb-4 pb-2 border-b border-border-light">Resumen del Expediente Enviado</h3>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 text-xs text-text-secondary">
+                        <div>
+                          <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Nombre Completo</span>
+                          <p className="font-medium text-text-primary">{agent.full_name}</p>
+                        </div>
+                        <div>
+                          <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Tipo de Socio</span>
+                          <p className="font-medium text-text-primary">
+                            {agent.application_id?.startsWith("B2B-") ? "Agencia Partner Corporativa" : "Asesor Consultor Independiente"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Email</span>
+                          <p className="font-medium text-text-primary">{agent.email}</p>
+                        </div>
+                        <div>
+                          <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Teléfono</span>
+                          <p className="font-medium text-text-primary">{agent.phone}</p>
+                        </div>
+                        <div>
+                          <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">País de Residencia</span>
+                          <p className="font-medium text-text-primary">{agent.country_residence}</p>
+                        </div>
+                        <div>
+                          <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">Años de Experiencia</span>
+                          <p className="font-medium text-text-primary">
+                            {/^\d+$/.test(String(agent.experience_years).trim()) ? `${agent.experience_years} Años` : agent.experience_years}
+                          </p>
+                        </div>
+                        {agent.linkedin && (
+                          <div className="sm:col-span-2 md:col-span-3">
+                            <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-1">LinkedIn / Portafolio</span>
+                            <a href={agent.linkedin} target="_blank" rel="noopener noreferrer" className="text-brand-primary font-medium hover:underline break-all">
+                              {agent.linkedin}
+                            </a>
+                          </div>
+                        )}
                       </div>
                     </div>
+
+                    {/* Qualifications / Profile */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 border-t border-border-light text-xs text-text-secondary">
+                      <div>
+                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-2">Especialidades</span>
+                        {agent.specialties && agent.specialties.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {agent.specialties.map((s, idx) => (
+                              <span key={idx} className="bg-gray-100 text-text-primary px-2 py-0.5 rounded text-[10px] font-medium border border-gray-200">
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="italic text-text-muted">No especificadas</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-2">Destinos de Interés</span>
+                        {agent.target_countries && agent.target_countries.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {agent.target_countries.map((c, idx) => (
+                              <span key={idx} className="bg-blue-50/50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-medium border border-blue-100">
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="italic text-text-muted">No especificados</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-2">Idiomas</span>
+                        {agent.languages && agent.languages.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {agent.languages.map((l, idx) => (
+                              <span key={idx} className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-medium border border-emerald-100">
+                                {l}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="italic text-text-muted">No especificados</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Biography */}
+                    {agent.biography && (
+                      <div className="pt-6 border-t border-border-light text-xs text-text-secondary">
+                        <span className="block font-bold text-text-primary uppercase text-[9px] tracking-wider mb-2">Carta de Presentación / Biografía</span>
+                        <p className="leading-relaxed whitespace-pre-wrap bg-background-main/30 p-4 rounded border border-border-light font-mono text-[11px] text-text-primary">
+                          {agent.biography}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                   </div>
               )}
 
@@ -1017,9 +1086,7 @@ function AgentPortalContent() {
                             Las partes pactan de mutuo acuerdo la siguiente estructura de compensación económica:
                           </p>
                           <ul className="list-disc pl-5 mt-1.5 space-y-1">
-                            <li><strong>Comisión Base (70%):</strong> El Agente percibirá el setenta por ciento (70%) neto de la tarifa de asesoría cobrada oficialmente al cliente a través de la pasarela de TodoVisa.</li>
-                            <li><strong>Bono de Excelencia (10% adicional):</strong> La Plataforma otorgará un bono extra del diez por ciento (10%), ascendiendo al ochenta por ciento (80%) total de comisión, cuando el Agente promedie una calificación de satisfacción de 4.8/5.0 estrellas en el mes.</li>
-                            <li><strong>Tarifa de Plataforma (5% retención):</strong> La Plataforma retendrá un cinco por ciento (5%) de la comisión del Agente para solventar costos operativos de facturación, pasarela de cobros segura, uso de servidores y herramientas de asistencia.</li>
+                            <li><strong>Comisión Base (60%):</strong> El Agente percibirá el sesenta por ciento (60%) neto de la tarifa de asesoría cobrada oficialmente al cliente a través de la pasarela de TodoVisa.</li>
                           </ul>
                         </div>
 
@@ -1069,7 +1136,7 @@ function AgentPortalContent() {
                           <label htmlFor="terms" className="text-xs text-text-secondary leading-normal cursor-pointer select-none text-left">
                             {agent.application_id.startsWith("B2B-") 
                               ? <span>Acepto los términos de alianza comercial corporativa, las comisiones financieras corporativas del 75% al 85% y las cláusulas penales por filtración de datos de clientes.</span>
-                              : <span>He leído en su totalidad y de conformidad, <strong>acepto los términos comerciales</strong>, las comisiones financieras del 70% (con posibilidad de 80% por bono de excelencia) y las cláusulas penales por incumplimiento de confidencialidad de datos.</span>}
+                              : <span>He leído en su totalidad y de conformidad, <strong>acepto los términos comerciales</strong>, las comisiones financieras del 60% neto y las cláusulas penales por incumplimiento de confidencialidad de datos.</span>}
                           </label>
                         </div>
 
