@@ -14,6 +14,7 @@ interface Agent {
   reviewsCount: number;
   partnerType?: string;
   agencyName?: string;
+  userId?: string;
 }
 
 interface CheckoutModalProps {
