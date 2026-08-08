@@ -6,28 +6,22 @@ import { useRouter } from 'next/navigation';
 import { AuthService } from '../../service/AuthService';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
+import supabase from '../../lib/supabase';
 
-// Helper function to handle API call for Google OAuth redirect. 
-// It redirects the user by calling a dedicated /api/auth/google endpoint.
-const handleGoogleSignInApi = async (redirectTo: string) => {
-    try {
-        console.log("Initiating Google Sign-In flow...");
-        const result = await AuthService.googleSignIn(redirectTo);
-        console.log("Respuesta de la API de Google:", result);
-
-        const urlToRedirect = result.data?.url || result.url;
-
-        if (urlToRedirect) {
-            console.log("Redirigiendo a:", urlToRedirect);
-            window.location.assign(urlToRedirect);
-        } else {
-            throw new Error('La API no devolvió una URL válida de redirección.');
-        }
-    } catch (error: unknown) {
-        const errMessage = error instanceof Error ? error.message : String(error);
-        console.error("Google Sign-In API redirect error:", errMessage);
-        throw error;
+// Llama a signInWithOAuth directamente desde el cliente para garantizar
+// que window.location.origin (la URL real de producción o dev) se use
+// siempre como redirectTo, evitando que el servidor devuelva localhost.
+const handleGoogleSignInClient = async () => {
+    const redirectTo = `${window.location.origin}/`;
+    console.log("Initiating Google Sign-In flow (client-side)...", redirectTo);
+    const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+    });
+    if (error) {
+        throw new Error(error.message);
     }
+    // Supabase redirige automáticamente al proveedor — no se necesita hacer nada más.
 };
 
 interface SignInInputs {
@@ -111,14 +105,14 @@ export function SignInForm() {
     };
 
     const handleGoogleSignIn = async () => {
-        setIsLoading(true); // Cambiamos el estado a cargando para dar feedback visual
+        setIsLoading(true);
         setAuthError(null);
         try {
-            await handleGoogleSignInApi(`${window.location.origin}/`); 
+            await handleGoogleSignInClient();
         } catch (error: unknown) {
             const errMessage = error instanceof Error ? error.message : String(error);
             setAuthError(errMessage || 'Error de red al iniciar sesión con Google');
-            setIsLoading(false); // Si falla, quitamos el estado de carga
+            setIsLoading(false);
         }
     };
 

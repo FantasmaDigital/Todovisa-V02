@@ -18,9 +18,9 @@ export class AgentRepository {
       const agencyIds = agencyProfiles.map((p) => p.id);
       const { data: agencyApps } = await supabase
         .from("agent_applications")
-        .select("user_id, specialties, target_countries, languages, experience_years, biography, status, signature_name")
+        .select("user_id, specialties, target_countries, languages, experience_years, biography, status, signature_name, signed_at")
         .in("user_id", agencyIds)
-        .eq("status", "active");
+        .not("signed_at", "is", null);
 
       agencyApps?.forEach((a) => {
         agencyAppsMap[a.user_id] = a;
@@ -35,8 +35,8 @@ export class AgentRepository {
     const [appsResult, membersResult] = await Promise.all([
       supabase
         .from("agent_applications")
-        .select("user_id, full_name, email, phone, specialties, target_countries, languages, experience_years, biography, status, application_id")
-        .eq("status", "active"),
+        .select("user_id, full_name, email, phone, specialties, target_countries, languages, experience_years, biography, status, application_id, signed_at")
+        .not("signed_at", "is", null),
       supabase
         .from("agency_members")
         .select("member_id"),
@@ -185,15 +185,22 @@ export class AgentRepository {
   }
 
   static async createAgencyClientRequest(requestData: Record<string, any>) {
-    const { data: agencyProfile } = await supabase
-      .from("profiles")
-      .select("id")
-      .ilike("first_name", `%${requestData.agencyName}%`)
-      .maybeSingle();
+    let targetAgencyId = requestData.agency_id;
 
-    if (agencyProfile?.id) {
+    if (!targetAgencyId && requestData.agencyName) {
+      const { data: agencyProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .ilike("first_name", `%${requestData.agencyName}%`)
+        .maybeSingle();
+      if (agencyProfile) {
+        targetAgencyId = agencyProfile.id;
+      }
+    }
+
+    if (targetAgencyId) {
       return await supabase.from("agency_client_requests").insert({
-        agency_id: agencyProfile.id,
+        agency_id: targetAgencyId,
         client_id: requestData.client_id,
         client_name: requestData.client_name,
         client_email: requestData.client_email,
@@ -224,8 +231,46 @@ export class AgentRepository {
     if (agentId) {
       query = query.eq("agency_id", agentId);
     }
-    const { data, error } = await query.order("created_at", { ascending: false });
+    const { data: requests, error } = await query.order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return data || [];
+
+    const clientRequests = [...(requests || [])];
+
+    if (agentId) {
+      // Find client IDs from messages table linked to this agent
+      const { data: messages } = await supabase
+        .from("messages")
+        .select("user_id")
+        .or(`agent_id.eq.${agentId},agent_id.eq.agent-${agentId}`);
+
+      if (messages && messages.length > 0) {
+        const uniqueClientIds = Array.from(new Set(messages.map(m => m.user_id).filter(Boolean)));
+        
+        for (const clientId of uniqueClientIds) {
+          if (!clientRequests.some(r => r.client_id === clientId)) {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("*")
+              .eq("id", clientId)
+              .maybeSingle();
+
+            if (profile) {
+              clientRequests.push({
+                id: `synthetic-${clientId}`,
+                agency_id: agentId,
+                client_id: clientId,
+                client_name: `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || profile.email,
+                client_email: profile.email,
+                status: "pending",
+                service_type: "Full Advisor Concierge",
+                created_at: profile.updated_at || new Date().toISOString()
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return clientRequests;
   }
 }

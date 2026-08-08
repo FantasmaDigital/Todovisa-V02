@@ -73,6 +73,19 @@ export class AuthRepository {
           if (attributes.photo_url !== undefined) profileUpdates.photo_url = attributes.photo_url;
           if (attributes.avatar_changes_this_month !== undefined) profileUpdates.avatar_changes_this_month = attributes.avatar_changes_this_month;
           if (attributes.last_avatar_change_month !== undefined) profileUpdates.last_avatar_change_month = attributes.last_avatar_change_month;
+          if (attributes.expediente_status !== undefined) profileUpdates.expediente_status = attributes.expediente_status;
+          if (attributes.has_paid_advisor !== undefined) profileUpdates.has_paid_advisor = attributes.has_paid_advisor;
+          if (attributes.assigned_agent_id !== undefined) profileUpdates.assigned_agent_id = attributes.assigned_agent_id;
+          // Sync client document uploads so agents can access them
+          if (attributes.client_docs !== undefined) profileUpdates.client_docs = attributes.client_docs;
+          // Sync DS-160 consular form fields
+          if (attributes.ds160_full_name !== undefined) profileUpdates.ds160_full_name = attributes.ds160_full_name;
+          if (attributes.ds160_passport_num !== undefined) profileUpdates.ds160_passport_num = attributes.ds160_passport_num;
+          if (attributes.ds160_birth_date !== undefined) profileUpdates.ds160_birth_date = attributes.ds160_birth_date;
+          if (attributes.ds160_purpose_of_trip !== undefined) profileUpdates.ds160_purpose_of_trip = attributes.ds160_purpose_of_trip;
+          if (attributes.ds160_has_assets !== undefined) profileUpdates.ds160_has_assets = attributes.ds160_has_assets;
+          if (attributes.ds160_confirmed !== undefined) profileUpdates.ds160_confirmed = attributes.ds160_confirmed;
+          if (attributes.document_reviews !== undefined) profileUpdates.document_reviews = attributes.document_reviews;
 
           if (Object.keys(profileUpdates).length > 0) {
             await client.from("profiles").update(profileUpdates).eq("id", user.id);
