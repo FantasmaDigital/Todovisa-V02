@@ -27,6 +27,8 @@ export interface UserData {
   expedienteStatus?: 'draft' | 'submitted' | 'approved';
   role?: string;
   hasCompletedVipro?: boolean;
+  clientDocs?: Record<string, string>;
+  documentReviews?: Record<string, any>;
 }
 
 interface AuthState {

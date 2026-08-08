@@ -88,11 +88,12 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           console.error("Failed to save status to Supabase:", err);
         }
 
-        // ── B2B AGENCY FLOW ──────────────────────────────────────────────────────
-        if (product === "advisor" && agent && agent.partnerType === "b2b_agency_entity") {
+        // ── ALWAYS LINK CLIENT TO AGENT/AGENCY UPON ADVISOR HIRE ──────────────────
+        if (product === "advisor" && agent) {
           try {
             await AgentClientService.createClientRequest({
-              agencyName: agent.agencyName,
+              agency_id: agent.userId || agent.id,
+              agencyName: agent.agencyName || null,
               client_id: user.id,
               client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
               client_email: user.email,

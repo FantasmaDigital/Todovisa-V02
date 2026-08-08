@@ -1,4 +1,16 @@
 import supabase from "@/app/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
+
+// Admin client with service role — bypasses RLS for server-side writes (used by advisor audit)
+function getAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!serviceKey) {
+    console.warn("[ProfileRepository] SUPABASE_SERVICE_ROLE_KEY not set — using anon client (RLS may block writes)");
+    return supabase;
+  }
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
+}
 
 export class ProfileRepository {
   static async getProfileById(userId: string) {
@@ -23,7 +35,8 @@ export class ProfileRepository {
   }
 
   static async updateProfile(userId: string, updates: Record<string, any>) {
-    const { data, error } = await supabase
+    const adminClient = getAdminClient();
+    const { data, error } = await adminClient
       .from("profiles")
       .update(updates)
       .eq("id", userId)

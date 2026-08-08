@@ -319,9 +319,14 @@ export default function AgentProfilePage() {
               {(!user || (user.role !== "agent" && user.role !== "agency")) && (
                 <button
                   onClick={handleHireAgent}
-                  className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+                  disabled={Boolean(user?.hasPaidAdvisor)}
+                  className={`w-full py-3 text-xs font-bold rounded transition-colors shadow-sm flex items-center justify-center gap-1.5 ${
+                    user?.hasPaidAdvisor
+                      ? "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
+                      : "bg-brand-primary hover:bg-brand-hover text-white cursor-pointer"
+                  }`}
                 >
-                  Contratar Asesoría
+                  {user?.hasPaidAdvisor ? "Asesoría Contratada" : "Contratar Asesoría"}
                 </button>
               )}
 

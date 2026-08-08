@@ -472,14 +472,19 @@ export default function AgentesPage() {
                        Ver Perfil
                      </button>
 
-                     {(!user || (user.role !== "agent" && user.role !== "agency")) && (
-                       <button
-                         onClick={() => handleHireAgent(agent)}
-                         className="flex-1 px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 shadow-sm"
-                       >
-                         Contratar Asesoría
-                       </button>
-                     )}
+                      {(!user || (user.role !== "agent" && user.role !== "agency")) && (
+                        <button
+                          onClick={() => handleHireAgent(agent)}
+                          disabled={Boolean(user?.hasPaidAdvisor)}
+                          className={`flex-1 px-4 py-2 text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 ${
+                            user?.hasPaidAdvisor
+                              ? "bg-gray-200 text-gray-400 border border-gray-200 cursor-not-allowed shadow-none"
+                              : "bg-brand-primary hover:bg-brand-hover text-white shadow-sm"
+                          }`}
+                        >
+                          {user?.hasPaidAdvisor ? "Asesoría Contratada" : "Contratar Asesoría"}
+                        </button>
+                      )}
                   </div>
                 </div>
               ))}
