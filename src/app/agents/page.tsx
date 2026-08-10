@@ -177,9 +177,9 @@ export default function AgentesPage() {
       <Header headerRef={headerRef} />
 
       {/* Banner de Bienvenida */}
-      <div className="w-full bg-brand-primary py-14 px-6 relative overflow-hidden">
+      <div className="w-full bg-brand-primary py-14 px-4 sm:px-6 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        <div className="w-[80%] mx-auto relative z-10">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-3">Red TodoVisa</p>
           <h1 className="text-4xl md:text-5xl text-white leading-tight mb-4 font-semibold font-serif italic">
             Encuentra a tu agente certificado
@@ -190,7 +190,7 @@ export default function AgentesPage() {
         </div>
       </div>
 
-      <main className="w-[80%] mx-auto py-12 flex-1 flex flex-col lg:flex-row gap-8">
+      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12 flex-1 flex flex-col lg:flex-row gap-8">
 
         {/* Panel Izquierdo: Filtros */}
         <aside className="w-full lg:w-1/4 flex-shrink-0">

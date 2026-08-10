@@ -223,6 +223,113 @@ export default function PerfilUsuarioPage() {
   const [docReviews, setDocReviews] = useState<Record<string, { status: 'approved' | 'observed' | 'rejected' | 'pending'; comment: string }>>({});
   const [auditExpedienteStatus, setAuditExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>('submitted');
   const [isSavingAudit, setIsSavingAudit] = useState(false);
+  const [isAgentProposingCita, setIsAgentProposingCita] = useState(false);
+  const [agentCitaProposal, setAgentCitaProposal] = useState({
+    proposedDate: "",
+    proposedTime: "10:00",
+    agentNotes: "",
+  });
+
+  const handleAgentAcceptCita = async (agentNotes?: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "confirmed" as const,
+        confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
+        confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
+        agent_notes: agentNotes || "Cita admitida y confirmada por el asesor.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+
+      const msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs. ${agentNotes ? `\n\n💬 Nota del Asesor: "${agentNotes}"` : ""}`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Cita admitida y confirmada exitosamente.", "success");
+    } catch (err: any) {
+      console.error("Error al admitir cita:", err);
+      showToast("Error al admitir cita: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleAgentRejectCita = async (agentNotes?: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "rejected" as const,
+        agent_notes: agentNotes || "La cita ha sido rechazada por el asesor.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+
+      const msgText = `❌ Tu solicitud de cita ha sido rechazada por el asesor. ${agentNotes ? `\n\n💬 Motivo/Observación: "${agentNotes}"` : ""}\n\nPuedes ingresar al apartado de Citas y reagendar en un nuevo horario.`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Cita rechazada. Se notificó al cliente.", "info");
+    } catch (err: any) {
+      console.error("Error al rechazar cita:", err);
+      showToast("Error al rechazar cita: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleAgentProposeCita = async () => {
+    if (!selectedClientProfile || !agentCitaProposal.proposedDate) {
+      showToast("Selecciona una fecha válida para proponer al cliente.", "error");
+      return;
+    }
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "proposed" as const,
+        agent_proposed_date: agentCitaProposal.proposedDate,
+        agent_proposed_time: agentCitaProposal.proposedTime,
+        agent_notes: agentCitaProposal.agentNotes || "El asesor propone este nuevo horario.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+      setIsAgentProposingCita(false);
+
+      const msgText = `📅 El asesor ha propuesto un NUEVO HORARIO para la cita:\n- Fecha propuesta: ${agentCitaProposal.proposedDate}\n- Hora propuesta: ${agentCitaProposal.proposedTime} hrs${agentCitaProposal.agentNotes ? `\n- Nota: ${agentCitaProposal.agentNotes}` : ""}\n\nIngresa al apartado de Citas para Aceptar la propuesta.`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Propuesta de cita enviada al cliente.", "success");
+    } catch (err: any) {
+      console.error("Error al proponer cita:", err);
+      showToast("Error al proponer cita: " + (err.message || String(err)), "error");
+    }
+  };
   const [assignedAgencyProfile, setAssignedAgencyProfile] = useState<any | null>(null);
   const [assignedAgentProfile, setAssignedAgentProfile] = useState<any | null>(null);
   const [realAgentsData, setRealAgentsData] = useState<any[]>([]);
@@ -831,7 +938,7 @@ export default function PerfilUsuarioPage() {
             ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
-            expedienteStatus: metadata.expediente_status || dbProfile?.expediente_status || 'draft',
+            expedienteStatus: dbProfile?.expediente_status || metadata.expediente_status || 'draft',
             role: finalRole,
             clientDocs: metadata.client_docs || {},
             documentReviews: dbProfile?.document_reviews || metadata.document_reviews || {},
@@ -2987,10 +3094,10 @@ export default function PerfilUsuarioPage() {
                               {expedienteStatus === 'approved' && (
                                 <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
                                   <button
-                                    onClick={() => setActiveTab("asesor")}
+                                    onClick={() => router.push(`/citas?processId=${user.id}`)}
                                     className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
                                   >
-                                    🎥 Coordinar Fechas / Buzón por Chat &rarr;
+                                    🎥 Coordinar Fechas / Citas →
                                   </button>
                                 </div>
                               )}
@@ -4964,7 +5071,7 @@ export default function PerfilUsuarioPage() {
                                 {/* Header strip */}
                                 <div className="px-5 py-4 bg-white border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                   <div>
-                                    <h3 className="font-extrabold text-slate-800 text-[13px] tracking-tight">📂 Expediente Consular</h3>
+                                    <h3 className="font-extrabold text-slate-800 text-[13px] tracking-tight">📋 Expediente y Auditoría Consular</h3>
                                     <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
                                       {selectedClientProfile?.first_name} {selectedClientProfile?.last_name} — Revisa y dictamina cada documento
                                     </p>
@@ -4983,7 +5090,206 @@ export default function PerfilUsuarioPage() {
                                   </div>
                                 </div>
 
-                                <div className="p-4 space-y-3">
+                                <div className="p-5 space-y-6">
+                                  {/* BLOQUE 1: GESTIÓN Y APROBACIÓN DE CITAS CONSULARES */}
+                                  {(() => {
+                                    const clientAppt = selectedClientProfile?.appointment_request || selectedClientProfile?.cita_details || selectedClientProfile?.document_reviews?.appointment_request || selectedClientProfile?.document_reviews?.cita_details;
+                                    return (
+                                      <div className="bg-white border-2 border-brand-primary/30 rounded-2xl p-5 shadow-md space-y-4">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                          <div>
+                                            <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                                              <span className="text-base">📅</span>
+                                              <span>Aprobación y Agendamiento de Cita / Simulacro</span>
+                                            </h4>
+                                            <p className="text-[11px] text-slate-500 mt-0.5">Admite, propone o rechaza los horarios para la cita del cliente.</p>
+                                          </div>
+                                          <span className={`text-[10px] font-extrabold px-3 py-1 rounded-full ${
+                                            clientAppt?.status === 'confirmed'
+                                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                              : clientAppt?.status === 'rejected'
+                                                ? 'bg-red-100 text-red-800 border border-red-300'
+                                                : clientAppt?.status === 'proposed'
+                                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
+                                          }`}>
+                                            {clientAppt?.status === 'confirmed' ? '✓ CITA CONFIRMADA' :
+                                             clientAppt?.status === 'rejected' ? '✕ RECHAZADA' :
+                                             clientAppt?.status === 'proposed' ? '⚡ PROPUESTA ENVIADA' : '⏳ PENDIENTE DE REVISIÓN'}
+                                          </span>
+                                        </div>
+
+                                        {clientAppt ? (
+                                          <div className="space-y-4">
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Trámite</span>
+                                                <span className="font-semibold text-slate-800 block mt-0.5">{clientAppt.appointment_type}</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Fecha Solicitada</span>
+                                                <span className="font-bold text-blue-800 block mt-0.5">{clientAppt.requested_date || clientAppt.confirmed_date}</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Hora Solicitada</span>
+                                                <span className="font-bold text-blue-800 block mt-0.5">{clientAppt.requested_time || clientAppt.confirmed_time} hrs</span>
+                                              </div>
+                                            </div>
+
+                                            {clientAppt.client_notes && (
+                                              <p className="text-xs text-slate-700 italic bg-slate-100/70 p-3 rounded-xl border border-slate-200">
+                                                💬 Comentario del Cliente: &quot;{clientAppt.client_notes}&quot;
+                                              </p>
+                                            )}
+
+                                            {/* Input para Comentario / Respuesta del Asesor */}
+                                            <div>
+                                              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                                Respuesta / Comentario del Asesor para el Cliente
+                                              </label>
+                                              <input
+                                                type="text"
+                                                value={agentCitaProposal.agentNotes}
+                                                onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
+                                                placeholder="Ej. Cita aprobada exitosamente. Favor conectarse a Zoom 5 min antes..."
+                                                className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium"
+                                              />
+                                            </div>
+
+                                            {/* Botones de Acción Directa del Asesor */}
+                                            <div className="flex flex-wrap gap-2.5 pt-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAgentAcceptCita(agentCitaProposal.agentNotes)}
+                                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                                              >
+                                                <span>✅</span>
+                                                <span>Admitir / Aprobar Cita</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setIsAgentProposingCita(!isAgentProposingCita)}
+                                                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                                              >
+                                                <span>📅</span>
+                                                <span>Proponer Horario Alternativo</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAgentRejectCita(agentCitaProposal.agentNotes)}
+                                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                                              >
+                                                <span>❌</span>
+                                                <span>Rechazar Cita</span>
+                                              </button>
+                                            </div>
+
+                                            {/* Formulario de Proposición de Horario Alternativo por el Asesor */}
+                                            {isAgentProposingCita && (
+                                              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 animate-in fade-in duration-200">
+                                                <span className="text-xs font-extrabold text-amber-950 block">Ingresa la nueva fecha y hora propuesta al cliente:</span>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Nueva Fecha Propuesta</span>
+                                                    <input
+                                                      type="date"
+                                                      value={agentCitaProposal.proposedDate}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedDate: e.target.value }))}
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Nueva Hora Propuesta</span>
+                                                    <input
+                                                      type="text"
+                                                      value={agentCitaProposal.proposedTime}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedTime: e.target.value }))}
+                                                      placeholder="Ej. 14:00"
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleAgentProposeCita}
+                                                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                                >
+                                                  📩 Enviar Propuesta al Cliente por Chat
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-center">
+                                            <p className="text-xs text-slate-600 font-medium">El cliente aún no ha registrado una solicitud de cita en el portal.</p>
+                                            <button
+                                              type="button"
+                                              onClick={() => setIsAgentProposingCita(!isAgentProposingCita)}
+                                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                                            >
+                                              <span>📅</span>
+                                              <span>Asignar Horario de Cita al Cliente</span>
+                                            </button>
+                                            {isAgentProposingCita && (
+                                              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 text-left animate-in fade-in duration-200 mt-2">
+                                                <span className="text-xs font-extrabold text-amber-950 block">Asignar / Proponer Cita al Cliente:</span>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Fecha</span>
+                                                    <input
+                                                      type="date"
+                                                      value={agentCitaProposal.proposedDate}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedDate: e.target.value }))}
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Hora</span>
+                                                    <input
+                                                      type="text"
+                                                      value={agentCitaProposal.proposedTime}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedTime: e.target.value }))}
+                                                      placeholder="Ej. 10:00"
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <div>
+                                                  <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Comentario para el cliente</span>
+                                                  <input
+                                                    type="text"
+                                                    value={agentCitaProposal.agentNotes}
+                                                    onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
+                                                    placeholder="Comentario sobre el horario..."
+                                                    className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                  />
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleAgentProposeCita}
+                                                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                                >
+                                                  📩 Notificar Cita al Cliente
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+
+                                  {/* BLOQUE 2: AUDITORÍA DE DOCUMENTACIÓN CONSULAR */}
+                                  <div className="space-y-3 pt-2">
+                                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                      <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                                        <span>📂</span>
+                                        <span>Documentación Adjunta y Formulario Consular</span>
+                                      </h4>
+                                      <span className="text-[10px] text-slate-400 font-bold">4 Requisitos + DS-160</span>
+                                    </div>
+
+                                  {/* Documents grid */}
                                   {/* Documents grid */}
                                   {[
                                     { key: "passport", label: "Pasaporte Vigente", desc: "Primera página con datos de identidad", icon: "🛂", color: "blue" },
@@ -5178,7 +5484,8 @@ export default function PerfilUsuarioPage() {
                                   </div>
                                 </div>
 
-                                {/* Save footer */}
+                                </div>
+                                 {/* Save footer */}
                                 <div className="sticky bottom-0 bg-white border-t border-slate-100 px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
                                   <span className="text-[10px] text-slate-400">Los cambios se notificarán al cliente vía chat automáticamente.</span>
                                   <button

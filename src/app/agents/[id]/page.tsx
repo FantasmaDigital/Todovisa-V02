@@ -121,7 +121,7 @@ export default function AgentProfilePage() {
     <div className="min-h-screen w-full flex flex-col bg-background-main font-sans">
       <Header headerRef={headerRef} />
 
-      <main className="w-[80%] mx-auto py-12 flex-1 flex flex-col gap-6 text-left">
+      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12 flex-1 flex flex-col gap-6 text-left">
         {/* Back Navigation */}
         <div className="mb-2">
           <button

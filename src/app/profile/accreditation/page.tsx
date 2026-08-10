@@ -188,7 +188,7 @@ export default function AcreditacionPage() {
     <div className="min-h-screen w-full flex flex-col bg-background-main">
       <Header headerRef={headerRef} />
 
-      <main className="w-[80%] mx-auto py-10 flex-grow text-left">
+      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10 flex-grow text-left">
         {/* Back navigation */}
         <div className="mb-6">
           <button

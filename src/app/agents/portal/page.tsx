@@ -654,9 +654,9 @@ function AgentPortalContent() {
       <Header headerRef={headerRef} />
 
       {/* Hero Banner */}
-      <div className="w-full bg-brand-primary text-white py-12 px-6 relative overflow-hidden flex-shrink-0">
+      <div className="w-full bg-brand-primary text-white py-12 px-4 sm:px-6 relative overflow-hidden flex-shrink-0">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        <div className="w-[80%] mx-auto relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div>
             <p className="text-xs font-bold tracking-[0.2em] text-emerald-400 uppercase mb-2">Mi Acreditación Red TodoVisa</p>
             <h1 className="text-3xl md:text-4xl font-serif text-white font-semibold leading-tight">
@@ -675,7 +675,7 @@ function AgentPortalContent() {
         </div>
       </div>
 
-      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col gap-8">
+      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10 flex-1 flex flex-col gap-8">
         {agent && agent.status === "approved" && !agent.signed_at && (
           <div className="bg-amber-50 border border-amber-200 rounded-sm p-6 text-left shadow-xs flex flex-col gap-2">
             <div className="flex items-center gap-2 text-amber-800 font-bold text-sm">

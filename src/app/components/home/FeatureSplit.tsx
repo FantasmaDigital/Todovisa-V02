@@ -29,9 +29,9 @@ const Section1 = ({ scrollYProgress }) => {
     <motion.section
       id="asesoria-virtual"
       style={{ scale, rotate, z: 0 }}
-      className='sticky top-0 h-screen bg-background-main flex flex-col items-center justify-center text-text-primary antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
+      className='sticky top-0 min-h-screen py-12 lg:py-0 bg-background-main flex flex-col items-center justify-center text-text-primary antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
     >
-      <div className="w-[80%] mx-auto flex flex-col lg:flex-row items-center gap-16 relative z-10">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row items-center gap-8 lg:gap-16 relative z-10">
         <div className="w-full lg:w-1/2">
           <div className="rounded-xl relative w-full aspect-[4/5] md:aspect-square rounded-sm overflow-hidden border border-border-light bg-white">
             <img
@@ -68,9 +68,9 @@ const Section2 = ({ scrollYProgress }) => {
     <motion.section
       id="evaluacion-vipro"
       style={{ scale, rotate, z: 0 }}
-      className='sticky top-0 h-screen bg-background-main text-text-primary flex flex-col items-center justify-center border-t border-border-light shadow-[0_-20px_50px_rgba(0,0,0,0.03)] antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
+      className='sticky top-0 min-h-screen py-12 lg:py-0 bg-background-main text-text-primary flex flex-col items-center justify-center border-t border-border-light shadow-[0_-20px_50px_rgba(0,0,0,0.03)] antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
     >
-      <div className="w-[80%] mx-auto flex flex-col lg:flex-row-reverse items-center gap-16 relative z-10">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row-reverse items-center gap-8 lg:gap-16 relative z-10">
         <div className="w-full lg:w-1/2">
           <div className="rounded-xl relative w-full aspect-[4/5] md:aspect-square rounded-sm overflow-hidden shadow-sm border border-border-light bg-white">
             <img
@@ -107,9 +107,9 @@ const Section3 = ({ scrollYProgress }) => {
     <motion.section
       id="cita-virtual"
       style={{ scale, rotate, z: 0 }}
-      className='relative h-screen bg-background-main text-text-primary flex flex-col items-center justify-center border-t border-border-light shadow-[0_-20px_50px_rgba(0,0,0,0.05)] antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
+      className='relative min-h-screen py-12 lg:py-0 bg-background-main text-text-primary flex flex-col items-center justify-center border-t border-border-light shadow-[0_-20px_50px_rgba(0,0,0,0.05)] antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
     >
-      <div className="w-[80%] mx-auto flex flex-col lg:flex-row items-center gap-16 relative z-10">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row items-center gap-8 lg:gap-16 relative z-10">
         <div className="w-full lg:w-1/2">
           <div className="rounded-xl relative w-full aspect-[4/5] md:aspect-square rounded-sm overflow-hidden shadow-sm border border-border-light bg-white">
             <img

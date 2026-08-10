@@ -30,9 +30,9 @@ export default function VisaDetailPage() {
             <Header headerRef={headerRef} />
 
             {/* Hero Banner */}
-            <div className="w-full bg-brand-primary px-6 py-16 relative overflow-hidden">
+            <div className="w-full bg-brand-primary px-4 sm:px-6 py-16 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                <div className="w-[80%] mx-auto flex flex-col md:flex-row gap-10 items-center relative z-10">
+                <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row gap-10 items-center relative z-10">
                     {/* Text */}
                     <div className="text-left">
                         <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-2">Guía de Visa</p>
@@ -46,7 +46,7 @@ export default function VisaDetailPage() {
                 </div>
             </div>
 
-            <main className="w-[80%] mx-auto py-16 flex flex-col gap-16">
+            <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-16 flex flex-col gap-16">
 
                 {/* Requirements */}
                 <section>

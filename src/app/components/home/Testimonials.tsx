@@ -17,7 +17,7 @@ export const Testimoniasl = () => {
     };
     return (
         <section className="w-full bg-[#EFF5F0] py-28 mt-12 overflow-hidden">
-            <div className="w-[90%] max-w-6xl mx-auto flex flex-col justify-center min-h-[320px]">
+            <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col justify-center min-h-[320px]">
 
                 <AnimatePresence mode="wait" initial={false}>
                     <motion.p

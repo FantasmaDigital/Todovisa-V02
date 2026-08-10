@@ -261,7 +261,7 @@ export default function AgentApplyPage() {
     <div className="flex flex-col min-h-screen bg-background-main font-sans">
       <Header />
 
-      <main className="w-[80%] mx-auto py-12 flex-grow">
+      <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12 flex-grow">
         {!isSubmitted ? (
           <div className="bg-white border border-border-light shadow-sm rounded-sm p-6 sm:p-10 transition-all duration-300">
             {/* Page Header */}

@@ -2,6 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { UserAvatar } from "./UserAvatar"
 import { useState, useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
@@ -11,10 +12,18 @@ import { ROLES } from "@/app/constants/roles"
 import { visaDestinations } from "@/app/constants/visas/destinations"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
+    const pathname = usePathname();
     const user = useAuthStore((state) => state.user);
     const [isMounted, setIsMounted] = useState(false);
     const [showLoader, setShowLoader] = useState(true);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+    const handleLogoClick = (e: React.MouseEvent) => {
+        if (pathname === "/") {
+            e.preventDefault();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+    };
 
     useEffect(() => {
         setIsMounted(true);
@@ -126,9 +135,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                     // Fetch profile role now that we have the userId — this is the only call we can't parallelize
                     // without the user id, but we avoided the getSession() call above being repeated.
                     let profileRole = null;
+                    let dbProfile: any = null;
                     try {
                         const profileRes = await ProfileClientService.getProfile(supabaseUser.id);
-                        profileRole = profileRes?.profile?.role;
+                        dbProfile = profileRes?.profile || null;
+                        profileRole = dbProfile?.role;
                     } catch (pErr) {
                         console.warn("Could not fetch profile role:", pErr);
                     }
@@ -155,7 +166,10 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
                         ds160HasAssets: metadata.ds160_has_assets ?? true,
                         ds160Confirmed: metadata.ds160_confirmed || false,
-                        expedienteStatus: metadata.expediente_status || 'draft',
+                        expedienteStatus: dbProfile?.expediente_status || metadata.expediente_status || 'draft',
+                        clientDocs: dbProfile?.client_docs || metadata.client_docs || {},
+                        documentReviews: dbProfile?.document_reviews || metadata.document_reviews || {},
+                        appointmentRequest: dbProfile?.appointment_request || dbProfile?.cita_details || metadata.appointment_request || null,
                         role: (profileRole as typeof ROLES[keyof typeof ROLES]) || ROLES.USER,
                     };
 
@@ -207,7 +221,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         {/* LEFT SECTION: Logo & Desktop Links */}
                         <div className="flex items-center gap-10">
                             <div className="flex-shrink-0">
-                                <Link href="/">
+                                <Link href="/" onClick={handleLogoClick}>
                                     <Image
                                         src="/images/todovisa.png"
                                         alt="Logo TODOVISA"
@@ -403,7 +417,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                     {/* Mobile menu dropdown */}
                     {isMenuOpen && (
-                        <div className="lg:hidden w-full bg-white border-t border-border-light shadow-xl absolute top-full left-0 z-40 py-6 px-[6%] flex flex-col gap-6 animate-in slide-in-from-top duration-250">
+                        <div className="lg:hidden w-full bg-white border-t border-border-light shadow-xl absolute top-full left-0 z-40 py-6 px-6 max-h-[85vh] overflow-y-auto flex flex-col gap-6 animate-in slide-in-from-top duration-250">
                             {/* Navigation Links */}
                             <div className="flex flex-col gap-5 text-sm font-semibold text-text-secondary text-left">
                                 {/* Visas Group */}

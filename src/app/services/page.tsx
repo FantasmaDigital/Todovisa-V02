@@ -109,9 +109,9 @@ export default function ServicesPage() {
         <div className="min-h-screen w-full flex flex-col bg-background-main">
             <Header headerRef={headerRef} />
 
-            <div className="w-full bg-brand-primary py-14 px-6 relative overflow-hidden">
+            <div className="w-full bg-brand-primary py-14 px-4 sm:px-6 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                <div className="w-[80%] mx-auto relative z-10">
+                <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
                     <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-3">Nuestros servicios</p>
                     <h1 className="text-4xl md:text-5xl text-white leading-tight mb-4 font-semibold font-serif italic">
                         Asesoría de visas para todo el mundo
@@ -123,7 +123,7 @@ export default function ServicesPage() {
                 </div>
             </div>
 
-            <main className="w-[80%] mx-auto py-14 flex-1 space-y-16">
+            <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14 flex-1 space-y-16">
                 <section className="bg-white border border-border-light rounded-2xl p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.03)] text-left">
                     <div className="text-center max-w-3xl mx-auto mb-12 space-y-3">
                         <span className="inline-block text-[11px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">

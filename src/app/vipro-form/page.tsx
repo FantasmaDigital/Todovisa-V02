@@ -100,7 +100,7 @@ function ViproFormContent() {
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
             <Header headerRef={headerRef} />
-            <main className="w-[80%] mx-auto py-12 md:py-20 flex flex-col gap-24 flex-1">
+            <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-16 flex flex-col gap-16 md:gap-24 flex-1">
                 <div className="flex flex-col md:flex-row items-center gap-20">
                     <div className="w-full md:w-1/2 flex flex-col items-start gap-6">
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-text-primary leading-tight tracking-tight text-left">
