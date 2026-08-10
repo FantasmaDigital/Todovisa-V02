@@ -9,12 +9,12 @@ export interface UserData {
   phone: string;
   country: string;
   hasPaidAdvisor?: boolean;
-  hasPaidVipro?: boolean;
   assignedAgentId?: string | null;
-  hasCompletedVipro?: boolean;
+  assignedAgencyName?: string | null;
   viproScore?: number | null;
   viproCompleted?: boolean;
   viproDestination?: string | null;
+  hasPaidVipro?: boolean;
   photoUrl?: string | null;
   avatarChangesThisMonth?: number;
   lastAvatarChangeMonth?: string;
@@ -25,6 +25,10 @@ export interface UserData {
   ds160HasAssets?: boolean;
   ds160Confirmed?: boolean;
   expedienteStatus?: 'draft' | 'submitted' | 'approved';
+  role?: string;
+  hasCompletedVipro?: boolean;
+  clientDocs?: Record<string, string>;
+  documentReviews?: Record<string, any>;
 }
 
 interface AuthState {
@@ -42,14 +46,6 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage', // Nombre para el localStorage
-      partialize: (state) => ({
-        user: state.user
-          ? {
-              ...state.user,
-              photoUrl: null, // Exclude heavy image from localStorage to prevent QuotaExceededError
-            }
-          : null,
-      }),
     }
   )
 );

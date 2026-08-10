@@ -5,19 +5,19 @@ export type FAQs = {
 
 export const faqs: FAQs[] = [
     {
-        question: "¿Cómo logran su alta tasa de éxito?",
-        answer: "Analizamos detalladamente el perfil de cada solicitante utilizando nuestro sistema de evaluación y la experiencia de asesores consulares para identificar fortalezas y corregir debilidades antes de la entrevista."
+        question: "¿Cómo funciona la Evaluación Diagnóstica VIPRO ($19.99 USD)?",
+        answer: "VIPRO es nuestro sistema de inteligencia consular algorítmica para Estados Unidos 🇺🇸, Canadá 🇨🇦, Australia 🇦🇺 y Reino Unido 🇬🇧. Analiza tus lazos de solvencia laboral, familiar y de arraigo conforme al artículo 214(b) o normativas IRCC/UKVI, otorgándote un scoring predictivo (0-100 pts), detección de riesgos y un 25% de reembolso directo si decides contratar la Asesoría Integral con Asesor Certificado."
     },
     {
-        question: "¿Cómo puedo iniciar mi trámite?",
-        answer: "El primer paso es completar el Formulario VIPRO de evaluación inicial. Esto nos permite conocer tus antecedentes de viaje, trabajo y solvencia para recomendarte la mejor estrategia de visado."
+        question: "¿Cómo funciona la Renovación de Visa de EE.UU. sin entrevista (Interview Waiver / Drop Box)?",
+        answer: "Si tu visa B1/B2 anterior expiró dentro de los últimos 48 meses (o sigue vigente) y pertenece a la misma categoría, calificas al programa de Exención de Entrevista. Te preparamos el paquete de expediente para entregarlo directamente en el Centro de Atención a Solicitantes (CAS) o sucursal de Courier autorizada sin acudir a entrevista presencial ante un oficial consular."
     },
     {
-        question: "¿Cómo ayuda TODOVISA a mejorar mis probabilidades de aprobación?",
-        answer: "Te guiamos en la recolección de documentos de soporte idóneos, revisamos minuciosamente el llenado de los formularios oficiales y te preparamos a través de simulacros de entrevista basados en preguntas reales de la embajada."
+        question: "¿Cómo es el proceso para Renovaciones de México, Canadá, Australia y Reino Unido?",
+        answer: "Para México, Canadá, Australia y el Reino Unido, la renovación requiere la presentación de formularios y expediente formal. Sin embargo, haber contado con un visado previo sin faltas migratorias te otorga un perfil de 'Bajo Riesgo Migratorio', garantizando una tramitación prioritaria y una tasa de éxito sumamente elevada."
     },
     {
-        question: "¿Cuánto cuesta el servicio de TODOVISA?",
-        answer: "Ofrecemos diferentes planes que se adaptan a tus necesidades, desde evaluaciones express hasta acompañamiento integral de servicio completo. Puedes consultar nuestros precios detallados contactando a un asesor."
+        question: "¿Qué incluye la Asesoría Consular Completa ($150 USD / $112.50 USD con VIPRO)?",
+        answer: "Incluye la asignación de un Asesor Certificado 1-a-1, llenado y revisión exhaustiva de tu preformulario y formulario oficial (DS-160 / UKVI), auditoría de expediente probatorio, agendamiento de citas, simulacros de entrevista consular presencial por Zoom y monitoreo del pasaporte hasta su entrega por courier."
     }
 ];

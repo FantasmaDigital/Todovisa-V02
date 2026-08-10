@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
-import agentsData from "../dummies/agents.json";
+import { UserAvatar } from "../components/shared/UserAvatar";
 import { useAuthStore } from "../store/authStore";
+import { AgentClientService } from "@/services/client/AgentClientService";
 import { useRouter } from "next/navigation";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 
@@ -23,22 +24,26 @@ interface Agent {
   bio: string;
   whatsapp: string;
   featured: boolean;
+  partnerType: "outsourced_agent" | "b2b_agency_entity";
+  agencyName?: string;
+  /** real user_id from profiles/agent_applications, used for checkout */
+  userId?: string;
 }
 
 export default function AgentesPage() {
   const headerRef = useRef(null);
   const router = useRouter();
   const { user } = useAuthStore();
-  
+
   // State for filters
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCountry, setSelectedCountry] = useState("Todos");
   const [selectedSpecialty, setSelectedSpecialty] = useState("Todos");
   const [selectedLanguage, setSelectedLanguage] = useState("Todos");
   const [selectedAvailability, setSelectedAvailability] = useState("Todos");
-  
-  // State for active modal agent
-  const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
+
+
+
 
   // Checkout modal states
   const [checkoutAgent, setCheckoutAgent] = useState<Agent | null>(null);
@@ -47,52 +52,93 @@ export default function AgentesPage() {
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // ── REAL DATA FROM SUPABASE ───────────────────────────────────────────────
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setToast({ message, type });
-    setTimeout(() => {
-      setToast(null);
-    }, 4000);
+    setTimeout(() => setToast(null), 4000);
   };
+
+  useEffect(() => {
+    const fetchFromDB = async () => {
+      setLoadingAgents(true);
+      const list: Agent[] = [];
+
+      try {
+        const data = await AgentClientService.getAgents();
+        const agencyProfiles = data.agencyProfiles || [];
+        const agencyAppsMap = data.agencyAppsMap || {};
+        const activeApps = data.activeApps || [];
+        const agencyMemberIds = new Set(data.agencyMemberIds || []);
+
+        // 1. Agencies (B2B Agencies are not listed directly for hire, they operate via referral links)
+
+        // 2. Independent agents
+        const agencyUserIds = new Set(agencyProfiles.map((p: any) => p.id));
+        activeApps.forEach((app: any) => {
+          if (agencyMemberIds.has(app.user_id) || agencyUserIds.has(app.user_id)) return;
+          if (app.application_id?.startsWith("B2B-")) return;
+
+          const phone = app.phone?.replace(/\D/g, "") || "50370200976";
+          list.push({
+            id: `agent-${app.user_id || app.application_id}`,
+            userId: app.user_id,
+            name: app.full_name || app.email || "Asesor TodoVisa",
+            title: `Asesor Independiente · ${(app.specialties || ["General"])[0]}`,
+            photo: app.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(app.full_name || "Asesor")}&background=0d9488&color=fff&size=200`,
+            rating: 4.8,
+            reviewsCount: 0,
+            languages: app.languages || ["Español"],
+            countries: app.target_countries || ["Estados Unidos"],
+            specialties: app.specialties || ["Asesoría General"],
+            experience: app.experience_years ? (/^\d+$/.test(app.experience_years.trim()) ? `${app.experience_years} años` : app.experience_years) : "—",
+            availability: "Inmediata",
+            bio: app.biography || "Asesor consular certificado en la red TodoVisa.",
+            whatsapp: `https://wa.me/${phone}?text=Hola,%20me%20gustar%C3%ADa%20recibir%20asesor%C3%ADa.`,
+            featured: false,
+            partnerType: "outsourced_agent",
+          });
+        });
+      } catch (err) {
+        console.error("Error fetching agents from DB:", err);
+      }
+
+      setAgents(list);
+      setLoadingAgents(false);
+    };
+
+    fetchFromDB();
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleHireAgent = (agent: Agent) => {
     if (!user) {
       showToast("Por favor, inicia sesión para poder contratar a este asesor.", "info");
-      setTimeout(() => {
-        router.push("/auth/signin");
-      }, 1500);
+      setTimeout(() => router.push("/auth/signin"), 1500);
       return;
     }
-    
+    if (user.role === "agent" || user.role === "agency") {
+      showToast("Los agentes y agencias no pueden contratar asesoría.", "error");
+      return;
+    }
     if (user.hasPaidAdvisor) {
       showToast("Ya tienes contratada una asesoría activa. Redirigiendo a tu chat...", "info");
-      setTimeout(() => {
-        router.push("/profile?tab=asesor");
-      }, 1500);
+      setTimeout(() => router.push("/profile?tab=asesor"), 1500);
       return;
     }
-
     setCheckoutAgent(agent);
     setIsCheckoutOpen(true);
   };
 
-  // Lists of unique values for filters
-  const countries = ["Todos", "Estados Unidos", "Canadá", "México", "Inglaterra", "Australia"];
-  const specialties = [
-    "Todos",
-    "Turismo",
-    "Estudio",
-    "Trabajo",
-    "Negocios",
-    "Inversión",
-    "Renovación",
-    "Preparación Consular",
-    "Tránsito/Tripulante"
-  ];
-  const languages = ["Todos", "Español", "Inglés", "Francés", "Portugués"];
+  // Build dynamic filter options from real data
+  const allCountries = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.countries))).sort()];
+  const allSpecialties = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.specialties))).sort()];
+  const allLanguages = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.languages))).sort()];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
-
   // Filter logic
-  const filteredAgents = (agentsData as Agent[]).filter((agent) => {
+  const filteredAgents = agents.filter((agent) => {
     const matchesSearch =
       agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       agent.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -113,6 +159,7 @@ export default function AgentesPage() {
     const matchesAvailability =
       selectedAvailability === "Todos" ||
       agent.availability.toLowerCase() === selectedAvailability.toLowerCase();
+
 
     return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability;
   });
@@ -144,7 +191,7 @@ export default function AgentesPage() {
       </div>
 
       <main className="w-[80%] mx-auto py-12 flex-1 flex flex-col lg:flex-row gap-8">
-        
+
         {/* Panel Izquierdo: Filtros */}
         <aside className="w-full lg:w-1/4 flex-shrink-0">
           <div className="bg-white rounded-lg border border-border-light p-6 sticky top-28 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
@@ -196,10 +243,8 @@ export default function AgentesPage() {
                 onChange={(e) => setSelectedCountry(e.target.value)}
                 className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
               >
-                {countries.map((country) => (
-                  <option key={country} value={country}>
-                    {country}
-                  </option>
+                {allCountries.map((country) => (
+                  <option key={country} value={country}>{country}</option>
                 ))}
               </select>
             </div>
@@ -215,7 +260,7 @@ export default function AgentesPage() {
                 onChange={(e) => setSelectedSpecialty(e.target.value)}
                 className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
               >
-                {specialties.map((specialty) => (
+                {allSpecialties.map((specialty) => (
                   <option key={specialty} value={specialty}>
                     {specialty === "Todos" ? "Todas las especialidades" : specialty}
                   </option>
@@ -234,7 +279,7 @@ export default function AgentesPage() {
                 onChange={(e) => setSelectedLanguage(e.target.value)}
                 className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-sm focus:border-border-focus transition-all text-text-primary"
               >
-                {languages.map((lang) => (
+                {allLanguages.map((lang) => (
                   <option key={lang} value={lang}>
                     {lang === "Todos" ? "Todos los idiomas" : lang}
                   </option>
@@ -243,7 +288,7 @@ export default function AgentesPage() {
             </div>
 
             {/* Filtro de Disponibilidad */}
-            <div className="mb-2">
+            <div className="mb-5">
               <label htmlFor="availability-select" className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
                 Disponibilidad
               </label>
@@ -260,21 +305,45 @@ export default function AgentesPage() {
                 ))}
               </select>
             </div>
+
+
           </div>
         </aside>
 
         {/* Panel Derecho: Resultados y Cartas */}
         <section className="w-full lg:w-3/4 flex flex-col">
-          
+
           {/* Contador y metadatos */}
           <div className="flex items-center justify-between mb-6">
             <p className="text-sm font-medium text-text-secondary">
-              Mostrando <span className="font-semibold text-text-primary">{filteredAgents.length}</span> agentes disponibles
+              {loadingAgents
+                ? "Cargando asesores..."
+                : <>Mostrando <span className="font-semibold text-text-primary">{filteredAgents.length}</span> {filteredAgents.length === 1 ? "resultado" : "resultados"}</> 
+              }
             </p>
           </div>
 
-          {/* Estado vacío si no hay resultados */}
-          {filteredAgents.length === 0 ? (
+          {/* Loading skeleton */}
+          {loadingAgents ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[1,2,3,4].map(i => (
+                <div key={i} className="bg-white rounded-lg border border-border-light p-6 animate-pulse">
+                  <div className="flex gap-4 mb-4">
+                    <div className="w-16 h-16 rounded-full bg-gray-200 flex-shrink-0"></div>
+                    <div className="flex-1 space-y-2 pt-1">
+                      <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                      <div className="h-3 bg-gray-100 rounded w-1/2"></div>
+                      <div className="h-3 bg-gray-100 rounded w-1/3"></div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-3 bg-gray-100 rounded"></div>
+                    <div className="h-3 bg-gray-100 rounded w-5/6"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredAgents.length === 0 ? (
             <div className="w-full py-16 px-6 bg-white border border-border-light rounded-lg flex flex-col items-center justify-center text-center">
               <svg className="w-16 h-16 text-text-muted mb-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
@@ -302,10 +371,11 @@ export default function AgentesPage() {
                   <div className="p-6 pb-4 flex items-start gap-4">
                     {/* Contenedor Foto de Perfil */}
                     <div className="relative flex-shrink-0">
-                      <img
+                      <UserAvatar
                         src={agent.photo}
-                        alt={`Foto de ${agent.name}`}
-                        className="w-16 h-16 rounded-full object-cover border border-border-light"
+                        name={agent.name}
+                        size="lg"
+                        partnerType={agent.partnerType}
                       />
                       {agent.availability === "Inmediata" && (
                         <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-status-success border-2 border-white rounded-full" title="Disponible Hoy"></span>
@@ -323,11 +393,20 @@ export default function AgentesPage() {
                             ★ DESTACADO
                           </span>
                         )}
+                        {agent.partnerType === "b2b_agency_entity" ? (
+                          <span className="inline-flex items-center bg-indigo-50 text-indigo-700 text-[9px] font-bold px-2 py-0.5 rounded border border-indigo-200">
+                            🏢 EMPRESA / AGENCIA B2B
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center bg-emerald-50 text-emerald-700 text-[9px] font-bold px-2 py-0.5 rounded border border-emerald-200">
+                            💼 ASESOR INDEPENDIENTE
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-text-secondary font-medium leading-relaxed mt-1">
                         {agent.title}
                       </p>
-                      
+
                       {/* Calificación y Experiencia */}
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <div className="flex items-center text-amber-500 text-sm">
@@ -384,21 +463,28 @@ export default function AgentesPage() {
                     </div>
                   </div>
 
-                  {/* Pie de la Carta / Acciones */}
-                  <div className="p-6 pt-4 border-t border-border-light bg-background-main/50 grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setActiveAgent(agent)}
-                      className="px-4 py-2 bg-white border border-border-light text-text-secondary hover:text-brand-primary hover:border-brand-primary text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1"
-                    >
-                      Ver Perfil
-                    </button>
-                    
-                    <button
-                      onClick={() => handleHireAgent(agent)}
-                      className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      Contratar Asesoría
-                    </button>
+                   {/* Pie de la Carta / Acciones */}
+                   <div className="p-6 pt-4 border-t border-border-light bg-background-main/50 flex gap-3">
+                     <button
+                       onClick={() => router.push(`/agents/${agent.id}`)}
+                       className="flex-1 px-4 py-2 bg-white border border-border-light text-text-secondary hover:text-brand-primary hover:border-brand-primary text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1"
+                     >
+                       Ver Perfil
+                     </button>
+
+                      {(!user || (user.role !== "agent" && user.role !== "agency")) && (
+                        <button
+                          onClick={() => handleHireAgent(agent)}
+                          disabled={Boolean(user?.hasPaidAdvisor)}
+                          className={`flex-1 px-4 py-2 text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 ${
+                            user?.hasPaidAdvisor
+                              ? "bg-gray-200 text-gray-400 border border-gray-200 cursor-not-allowed shadow-none"
+                              : "bg-brand-primary hover:bg-brand-hover text-white shadow-sm"
+                          }`}
+                        >
+                          {user?.hasPaidAdvisor ? "Asesoría Contratada" : "Contratar Asesoría"}
+                        </button>
+                      )}
                   </div>
                 </div>
               ))}
@@ -406,175 +492,6 @@ export default function AgentesPage() {
           )}
         </section>
       </main>
-
-      {/* Modal de Detalle del Agente */}
-      {activeAgent && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl relative flex flex-col border border-border-light animate-in fade-in zoom-in-95 duration-200">
-            
-            {/* Botón de Cierre */}
-            <button
-              onClick={() => setActiveAgent(null)}
-              className="absolute right-4 top-4 text-text-secondary hover:text-text-primary bg-background-main hover:bg-background-hover p-2 rounded-full transition-colors z-20 focus:outline-none"
-              title="Cerrar"
-            >
-              <svg className="w-5.5 h-5.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            {/* Encabezado del Perfil */}
-            <div className="p-8 bg-brand-light flex flex-col sm:flex-row items-center sm:items-start gap-6 border-b border-border-light">
-              <img
-                src={activeAgent.photo}
-                alt={`Foto de ${activeAgent.name}`}
-                className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md flex-shrink-0"
-              />
-              <div className="text-center sm:text-left flex-1 min-w-0">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-1.5">
-                  <h2 className="text-2xl font-bold text-text-primary">{activeAgent.name}</h2>
-                  {activeAgent.featured && (
-                    <span className="mx-auto sm:mx-0 w-max bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">
-                      ★ VERIFICADO
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm font-semibold text-brand-primary mb-3">
-                  {activeAgent.title}
-                </p>
-                
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4">
-                  <div className="flex items-center text-amber-500 font-bold text-sm">
-                    <span className="text-text-primary mr-1">{activeAgent.rating.toFixed(1)}</span>
-                    <span className="text-amber-400 mr-1.5">★</span>
-                    <span className="text-xs font-normal text-text-secondary">({activeAgent.reviewsCount} evaluaciones)</span>
-                  </div>
-                  <span className="hidden sm:inline text-text-muted">|</span>
-                  <p className="text-xs font-medium text-text-secondary">
-                    Experiencia: <span className="font-bold text-text-primary">{activeAgent.experience}</span>
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Contenido del Perfil */}
-            <div className="p-8 space-y-6">
-              {/* Biografía */}
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-2">Sobre mí</h4>
-                <p className="text-sm text-text-secondary leading-relaxed">
-                  {activeAgent.bio}
-                </p>
-              </div>
-
-              {/* Habilidades e Idiomas */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-6 border-b border-border-light">
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-2.5">Idiomas de asesoría</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {activeAgent.languages.map((lang) => (
-                      <span key={lang} className="bg-background-main border border-border-light text-text-secondary text-xs font-semibold px-3 py-1 rounded-sm">
-                        {lang}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-2.5">Estado de disponibilidad</h4>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-3 h-3 rounded-full ${activeAgent.availability === "Inmediata" ? "bg-status-success" : "bg-status-warning"}`}></span>
-                    <span className="text-sm font-bold text-text-primary">
-                      {activeAgent.availability === "Inmediata" ? "Agenda abierta (Cupos hoy)" : `Disponible la ${activeAgent.availability.toLowerCase()}`}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Especialidades por Visa y Destinos */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-2.5">Especialidad por tipo de visa</h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {activeAgent.specialties.map((spec) => (
-                      <span key={spec} className="bg-brand-light text-brand-primary text-xs font-bold px-2.5 py-1 rounded-sm">
-                        {spec}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-2.5">Países y Embajadas que domina</h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {activeAgent.countries.map((country) => (
-                      <span key={country} className="bg-gray-100 text-text-secondary text-xs font-bold px-2.5 py-1 rounded-sm border border-gray-200">
-                        {country}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Flujo de trabajo con el agente */}
-              <div className="pt-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-3">¿Cómo te ayuda tu asesor en TodoVisa?</h4>
-                <div className="space-y-3.5">
-                  <div className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-brand-light text-brand-primary text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</div>
-                    <div>
-                      <h5 className="text-sm font-bold text-text-primary">Evaluación inicial y perfilamiento</h5>
-                      <p className="text-xs text-text-secondary mt-0.5">Analiza tu perfil para identificar fortalezas y debilidades de tu postulación consular.</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-brand-light text-brand-primary text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</div>
-                    <div>
-                      <h5 className="text-sm font-bold text-text-primary">Llenado digital guiado de formularios</h5>
-                      <p className="text-xs text-text-secondary mt-0.5">Se encarga de llenar el DS-160 u otros formularios consulares sin errores tipográficos.</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-brand-light text-brand-primary text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</div>
-                    <div>
-                      <h5 className="text-sm font-bold text-text-primary">Simulacro de entrevista presencial</h5>
-                      <p className="text-xs text-text-secondary mt-0.5">Te prepara con preguntas reales para que asistas con seguridad al consulado.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Pie de Página del Modal */}
-            <div className="p-8 border-t border-border-light bg-background-main/50 flex flex-col sm:flex-row gap-4 items-center justify-between">
-              <div className="text-center sm:text-left">
-                <p className="text-xs text-text-secondary font-medium">¿Listo para iniciar tu trámite?</p>
-                <p className="text-sm font-bold text-text-primary">Conversa directamente con {activeAgent.name.split(" ")[1]}</p>
-              </div>
-
-              <div className="flex gap-3 w-full sm:w-auto">
-                <button
-                  onClick={() => setActiveAgent(null)}
-                  className="flex-1 sm:flex-none px-6 py-2.5 bg-white border border-border-light text-text-secondary hover:text-text-primary text-xs font-semibold rounded-sm transition-all focus:outline-none"
-                >
-                  Cerrar
-                </button>
-                <button
-                  onClick={() => {
-                    const agentToHire = activeAgent;
-                    setActiveAgent(null);
-                    handleHireAgent(agentToHire);
-                  }}
-                  className="flex-1 sm:flex-none px-6 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 shadow-sm"
-                >
-                  Contratar Asesoría
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
       {/* Checkout Modal */}
       {isCheckoutOpen && checkoutAgent && (
         <CheckoutModal
@@ -591,13 +508,12 @@ export default function AgentesPage() {
         />
       )}
       {toast && (
-        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${
-          toast.type === 'success' 
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-            : toast.type === 'error' 
-            ? 'bg-red-50 border-red-200 text-red-800' 
-            : 'bg-blue-50 border-blue-200 text-blue-850'
-        }`}>
+        <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${toast.type === 'success'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : toast.type === 'error'
+              ? 'bg-red-50 border-red-200 text-red-800'
+              : 'bg-blue-50 border-blue-200 text-blue-850'
+          }`}>
           <span className="text-base select-none">
             {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
           </span>

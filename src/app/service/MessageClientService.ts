@@ -17,6 +17,15 @@ export class MessageClientService {
     return result.data || [];
   }
 
+  static async getMessagesByAgent(agentId: string): Promise<ClientMessageData[]> {
+    const res = await fetch(`/api/messages?agentId=${encodeURIComponent(agentId)}`);
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.error?.message || result.message || "Failed to fetch agent messages");
+    }
+    return result.data || [];
+  }
+
   static async createMessage(msg: {
     sender: "user" | "agent";
     text: string;

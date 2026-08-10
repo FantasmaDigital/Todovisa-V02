@@ -105,7 +105,7 @@ const Section3 = ({ scrollYProgress }) => {
 
   return (
     <motion.section
-      id="cita-presencial"
+      id="cita-virtual"
       style={{ scale, rotate, z: 0 }}
       className='relative h-screen bg-background-main text-text-primary flex flex-col items-center justify-center border-t border-border-light shadow-[0_-20px_50px_rgba(0,0,0,0.05)] antialiased [transform-style:preserve-3d] [backface-visibility:hidden]'
     >
@@ -114,23 +114,23 @@ const Section3 = ({ scrollYProgress }) => {
           <div className="rounded-xl relative w-full aspect-[4/5] md:aspect-square rounded-sm overflow-hidden shadow-sm border border-border-light bg-white">
             <img
               src="/images/office-agents.webp"
-              alt="Cita Presencial TODOVISA"
+              alt="Asesoría Virtual TODOVISA"
               className="w-full h-full object-cover"
             />
           </div>
         </div>
         <div className="w-full lg:w-1/2 flex flex-col items-start text-left">
           <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-primary mb-4">
-            ATENCIÓN PRESENCIAL
+            ATENCIÓN 100% VIRTUAL
           </span>
           <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold text-text-primary mb-6 leading-tight">
-            Agenda tu cita<br />en oficina
+            Agenda tu asesoría<br />online
           </h2>
           <p className="text-lg text-text-secondary mb-10 leading-relaxed max-w-lg font-medium">
-            Si prefieres un trato más directo, te esperamos en nuestras sucursales. Nuestros especialistas revisarán tus documentos físicos y te brindarán atención personalizada cara a cara para que te sientas completamente seguro.
+            Resuelve tus dudas desde la comodidad de tu hogar. Conéctate con un especialista certificado a través de una videollamada segura (Google Meet o Zoom) para revisar tu perfil y definir tu estrategia sin necesidad de trasladarte.
           </p>
-          <button className="bg-brand-primary text-white font-semibold px-8 py-3 rounded-sm hover:bg-[#0f3755] transition-colors text-sm">
-            Agendar cita presencial
+          <button onClick={() => window.location.href = '/citas'} className="bg-brand-primary text-white font-semibold px-8 py-3 rounded-sm hover:bg-[#0f3755] transition-colors text-sm">
+            Agendar asesoría virtual
           </button>
         </div>
       </div>

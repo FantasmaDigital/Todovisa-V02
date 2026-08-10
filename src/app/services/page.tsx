@@ -2,8 +2,9 @@
 
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useAuthStore } from "../store/authStore";
 
 const countries = [
     {
@@ -73,10 +74,36 @@ const GuideIcon = () => (
 
 export default function ServicesPage() {
     const headerRef = useRef(null);
+    const user = useAuthStore((state) => state.user);
+    const isViproCompleted = Boolean(user?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))));
+    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+    const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
 
     useEffect(() => {
-        if (headerRef.current) { }
+        const savedPrice = localStorage.getItem("fullServicePrice");
+        if (savedPrice) {
+            setPrice(Number(savedPrice));
+        }
+        const savedViproPrice = localStorage.getItem("viproPrice");
+        if (savedViproPrice) {
+            setViproPrice(Number(savedViproPrice));
+        }
+
+        const handleStorage = () => {
+            const saved = localStorage.getItem("fullServicePrice");
+            if (saved) {
+                setPrice(Number(saved));
+            }
+            const savedVipro = localStorage.getItem("viproPrice");
+            if (savedVipro) {
+                setViproPrice(Number(savedVipro));
+            }
+        };
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
     }, []);
+
+    const discountPrice = price * 0.75;
 
     return (
         <div className="min-h-screen w-full flex flex-col bg-background-main">
@@ -96,7 +123,147 @@ export default function ServicesPage() {
                 </div>
             </div>
 
-            <main className="w-[80%] mx-auto py-14 flex-1">
+            <main className="w-[80%] mx-auto py-14 flex-1 space-y-16">
+                <section className="bg-white border border-border-light rounded-2xl p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.03)] text-left">
+                    <div className="text-center max-w-3xl mx-auto mb-12 space-y-3">
+                        <span className="inline-block text-[11px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+                            Transparencia y Claridad de Servicios
+                        </span>
+                        <h2 className="text-3xl md:text-4xl font-serif font-bold text-text-primary">
+                            Conoce la diferencia entre nuestros dos modelos
+                        </h2>
+                        <p className="text-sm text-text-secondary leading-relaxed">
+                            En TodoVisa nos basamos en estándares consulares internacionales. Elige el nivel de acompañamiento exacto que tu perfil requiere.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
+                        <div className="bg-gradient-to-b from-blue-50/40 via-white to-white border border-blue-200/80 rounded-xl p-6 md:p-8 flex flex-col justify-between relative overflow-hidden">
+                            <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-bl-lg">
+                                Diagnóstico Algorítmico Express
+                            </div>
+                            <div className="space-y-6">
+                                <div className="space-y-2">
+                                    <h3 className="text-2xl font-serif font-bold text-text-primary flex items-center gap-2">
+                                        📊 Evaluación VIPRO
+                                    </h3>
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="text-3xl font-extrabold text-brand-primary font-mono">${viproPrice.toFixed(2)}</span>
+                                        <span className="text-xs text-text-muted font-sans">USD / pago único</span>
+                                    </div>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        Herramienta de inteligencia consular para diagnosticar la viabilidad de tu perfil antes de iniciar trámites oficiales.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-3 border-t border-blue-100 pt-4">
+                                    <p className="text-[11px] font-bold uppercase tracking-wider text-blue-900">Lo que Incluye:</p>
+                                    <ul className="space-y-2.5 text-xs text-text-secondary">
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Scoring Consular de Viabilidad (0-100 pts)</strong> según tus ingresos, empleo e historial de viajes.</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Detección de Riesgos 214(b)</strong> para evitar rechazos por falta de arraigo en tu país.</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Checklist de Documentación Sugerida</strong> adaptado a tu situación económica.</span>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div className="bg-amber-50/80 border border-amber-200/60 rounded-lg p-3 text-[11px] text-amber-900 leading-relaxed">
+                                    <strong>Nota importante:</strong> VIPRO es un diagnóstico automatizado. <em>No incluye asesor humano 1-a-1 ni llenado de formularios DS-160/UKVI.</em>
+                                </div>
+                            </div>
+
+                            <div className="pt-6">
+                                {isViproCompleted ? (
+                                    <Link
+                                        href="/profile?tab=vipro"
+                                        className="w-full inline-block text-center px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-xs"
+                                    >
+                                        Ver Diagnóstico VIPRO Completado &rarr;
+                                    </Link>
+                                ) : (
+                                    <Link
+                                        href="/vipro-form"
+                                        className="w-full inline-block text-center px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-xs"
+                                    >
+                                        Comenzar Evaluación VIPRO (${viproPrice.toFixed(2)} USD) &rarr;
+                                    </Link>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="bg-gradient-to-b from-emerald-50/40 via-white to-white border border-emerald-200/80 rounded-xl p-6 md:p-8 flex flex-col justify-between relative overflow-hidden">
+                            <div className="absolute top-0 right-0 bg-emerald-700 text-white text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-bl-lg">
+                                Concierge 1-a-1 Integral
+                            </div>
+                            <div className="space-y-6">
+                                <div className="space-y-2">
+                                    <h3 className="text-2xl font-serif font-bold text-text-primary flex items-center gap-2">
+                                        👤 Asesoría Completa con Experto
+                                    </h3>
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="text-3xl font-extrabold text-emerald-700 font-mono">${discountPrice.toFixed(2)}</span>
+                                        <span className="text-xs text-text-muted font-sans">USD / paquete completo</span>
+                                    </div>
+                                    <p className="text-xs text-text-secondary leading-relaxed">
+                                        Representación 1-a-1 por un asesor certificado que asume la elaboración técnica de tu expediente de inicio a fin.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-3 border-t border-emerald-100 pt-4">
+                                    <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-900">Lo que Incluye:</p>
+                                    <ul className="space-y-2.5 text-xs text-text-secondary">
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Asesor Consular Asignado</strong> con comunicación ilimitada vía Chat 1-a-1.</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Preformulario y Llenado Oficial DS-160 / UKVI</strong> sin margen de error humano.</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Auditoría Digital de Expediente</strong> (pasaporte, DUI, constancias y solvencia).</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Agendamiento Prioritario de Citas</strong> (CAS / Embajada).</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-emerald-600 font-bold">✓</span>
+                                            <span><strong>Simulacro Intensivo de Entrevista por Zoom</strong> con preguntas reales de cónsules.</span>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div className="bg-emerald-50/80 border border-emerald-200/60 rounded-lg p-3 text-[11px] text-emerald-950 leading-relaxed">
+                                    <strong>Garantía de Acompañamiento:</strong> Tu asesor te guiará hasta la devolución de tu pasaporte en el courier.
+                                </div>
+                            </div>
+
+                            <div className="pt-6">
+                                <Link
+                                    href="/agents"
+                                    className="w-full inline-block text-center px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-sm transition-all shadow-xs"
+                                >
+                                    Elegir mi Asesor Consular (${discountPrice.toFixed(2)} USD) &rarr;
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <div className="text-left space-y-4">
+                    <h2 className="text-2xl font-serif font-bold text-text-primary">Explora Trámites de Visa por País</h2>
+                    <p className="text-xs text-text-secondary">Selecciona el país de tu interés para conocer la guía oficial de requisitos y tiempos de procesamiento.</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
                     {countries.map((country) => (
                         <div

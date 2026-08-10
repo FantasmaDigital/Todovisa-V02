@@ -6,18 +6,9 @@ import { Footer } from "../components/shared/Footer";
 import Link from "next/link";
 
 const OFFICE_LOCATIONS = [
-  { id: "cdmx", label: "Ciudad de México — Polanco", address: "Av. Presidente Masaryk 61, Col. Polanco, CDMX", phone: "5551 2345", schedule: ["lunes 9:00‑18:00", "martes 9:00‑18:00", "miércoles 9:00‑18:00", "jueves 9:00‑18:00", "viernes 9:00‑18:00", "sábado 10:00‑14:00"] },
-  { id: "gdl",  label: "Guadalajara — Providencia",  address: "Av. Américas 1254, Col. Providencia, Jalisco", phone: "3332 1122", schedule: ["lunes 9:00‑18:00", "martes 9:00‑18:00", "miércoles 9:00‑18:00", "jueves 9:00‑18:00", "viernes 9:00‑18:00", "sábado 10:00‑14:00"] },
-  { id: "mty",  label: "Monterrey — San Pedro",       address: "Calzada del Valle 400, San Pedro Garza García, N.L.", phone: "4445 6677", schedule: ["lunes 9:00‑18:00", "martes 9:00‑18:00", "miércoles 9:00‑18:00", "jueves 9:00‑18:00", "viernes 9:00‑18:00", "sábado 10:00‑14:00"] },
-  { id: "ssv",  label: "San Salvador — Centro",      address: "67 Avenida Sur Local #1, San Salvador", phone: "2245 4027", schedule: [
-      "domingo Cerrado",
-      "lunes 8:30 a.m.–6 p.m.",
-      "martes 8:30 a.m.–6 p.m.",
-      "miércoles (Día del Padre) 8:30 a.m.–6 p.m.",
-      "jueves 8:30 a.m.–6 p.m.",
-      "viernes 8:30 a.m.–6 p.m.",
-      "sábado 9 a.m.–5 p.m."
-    ] }
+  { id: "zoom", label: "Videollamada por Zoom", address: "Se enviará un enlace de Zoom personalizado a tu correo.", phone: "Soporte Virtual", schedule: ["lunes a viernes 9:00‑18:00", "sábado 10:00‑14:00"] },
+  { id: "meet", label: "Google Meet", address: "Se enviará un enlace de Google Meet a tu correo.", phone: "Soporte Virtual", schedule: ["lunes a viernes 9:00‑18:00", "sábado 10:00‑14:00"] },
+  { id: "whatsapp", label: "Llamada / Chat por WhatsApp", address: "Atención directa a través de nuestro número oficial: +503 7020-0976", phone: "+503 7020-0976", schedule: ["lunes a viernes 8:30‑18:00", "sábado 9:00‑17:00"] }
 ];
 
 const VISA_TYPES = [
@@ -134,17 +125,17 @@ export default function CitasPage() {
       <Header headerRef={headerRef} />
 
       {/* ── Hero Banner ── */}
-      <div className="w-full bg-brand-primary py-14 px-6 relative overflow-hidden" id="cita-presencial">
+      <div className="w-full bg-brand-primary py-14 px-6 relative overflow-hidden" id="cita-virtual">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]" />
         <div className="w-[80%] mx-auto relative z-10">
           <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-3">
-            Atención Personalizada
+            Atención Remota y Segura
           </p>
           <h1 className="text-4xl md:text-5xl text-white leading-tight mb-4 font-semibold font-serif italic">
-            Agenda tu cita presencial
+            Agenda tu asesoría virtual
           </h1>
           <p className="text-white/95 text-base md:text-lg max-w-2xl leading-relaxed">
-            Visítanos en nuestras oficinas y recibe orientación de un experto certificado. Resuelve todas tus dudas cara a cara y comienza tu trámite con el pie derecho.
+            Conéctate de forma remota y recibe orientación de un experto certificado. Resuelve todas tus dudas en una sesión virtual y comienza tu trámite con el pie derecho.
           </p>
         </div>
       </div>
@@ -182,14 +173,13 @@ export default function CitasPage() {
               {/* Offices */}
               <div className="bg-white border border-border-light rounded-md p-6 shadow-[0_2px_8px_rgba(0,0,0,0.03)]">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-4">
-                  Nuestras oficinas
+                  Canales de Asesoría Virtual
                 </h2>
                 <ul className="space-y-3">
                   {OFFICE_LOCATIONS.map((o) => (
                     <li key={o.id} className="flex gap-2 items-start">
                       <svg className="w-4 h-4 text-brand-primary flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                       </svg>
                       <div>
                         <p className="text-xs font-bold text-text-primary leading-snug">{o.label}</p>
@@ -275,10 +265,10 @@ export default function CitasPage() {
 
                   <hr className="border-border-light" />
 
-                  {/* Office */}
+                  {/* Office (Virtual Channel) */}
                   <div>
                     <label htmlFor="officeId" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">
-                      Oficina a visitar
+                      Canal de asesoría virtual
                     </label>
                     <select
                       id="officeId"
@@ -287,16 +277,15 @@ export default function CitasPage() {
                       onChange={handleChange}
                       className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all cursor-pointer"
                     >
-                      <option value="">Selecciona una oficina</option>
+                      <option value="">Selecciona un canal</option>
                       {OFFICE_LOCATIONS.map((o) => (
                         <option key={o.id} value={o.id}>{o.label}</option>
                       ))}
                     </select>
                     {selectedOffice && (
-                      <p className="text-[11px] text-text-secondary mt-1.5 flex items-center gap-1">
-                        <svg className="w-3 h-3 text-brand-primary flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                      <p className="text-[11px] text-text-secondary mt-1.5 flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5 text-brand-primary flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                         </svg>
                         {selectedOffice.address}
                       </p>
@@ -419,7 +408,7 @@ export default function CitasPage() {
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                           </svg>
-                          Agendar mi cita presencial
+                          Agendar mi asesoría virtual
                         </>
                       )}
                     </button>
@@ -440,9 +429,9 @@ export default function CitasPage() {
               </svg>
             </div>
 
-            <h1 className="text-2xl font-bold text-text-primary mb-2">¡Cita agendada con éxito!</h1>
+            <h1 className="text-2xl font-bold text-text-primary mb-2">¡Asesoría agendada con éxito!</h1>
             <p className="text-sm text-text-secondary max-w-sm mx-auto mb-8">
-              Recibirás un correo de confirmación en <strong className="text-text-primary">{formData.email}</strong> con todos los detalles y la dirección exacta.
+              Recibirás un correo de confirmación en <strong className="text-text-primary">{formData.email}</strong> con todos los detalles de conexión.
             </p>
 
             {/* Receipt */}
@@ -456,7 +445,7 @@ export default function CitasPage() {
                 <span className="text-xs font-semibold text-text-primary">{formData.fullName}</span>
               </div>
               <div className="flex justify-between border-b border-border-light pb-2.5">
-                <span className="text-[10px] font-bold text-text-secondary uppercase">Oficina</span>
+                <span className="text-[10px] font-bold text-text-secondary uppercase">Canal de Asesoría</span>
                 <span className="text-xs font-semibold text-text-primary">{selectedOffice?.label}</span>
               </div>
               <div className="flex justify-between border-b border-border-light pb-2.5">

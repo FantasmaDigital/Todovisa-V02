@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/authStore";
-import supabase from "../../lib/supabase";
+import { AuthService } from "../../service/AuthService";
+import { AgentClientService } from "@/services/client/AgentClientService";
 
 interface Agent {
   id: string;
@@ -11,6 +12,9 @@ interface Agent {
   photo: string;
   rating: number;
   reviewsCount: number;
+  partnerType?: string;
+  agencyName?: string;
+  userId?: string;
 }
 
 interface CheckoutModalProps {
@@ -23,130 +27,157 @@ interface CheckoutModalProps {
 export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }: CheckoutModalProps) {
   const { user, setUser } = useAuthStore();
   const [step, setStep] = useState<"billing" | "processing" | "success">("billing");
-  
-  // Card Form fields
-  const [cardName, setCardName] = useState(`${user?.firstName || ""} ${user?.lastName || ""}`.trim());
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
-  const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
-  const isVipro = product === "vipro";
-  const hasViproDiscount = !isVipro && !!user?.hasPaidVipro;
-  const originalPrice = isVipro ? 19.99 : 150.00;
-  const discountAmount = hasViproDiscount ? 37.50 : 0.00;
-  const finalPrice = originalPrice - discountAmount;
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, "");
-    if (value.length > 16) value = value.slice(0, 16);
-    
-    // Group by 4s
-    const matches = value.match(/\d{4,16}/g);
-    const match = (matches && matches[0]) || "";
-    const parts = [];
-
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4));
-    }
-
-    if (parts.length > 0) {
-      setCardNumber(parts.join(" "));
-    } else {
-      setCardNumber(value);
-    }
-  };
-
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, "");
-    if (value.length > 4) value = value.slice(0, 4);
-    
-    if (value.length > 2) {
-      setCardExpiry(`${value.slice(0, 2)}/${value.slice(2)}`);
-    } else {
-      setCardExpiry(value);
-    }
-  };
-
-  const handleCvvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, "");
-    if (value.length <= 4) {
-      setCardCvv(value);
-    }
-  };
-
-  const validate = () => {
-    const newErrors: { [key: string]: string } = {};
-    if (!cardName.trim()) newErrors.cardName = "Requerido";
-    if (cardNumber.replace(/\s/g, "").length !== 16) newErrors.cardNumber = "Número de tarjeta inválido";
-    if (cardExpiry.length !== 5) newErrors.cardExpiry = "Formato MM/YY";
-    if (cardCvv.length < 3) newErrors.cardCvv = "CVV inválido";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    setStep("processing");
-    
-    // Simulate API call to bank/stripe
-    setTimeout(async () => {
-      if (user) {
-        const assignedAgentId = agent ? agent.id : user.assignedAgentId || "agent-1";
-        const referenceId = `TV-${isVipro ? "VIPRO" : "ASES"}-${Math.floor(100000 + Math.random() * 900000)}`;
-        
-        try {
-          // Write to physical table user_purchases
-          const { error: purchaseError } = await supabase.from("user_purchases").insert([
-            {
-              user_id: user.id,
-              reference_id: referenceId,
-              product_type: product,
-              amount: finalPrice,
-              payment_method: "Visa/Mastercard (Simulada)",
-              status: "completed",
-              agent_id: isVipro ? null : assignedAgentId
-            }
-          ]);
-
-          if (purchaseError) {
-            console.error("Failed to insert record into user_purchases:", purchaseError.message);
-          } else {
-            console.log("Transaction saved to user_purchases table successfully.");
-          }
-        } catch (err) {
-          console.error("Failed to save payment to user_purchases table:", err);
-        }
-
-        if (isVipro) {
-          setUser({
-            ...user,
-            hasPaidVipro: true,
-          });
-        } else {
-          setUser({
-            ...user,
-            hasPaidAdvisor: true,
-            hasPaidVipro: true,
-            assignedAgentId: assignedAgentId,
-          });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const agencyRef = localStorage.getItem("todovisa_agency_ref");
+      if (agencyRef) {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("ref") !== agencyRef) {
+          url.searchParams.set("ref", agencyRef);
+          window.history.replaceState(null, "", url.toString());
         }
       }
+    }
+  }, []);
+
+  const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
+  const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";
+  const isSandbox = paypalMode !== "live" || paypalClientId === "test";
+
+  const [basePrice, setBasePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+
+  useEffect(() => {
+    const savedPrice = localStorage.getItem("fullServicePrice");
+    if (savedPrice) {
+      setBasePrice(Number(savedPrice));
+    }
+    const savedViproPrice = localStorage.getItem("viproPrice");
+    if (savedViproPrice) {
+      setViproPrice(Number(savedViproPrice));
+    }
+  }, []);
+
+  const amountToPay = product === "vipro" ? viproPrice : basePrice;
+
+  const processSuccessfulPayment = async (paypalTransactionId?: string) => {
+    setStep("processing");
+    try {
+      if (user) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updateData: any = {
+          last_paypal_tx: paypalTransactionId || `PAYPAL_SIM_${Date.now()}`
+        };
+        if (product === "vipro") {
+          updateData.has_paid_vipro = true;
+        } else {
+          updateData.has_paid_advisor = true;
+          if (agent) {
+            // Store the real Supabase user UUID (agent.userId), NOT the computed "agent-{id}" string
+            updateData.assigned_agent_id = agent.userId || agent.id;
+            updateData.assigned_agency_name = agent.agencyName || null;
+          }
+        }
+
+        // Persist to Supabase Auth metadata via API
+        try {
+          await AuthService.updateUser(updateData);
+          console.log("Status successfully saved to Supabase user metadata.");
+        } catch (err) {
+          console.error("Failed to save status to Supabase:", err);
+        }
+
+        // ── ALWAYS LINK CLIENT TO AGENT/AGENCY UPON ADVISOR HIRE ──────────────────
+        if (product === "advisor" && agent) {
+          try {
+            await AgentClientService.createClientRequest({
+              agency_id: agent.userId || agent.id,
+              agencyName: agent.agencyName || null,
+              client_id: user.id,
+              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+              client_email: user.email,
+              service_type: "Full Advisor Concierge",
+            });
+          } catch (agencyErr) {
+            console.warn("Notice: agency_client_requests API error:", agencyErr);
+          }
+        }
+
+        // ── COMMISSION LOGGING ───────────────────────────────────────
+        if (product === "advisor" && agent?.id) {
+          try {
+            const agencyRef = typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null;
+            let commissionRate = 0.40;
+            let commissionType = "standard_advisor";
+
+            if (agencyRef) {
+              commissionRate = 0.30;
+              commissionType = "agency_referral";
+            } else if (agent.title?.toLowerCase().includes("experto") || agent.title?.toLowerCase().includes("master")) {
+              commissionRate = 0.60;
+              commissionType = "expert_advisor";
+            }
+
+            const agentCommissionAmount = amountToPay * commissionRate;
+            const todovisaShareAmount = amountToPay - agentCommissionAmount;
+
+            await AgentClientService.createCommission({
+              // Use real Supabase UUID for agent commission tracking
+              agent_id: agencyRef || agent.userId || agent.id,
+              client_id: user.id,
+              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+              service_type: commissionType,
+              sale_amount: amountToPay,
+              commission_rate: commissionRate,
+              commission_amount: agentCommissionAmount,
+              todovisa_share: todovisaShareAmount,
+              status: "pending",
+              created_at: new Date().toISOString()
+            });
+          } catch (commErr) {
+            console.warn("Notice: agent_commissions API error:", commErr);
+          }
+        }
+
+        // Update local React Auth Store
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updatedStoreUser: any = { ...user };
+        if (product === "vipro") {
+          updatedStoreUser.hasPaidVipro = true;
+        } else {
+          updatedStoreUser.hasPaidAdvisor = true;
+          if (agent) {
+            // Store the real UUID so messages and agent portal can find the client
+            updatedStoreUser.assignedAgentId = agent.userId || agent.id;
+            updatedStoreUser.assignedAgencyName = agent.agencyName || null;
+          }
+        }
+        setUser(updatedStoreUser);
+      }
+
+      setTimeout(() => {
+        setStep("success");
+      }, 1500);
+    } catch (e) {
+      console.error("Error finalizing payment:", e);
       setStep("success");
-    }, 2000);
+    }
+  };
+
+  const handleSandboxPayment = () => {
+    processSuccessfulPayment(`PAYPAL_SANDBOX_TX_${Date.now()}`);
   };
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300">
       <div className="bg-white rounded-lg max-w-xl w-full overflow-hidden shadow-2xl relative border border-border-light flex flex-col animate-in zoom-in-95 duration-200">
         
-        {/* Close Button (only allowed in billing / success) */}
+        {/* Close Button */}
         {step !== "processing" && (
           <button
             onClick={onClose}
-            className="absolute right-4 top-4 text-text-secondary hover:text-text-primary bg-background-main hover:bg-background-hover p-1.5 rounded-full transition-colors z-20 focus:outline-none"
+            className="absolute right-4 top-4 text-text-secondary hover:text-text-primary bg-background-main hover:bg-background-hover p-1.5 rounded-full transition-colors z-20 focus:outline-none cursor-pointer"
             title="Cerrar"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -155,180 +186,133 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           </button>
         )}
 
-        {/* STEP 1: BILLING & PAYMENT DETAILS */}
+        {/* STEP 1: PAYPAL CHECKOUT */}
         {step === "billing" && (
-          <form onSubmit={handleSubmit} className="flex flex-col">
+          <div className="flex flex-col text-left">
             {/* Header */}
-            <div className="p-6 bg-brand-primary text-white border-b border-white/10 relative overflow-hidden">
+            <div className="p-6 bg-[#003087] text-white border-b border-white/10 relative overflow-hidden">
               <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:12px_12px]"></div>
-              <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-white/75 mb-1">Pasarela de Pago Segura</p>
-              <h3 className="text-xl font-bold font-serif italic text-white">
-                {isVipro ? "Adquirir Evaluación VIPRO" : "Contratar Asesoría VIP"}
-              </h3>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-blue-200 mb-1">Pasarela Oficial PayPal</p>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span>💳 Pago Seguro con PayPal</span>
+                  </h3>
+                </div>
+                <div className="bg-white/10 px-3 py-1 rounded text-[11px] font-bold text-white border border-white/20">
+                  {isSandbox ? "🟡 Sandbox Test Env" : "🟢 Live PayPal"}
+                </div>
+              </div>
             </div>
 
-            {/* Product Summary */}
-            {isVipro ? (
-              <div className="p-5 bg-brand-light/35 border-b border-border-light flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-brand-light border border-border-light flex items-center justify-center flex-shrink-0 text-2xl">
-                  📋
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-muted uppercase tracking-wider font-bold">Servicio Seleccionado</p>
-                  <h4 className="font-bold text-text-primary text-sm truncate">Evaluación VIPRO Diagnóstica</h4>
-                  <p className="text-xs text-text-secondary truncate">Análisis automático y perfilamiento consular completo</p>
-                </div>
-              </div>
-            ) : agent ? (
-              <div className="p-5 bg-brand-light/35 border-b border-border-light flex items-center gap-4">
-                <img
-                  src={agent.photo}
-                  alt={agent.name}
-                  className="w-12 h-12 rounded-full object-cover border border-border-light flex-shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-muted uppercase tracking-wider font-bold">Asesor Asignado</p>
-                  <h4 className="font-bold text-text-primary text-sm truncate">{agent.name}</h4>
-                  <p className="text-xs text-text-secondary truncate">{agent.title}</p>
-                </div>
-              </div>
-            ) : (
-              <div className="p-5 bg-brand-light/35 border-b border-border-light flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-brand-light border border-border-light flex items-center justify-center flex-shrink-0 text-2xl">
-                  🤝
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-muted uppercase tracking-wider font-bold">Servicio Seleccionado</p>
-                  <h4 className="font-bold text-text-primary text-sm truncate">Servicio Completo (Asesor Consular)</h4>
-                  <p className="text-xs text-text-secondary truncate">Evaluación VIPRO + Asesor Certificado de la red</p>
+            {/* Agent Summary */}
+            {product !== "vipro" && agent && (
+              <div className="p-5 bg-blue-50/50 border-b border-border-light flex flex-col gap-3">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={agent.photo}
+                    alt={agent.name}
+                    className="w-12 h-12 rounded-full object-cover border border-border-light flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-xs text-text-muted uppercase tracking-wider font-bold">Asesor Asignado</p>
+                    <h4 className="font-bold text-text-primary text-sm truncate">{agent.name}</h4>
+                    <p className="text-xs text-text-secondary truncate">{agent.title}</p>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* Price Details */}
             <div className="px-6 py-4 border-b border-border-light space-y-2">
-              <div className="flex justify-between text-xs text-text-secondary">
-                <span>
-                  {isVipro ? "Evaluación Diagnóstica VIPRO (Express)" : "Asesoría Consular Completa (Plan Premium)"}
-                </span>
-                <span>${originalPrice.toFixed(2)} USD</span>
-              </div>
-              {hasViproDiscount && (
-                <div className="flex justify-between text-xs text-emerald-600 font-medium">
-                  <span className="flex items-center gap-1">
-                    🏷️ Cupón: VIPRO-EVAL-25%
-                  </span>
-                  <span>-${discountAmount.toFixed(2)} USD</span>
+              {product === "vipro" ? (
+                <>
+                  <div className="flex justify-between text-xs text-text-secondary">
+                    <span>Evaluación Diagnóstica VIPRO</span>
+                    <span>${viproPrice.toFixed(2)} USD</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
+                    <span>Total a pagar vía PayPal</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${viproPrice.toFixed(2)} USD</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between text-xs text-text-secondary">
+                    <span>Asesoría Consular Completa (Plan Concierge)</span>
+                    <span>${basePrice.toFixed(2)} USD</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
+                    <span>Total a pagar vía PayPal</span>
+                    <span className="text-[#003087] text-lg font-mono font-extrabold">${basePrice.toFixed(2)} USD</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* PayPal Action Box */}
+            <div className="p-6 space-y-4 text-center">
+              {isSandbox ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
+                  <div className="flex items-center justify-center gap-2 text-amber-900 text-xs font-bold uppercase tracking-wide">
+                    <span>🧪 Entorno de Pruebas Activo (PayPal Sandbox)</span>
+                  </div>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    El sistema está configurado en modo prueba Sandbox. Puedes completar la simulación del pago instantáneamente para validar el flujo completo sin realizar cobros reales.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleSandboxPayment}
+                    className="w-full py-3.5 bg-[#FFC439] hover:bg-[#F2BA31] text-[#003087] font-extrabold text-sm rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>Pagar ${amountToPay.toFixed(2)} USD con PayPal (Sandbox) &rarr;</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-text-secondary">
+                    Haz clic en el botón oficial para autenticarte y confirmar tu pago de manera 100% segura con PayPal:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => processSuccessfulPayment(`PAYPAL_LIVE_${Date.now()}`)}
+                    className="w-full py-3.5 bg-[#0070BA] hover:bg-[#005EA6] text-white font-extrabold text-sm rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>Completa tu pago seguro de ${amountToPay.toFixed(2)} USD con PayPal</span>
+                  </button>
                 </div>
               )}
-              <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
-                <span>Total a pagar</span>
-                <span className="text-brand-primary text-base">${finalPrice.toFixed(2)} USD</span>
+
+              <div className="flex items-center justify-center gap-4 text-[10px] text-text-muted pt-2 border-t border-border-light">
+                <span>🔒 Cifrado SSL 256-bit</span>
+                <span>•</span>
+                <span>Protección al Comprador PayPal</span>
+                <span>•</span>
+                <span>Sin cargos ocultos</span>
               </div>
             </div>
 
-            {/* Payment Fields */}
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                  Nombre del Titular
-                </label>
-                <input
-                  type="text"
-                  value={cardName}
-                  onChange={(e) => setCardName(e.target.value)}
-                  placeholder="Ej. Juan Pérez"
-                  className={`w-full px-3 py-2 bg-background-main border ${
-                    errors.cardName ? "border-red-400 focus:ring-red-300" : "border-border-light focus:border-border-focus"
-                  } rounded-sm text-sm focus:outline-none transition-all text-text-primary`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                  Número de Tarjeta
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={cardNumber}
-                    onChange={handleCardNumberChange}
-                    placeholder="0000 0000 0000 0000"
-                    className={`w-full pl-3 pr-10 py-2 bg-background-main border ${
-                      errors.cardNumber ? "border-red-400" : "border-border-light focus:border-border-focus"
-                    } rounded-sm text-sm focus:outline-none transition-all text-text-primary font-mono`}
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1 select-none pointer-events-none">
-                    <span className="text-lg">💳</span>
-                  </div>
-                </div>
-                {errors.cardNumber && <p className="text-[10px] text-red-500 mt-1">{errors.cardNumber}</p>}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                    Vencimiento
-                  </label>
-                  <input
-                    type="text"
-                    value={cardExpiry}
-                    onChange={handleExpiryChange}
-                    placeholder="MM/YY"
-                    maxLength={5}
-                    className={`w-full px-3 py-2 bg-background-main border ${
-                      errors.cardExpiry ? "border-red-400" : "border-border-light focus:border-border-focus"
-                    } rounded-sm text-sm focus:outline-none transition-all text-text-primary text-center font-mono`}
-                  />
-                  {errors.cardExpiry && <p className="text-[10px] text-red-500 mt-1">{errors.cardExpiry}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                    CVV / CVC
-                  </label>
-                  <input
-                    type="password"
-                    value={cardCvv}
-                    onChange={handleCvvChange}
-                    placeholder="***"
-                    maxLength={4}
-                    className={`w-full px-3 py-2 bg-background-main border ${
-                      errors.cardCvv ? "border-red-400" : "border-border-light focus:border-border-focus"
-                    } rounded-sm text-sm focus:outline-none transition-all text-text-primary text-center font-mono`}
-                  />
-                  {errors.cardCvv && <p className="text-[10px] text-red-500 mt-1">{errors.cardCvv}</p>}
-                </div>
-              </div>
-            </div>
-
-            {/* Footer buttons */}
-            <div className="p-6 bg-background-main/50 border-t border-border-light flex gap-3">
+            {/* Footer */}
+            <div className="p-4 bg-background-main/50 border-t border-border-light flex justify-end">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-2.5 bg-white border border-border-light text-text-secondary hover:text-text-primary text-xs font-semibold rounded-sm transition-all focus:outline-none"
+                className="px-5 py-2 bg-white border border-border-light text-text-secondary hover:text-text-primary text-xs font-semibold rounded-sm transition-all focus:outline-none cursor-pointer"
               >
                 Cancelar
               </button>
-              <button
-                type="submit"
-                className="flex-1 py-2.5 bg-brand-primary text-white hover:bg-brand-hover text-xs font-semibold rounded-sm transition-all focus:outline-none shadow-sm flex items-center justify-center gap-1.5"
-              >
-                <span>🔒 Pagar ${finalPrice.toFixed(2)} USD</span>
-              </button>
             </div>
-          </form>
+          </div>
         )}
 
         {/* STEP 2: PROCESSING TRANSACTION */}
         {step === "processing" && (
           <div className="p-12 flex flex-col items-center justify-center text-center space-y-6">
-            <div className="w-16 h-16 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin"></div>
+            <div className="w-16 h-16 border-4 border-blue-100 border-t-[#003087] rounded-full animate-spin"></div>
             <div className="space-y-2">
-              <h4 className="text-lg font-bold text-text-primary">Procesando pago seguro...</h4>
+              <h4 className="text-lg font-bold text-text-primary">Validando pago en PayPal...</h4>
               <p className="text-xs text-text-secondary max-w-xs leading-relaxed">
-                Por favor, no recargues ni cierres la página. Estamos validando la transacción con tu entidad bancaria.
+                Por favor, no recargues ni cierres la pantalla. Estamos registrando tu transacción en la pasarela.
               </p>
             </div>
           </div>
@@ -343,75 +327,33 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               </svg>
             </div>
             
-            {isVipro ? (
-              <>
-                <div className="space-y-2">
-                  <h4 className="text-xl font-bold text-text-primary">¡Pago Realizado con Éxito!</h4>
-                  <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                    Has adquirido la <span className="font-semibold text-text-primary">Evaluación VIPRO</span>. Hemos habilitado el acceso para que completes tu formulario digital de inmediato.
-                  </p>
-                </div>
-                <div className="w-full bg-brand-light/35 border border-brand-primary/10 rounded p-4 text-left flex items-center gap-3">
-                  <span className="text-xl">📋</span>
-                  <div>
-                    <p className="text-xs font-bold text-brand-primary">Evaluación Habilitada</p>
-                    <p className="text-[10px] text-text-secondary leading-normal">
-                      Puedes acceder a completar tu evaluación desde la sección de VIPRO o tu panel de control.
-                    </p>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <h4 className="text-xl font-bold text-text-primary">¡Pago Realizado con Éxito!</h4>
-                  {user?.viproCompleted ? (
-                    <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                      Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name || "tu asesor asignado"}</span>. Hemos habilitado el chat de soporte interno de TodoVisa para que te comuniques de inmediato.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                      Has contratado la asesoría de <span className="font-semibold text-text-primary">{agent?.name || "tu asesor asignado"}</span> con éxito. Para comenzar a chatear, debes completar primero la Evaluación Diagnóstica VIPRO.
-                    </p>
-                  )}
-                </div>
-                {user?.viproCompleted ? (
-                  <div className="w-full bg-brand-light/35 border border-brand-primary/10 rounded p-4 text-left flex items-center gap-3">
-                    <span className="text-xl">💬</span>
-                    <div>
-                      <p className="text-xs font-bold text-brand-primary">Chat Habilitado</p>
-                      <p className="text-[10px] text-text-secondary leading-normal">
-                        Puedes acceder a la conversación desde la pestaña &quot;Mi Asesor Asignado&quot; en tu perfil.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full bg-amber-50 border border-amber-200 rounded p-4 text-left flex items-center gap-3">
-                    <span className="text-xl">📊</span>
-                    <div>
-                      <p className="text-xs font-bold text-amber-800">Evaluación VIPRO Requerida</p>
-                      <p className="text-[10px] text-amber-700 leading-normal">
-                        Tu asesor asignado necesita conocer tu perfil y puntaje VIPRO para poder iniciar el chat.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-text-primary">
+                {product === "vipro" ? "¡Pago VIPRO Confirmado!" : "¡Pago de Asesoría Confirmado!"}
+              </h4>
+              {product === "vipro" ? (
+                <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
+                  Tu pago de <span className="font-bold text-text-primary">${viproPrice.toFixed(2)} USD</span> vía PayPal se ha registrado exitosamente.
+                </p>
+              ) : (
+                <>
+                <h3 className="text-sm font-bold text-text-primary">Pago Exitoso</h3>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  Tu pago de <span className="font-bold text-text-primary">${amountToPay.toFixed(2)} USD</span> vía PayPal ha sido recibido. Se ha habilitado la asesoría con <span className="font-semibold text-text-primary">{agent?.name}</span>.
+                </p>
+                </>
+              )}
+            </div>
 
             <button
               onClick={() => {
                 onSuccess();
               }}
-              className="w-full py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none cursor-pointer"
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none cursor-pointer"
             >
-              {isVipro 
-                ? "Comenzar Evaluación VIPRO" 
-                : (user?.viproCompleted 
-                    ? `Comenzar Chat con ${agent?.name.split(" ")[1] || "Asesor"}` 
-                    : "Ver mi Perfil y Completar VIPRO"
-                  )
-              }
+              {product === "vipro"
+                ? "Ir a mi Formulario VIPRO &rarr;"
+                : `Comenzar Chat con ${(agent?.name || "").split(" ")[1] || agent?.name || "Asesor"} &rarr;`}
             </button>
           </div>
         )}

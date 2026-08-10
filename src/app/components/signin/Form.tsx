@@ -3,43 +3,26 @@
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-// Removed AuthService dependency as logic is moved to API routes
+import { AuthService } from '../../service/AuthService';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
 import supabase from '../../lib/supabase';
 
-
-// Helper function to handle API call for Google OAuth redirect. 
-// It redirects the user by calling a dedicated /api/auth/google endpoint.
-const handleGoogleSignInApi = async (redirectTo: string) => {
-    try {
-        console.log("Initiating Google Sign-In flow...");
-        // Call the dedicated API route that handles Supabase OAuth flow
-        const response = await fetch('/api/auth/google', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ redirectTo }),
-        });
-
-        if (!response.ok) {
-            // Read and throw error from the API route handler
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Error al intentar iniciar sesión con Google.');
-        }
-
-        const result = await response.json();
-        if (result.data?.url) {
-            window.location.href = result.data.url;
-        }
-    } catch (error: unknown) {
-        const errMessage = error instanceof Error ? error.message : String(error);
-        console.error("Google Sign-In API redirect error:", errMessage);
-        throw error;
+// Llama a signInWithOAuth directamente desde el cliente para garantizar
+// que window.location.origin (la URL real de producción o dev) se use
+// siempre como redirectTo, evitando que el servidor devuelva localhost.
+const handleGoogleSignInClient = async () => {
+    const redirectTo = `${window.location.origin}/`;
+    console.log("Initiating Google Sign-In flow (client-side)...", redirectTo);
+    const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+    });
+    if (error) {
+        throw new Error(error.message);
     }
+    // Supabase redirige automáticamente al proveedor — no se necesita hacer nada más.
 };
-
 
 interface SignInInputs {
     Email?: string;
@@ -59,76 +42,21 @@ export function SignInForm() {
         setAuthError(null);
         
         try {
-            // NOTE: This assumes an API route handler at /api/auth/signin exists 
-            // to handle standard credential exchange with Supabase.
-            const response = await fetch('/api/auth/signin', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data),
-            });
-
-            if (!response.ok) {
-                 const errorData = await response.json();
-                 throw new Error(errorData.error || 'Error al intentar iniciar sesión con credenciales.');
-            }
-            
-            const result = await response.json();
+            const result = await AuthService.signIn(data.Email || '', data.Password || '');
 
             // Check if the user data was successfully retrieved and set in the store
             if (result.data?.user) {
                 const userObj = result.data.user;
                 const metadata = userObj.user_metadata || {};
-                const userId = userObj.id;
                 
-                // Defaults — will be overridden from SQL tables below
-                let viproScore: number | null = null;
-                let viproCompleted = false;
-                let viproDestination: string | null = null;
-                let hasPaidVipro = false;
-                let hasPaidAdvisor = false;
-                let assignedAgentId: string | null = null;
+                let viproScore = metadata.vipro_score || null;
+                let viproCompleted = metadata.vipro_completed || false;
+                let viproDestination = metadata.vipro_destination || null;
+                const hasPaidAdvisor = metadata.has_paid_advisor || false;
+                const assignedAgentId = metadata.assigned_agent_id || null;
 
-                // 1. Load payment status from user_purchases table
-                try {
-                    const { data: purchases } = await supabase
-                        .from("user_purchases")
-                        .select("*")
-                        .eq("user_id", userId)
-                        .eq("status", "completed");
-
-                    if (purchases && purchases.length > 0) {
-                        hasPaidVipro = purchases.some((p: any) => p.product_type === "vipro" || p.product_type === "advisor");
-                        hasPaidAdvisor = purchases.some((p: any) => p.product_type === "advisor");
-                        const advisorPurchase = purchases.find((p: any) => p.product_type === "advisor");
-                        assignedAgentId = advisorPurchase?.agent_id || null;
-                    }
-                } catch (err) {
-                    console.error("Failed to load user_purchases on sign-in:", err);
-                }
-
-                // 2. Load VIPRO completion status from vipro_evaluations table
-                try {
-                    const { data: completedEval } = await supabase
-                        .from("vipro_evaluations")
-                        .select("*")
-                        .eq("user_id", userId)
-                        .eq("is_completed", true)
-                        .order("completed_at", { ascending: false })
-                        .maybeSingle();
-
-                    if (completedEval) {
-                        viproCompleted = true;
-                        viproScore = completedEval.score;
-                        viproDestination = completedEval.destination_country;
-                    }
-                } catch (err) {
-                    console.error("Failed to load vipro_evaluations on sign-in:", err);
-                }
-
-                // 3. Sync local guest evaluation to DB if it was done offline and user just logged in
-                if (!viproCompleted && typeof window !== "undefined") {
+                // Sync local guest VIPRO evaluation to Supabase if it wasn't saved in Supabase yet
+                if (typeof window !== "undefined" && !viproCompleted) {
                     const localCompleted = localStorage.getItem("vipro_completed") === "true";
                     if (localCompleted) {
                         const localScoreStr = localStorage.getItem("vipro_score");
@@ -140,21 +68,15 @@ export function SignInForm() {
                         viproDestination = localDestination;
 
                         try {
-                            // Persist local evaluation to the physical table
-                            await supabase.from("vipro_evaluations").insert([{
-                                user_id: userId,
-                                destination_country: localDestination || "US",
-                                answers: {},
-                                score: localScore,
-                                recommendations: [],
-                                destination_analysis: "Evaluación realizada sin sesión activa.",
-                                current_step: 0,
-                                is_completed: true,
-                                completed_at: new Date().toISOString()
-                            }]);
-                            console.log("Synced local guest VIPRO evaluation to vipro_evaluations table on Sign-in.");
+                            // Update user metadata via API route
+                            await AuthService.updateUser({
+                                vipro_score: localScore,
+                                vipro_completed: true,
+                                vipro_destination: localDestination
+                            });
+                            console.log("Synced local guest VIPRO on Sign-in.");
                         } catch (err) {
-                            console.error("Failed to sync local VIPRO to vipro_evaluations on sign-in:", err);
+                            console.error("Failed to sync local VIPRO on sign-in:", err);
                         }
                     }
                 }
@@ -169,19 +91,8 @@ export function SignInForm() {
                     viproScore: viproScore,
                     viproCompleted: viproCompleted,
                     viproDestination: viproDestination,
-                    hasPaidVipro: hasPaidVipro,
                     hasPaidAdvisor: hasPaidAdvisor,
-                    assignedAgentId: assignedAgentId,
-                    photoUrl: metadata.photo_url || null,
-                    avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
-                    lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
-                    ds160FullName: metadata.ds160_full_name || null,
-                    ds160PassportNum: metadata.ds160_passport_num || null,
-                    ds160BirthDate: metadata.ds160_birth_date || null,
-                    ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
-                    ds160HasAssets: metadata.ds160_has_assets ?? true,
-                    ds160Confirmed: metadata.ds160_confirmed || false,
-                    expedienteStatus: metadata.expediente_status || 'draft',
+                    assignedAgentId: assignedAgentId
                 });
             }
 
@@ -194,11 +105,14 @@ export function SignInForm() {
     };
 
     const handleGoogleSignIn = async () => {
+        setIsLoading(true);
+        setAuthError(null);
         try {
-            await handleGoogleSignInApi(`${window.location.origin}/`); 
+            await handleGoogleSignInClient();
         } catch (error: unknown) {
             const errMessage = error instanceof Error ? error.message : String(error);
             setAuthError(errMessage || 'Error de red al iniciar sesión con Google');
+            setIsLoading(false);
         }
     };
 
@@ -271,7 +185,8 @@ export function SignInForm() {
                         <button
                             type="button"
                             onClick={handleGoogleSignIn}
-                            className="w-full flex items-center justify-center gap-2 border-[1px] border-gray-300 bg-white hover:bg-gray-50 transition-colors text-gray-700 font-medium rounded-md px-4 py-2.5 text-md cursor-pointer"
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-center gap-2 border-[1px] border-gray-300 bg-white hover:bg-gray-50 transition-colors text-gray-700 font-medium rounded-md px-4 py-2.5 text-md cursor-pointer disabled:opacity-50"
                         >
                             <svg className="w-5 h-5" viewBox="0 0 24 24">
                                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -280,7 +195,7 @@ export function SignInForm() {
                                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                                 <path fill="none" d="M1 1h22v22H1z" />
                             </svg>
-                            Continuar con Google
+                            {isLoading ? 'Redirigiendo...' : 'Continuar con Google'}
                         </button>
                     </div>
 

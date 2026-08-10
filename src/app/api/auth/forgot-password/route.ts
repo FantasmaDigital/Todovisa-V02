@@ -1,30 +1,27 @@
-"use server";
-
-import { NextResponse } from 'next/server';
-import supabase from '@/app/lib/supabase';
+import { AuthRepository } from "@/lib/repositories/auth.repository";
+import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-    try {
-        const body = await request.json();
-        const email = body.Email;
+  try {
+    const { email } = await request.json();
 
-        if (!email || !/\S+@\S+$/i.test(email)) {
-             return NextResponse.json({ error: 'Por favor, introduce un correo electrónico válido.' }, { status: 400 });
-        }
-
-        // Use Supabase's built-in password reset mechanism (Magic Link)
-        const { error } = await supabase.auth.resetPasswordForEmail(email);
-
-        if (error) {
-            console.error('Supabase Password Reset Error:', error);
-            return NextResponse.json({ error: 'Error al procesar la solicitud de restablecimiento.' }, { status: 500 });
-        }
-
-        // Success: Send confirmation/success message back to the client
-        return NextResponse.json({ success: true, message: 'Instrucciones de restablecimiento enviadas exitosamente.' }, { status: 200 });
-
-    } catch (error) {
-        console.error('Fatal Error in Forgot Password API:', error);
-        return NextResponse.json({ error: 'Error interno del servidor al procesar la solicitud.' }, { status: 500 });
+    if (!email) {
+      return NextResponse.json({ error: "El correo electrónico es requerido" }, { status: 400 });
     }
+
+    const { error } = await AuthRepository.resetPasswordForEmail(email);
+
+    if (error) {
+      console.error("Supabase Password Reset Error:", error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { message: "Se ha enviado un correo con instrucciones para restablecer tu contraseña." },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    console.error("ForgotPassword catch error:", err);
+    return NextResponse.json({ error: err.message || "Error interno del servidor" }, { status: 500 });
+  }
 }
