@@ -107,10 +107,10 @@ export default function Home() {
               </p>
               <div className="pt-2">
                 <a
-                  href="/citas"
+                  href="/sobre-todovisa"
                   className="inline-flex items-center gap-3 bg-brand-primary hover:bg-brand-hover text-white font-bold px-8 py-3.5 rounded-lg transition-all duration-300 text-sm shadow-md cursor-pointer border-none"
                 >
-                  <span>Agenda una Cita Consular</span>
+                  <span>Conoce sobre TodoVisa</span>
                   <span className="text-base">→</span>
                 </a>
               </div>

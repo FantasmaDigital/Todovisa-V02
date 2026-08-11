@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { AuthService } from "../../service/AuthService";
 import { AgentClientService } from "@/services/client/AgentClientService";
+import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 interface Agent {
   id: string;
@@ -42,8 +43,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   }, []);
 
   const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
-  const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";
-  const isSandbox = paypalMode !== "live" || paypalClientId === "test";
+  const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || (process.env.NODE_ENV === "production" ? "live" : "sandbox");
+  const isSandbox = paypalMode === "sandbox" || paypalClientId === "test";
 
   const [basePrice, setBasePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
   const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
@@ -239,7 +240,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               ) : (
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
-                    <span>Asesoría Consular Completa (Plan Concierge)</span>
+                    <span>Asesoría Consular Completa</span>
                     <span>${basePrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
@@ -252,7 +253,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
 
             {/* PayPal Action Box */}
             <div className="p-6 space-y-4 text-center">
-              {isSandbox ? (
+              {paypalClientId === "test" ? (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
                   <div className="flex items-center justify-center gap-2 text-amber-900 text-xs font-bold uppercase tracking-wide">
                     <span>🧪 Entorno de Pruebas Activo (PayPal Sandbox)</span>
@@ -269,18 +270,43 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                   </button>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-text-secondary">
-                    Haz clic en el botón oficial para autenticarte y confirmar tu pago de manera 100% segura con PayPal:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => processSuccessfulPayment(`PAYPAL_LIVE_${Date.now()}`)}
-                    className="w-full py-3.5 bg-[#0070BA] hover:bg-[#005EA6] text-white font-extrabold text-sm rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <span>Completa tu pago seguro de ${amountToPay.toFixed(2)} USD con PayPal</span>
-                  </button>
-                </div>
+                <PayPalScriptProvider options={{ clientId: paypalClientId, currency: "USD" }}>
+                  <div className="space-y-3 text-left">
+                    <p className="text-xs text-text-secondary text-center mb-4">
+                      Completa tu transacción de manera 100% segura usando tu saldo PayPal o tu tarjeta de débito/crédito:
+                    </p>
+                    <div className="relative z-10">
+                      <PayPalButtons
+                        style={{ layout: "vertical", label: "pay" }}
+                        createOrder={(data, actions) => {
+                          return actions.order.create({
+                            intent: "CAPTURE",
+                            purchase_units: [
+                              {
+                                description: product === "vipro" ? "Evaluación Diagnóstica VIPRO" : "Asesoría Consular Completa",
+                                amount: {
+                                  currency_code: "USD",
+                                  value: amountToPay.toFixed(2),
+                                },
+                              },
+                            ],
+                          });
+                        }}
+                        onApprove={async (data, actions) => {
+                          if (actions.order) {
+                            const details = await actions.order.capture();
+                            const txId = details.id || `PAYPAL_${Date.now()}`;
+                            await processSuccessfulPayment(txId);
+                          }
+                        }}
+                        onError={(err) => {
+                          console.error("PayPal checkout error:", err);
+                          alert("Ocurrió un error con el pago de PayPal. Por favor, intenta de nuevo.");
+                        }}
+                      />
+                    </div>
+                  </div>
+                </PayPalScriptProvider>
               )}
 
               <div className="flex items-center justify-center gap-4 text-[10px] text-text-muted pt-2 border-t border-border-light">
@@ -352,8 +378,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none cursor-pointer"
             >
               {product === "vipro"
-                ? "Ir a mi Formulario VIPRO &rarr;"
-                : `Comenzar Chat con ${(agent?.name || "").split(" ")[1] || agent?.name || "Asesor"} &rarr;`}
+                ? "Ir a mi Formulario VIPRO"
+                : `Comenzar Chat con ${(agent?.name || "").split(" ")[1] || agent?.name || "Asesor"}`}
             </button>
           </div>
         )}

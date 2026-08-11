@@ -157,7 +157,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         viproDestination: metadata.vipro_destination || null,
                         hasPaidAdvisor: metadata.has_paid_advisor || false,
                         assignedAgentId: metadata.assigned_agent_id || null,
-                        photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
+                        photoUrl: dbProfile?.photo_url || metadata.photo_url || metadata.avatar_url || metadata.picture || null,
                         avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
                         lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
                         ds160FullName: metadata.ds160_full_name || null,
@@ -179,7 +179,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         currentUser.role !== updatedUser.role || 
                         currentUser.email !== updatedUser.email || 
                         currentUser.firstName !== updatedUser.firstName ||
-                        currentUser.lastName !== updatedUser.lastName;
+                        currentUser.lastName !== updatedUser.lastName ||
+                        currentUser.photoUrl !== updatedUser.photoUrl;
 
                     if (isDifferent) {
                         useAuthStore.getState().setUser(updatedUser);
@@ -468,13 +469,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                 {userData?.id ? (
                                     <>
                                         <div className="flex items-center gap-3 bg-brand-light/30 p-3 rounded-lg border border-brand-primary/10 text-left">
-                                            <div className="w-10 h-10 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/20 overflow-hidden">
-                                                {userData.photoUrl ? (
-                                                    <img src={userData.photoUrl} alt="Avatar" className="w-full h-full object-cover" />
-                                                ) : (
-                                                    <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
-                                                )}
-                                            </div>
+                                            <UserAvatar
+                                                src={userData.photoUrl}
+                                                name={userData.firstName + " " + userData.lastName}
+                                                size="md"
+                                            />
                                             <div className="flex flex-col">
                                                 <span className="text-text-primary font-bold text-xs">{userData.firstName + " " + userData.lastName}</span>
                                                 <span className="text-text-secondary text-[10px]">{userData.email}</span>
