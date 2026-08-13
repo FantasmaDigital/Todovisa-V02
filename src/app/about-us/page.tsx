@@ -114,7 +114,7 @@ export default function AboutUsPage() {
                 TodoVisa surgió al identificar que miles de solicitudes de visa son rechazadas no por falta de solvencia o lazos de arraigo, sino por errores en el llenado de formularios, expedientes incompletos o falta de preparación previa para la entrevista consular.
               </p>
               <p className="text-sm md:text-base text-text-secondary leading-relaxed">
-                Nuestra misión es brindar claridad absoluta a cada viajero mediante diagnósticos oportunos y acompañamiento profesional 1-a-1 de principio a fin.
+                Nuestra misión es brindar claridad absoluta a cada viajero mediante diagnósticos oportunos y acompañamiento profesional con Asesores Expertos de principio a fin.
               </p>
             </div>
 
@@ -203,7 +203,7 @@ export default function AboutUsPage() {
               ¿Listo para asegurar la aprobación de tu visa?
             </h2>
             <p className="text-sm md:text-base text-white/90 max-w-2xl mx-auto leading-relaxed">
-              Inicia tu evaluación diagnóstica con VIPRO o solicita el acompañamiento 1-a-1 de uno de nuestros asesores certificados.
+              Inicia tu evaluación diagnóstica con VIPRO o solicita el acompañamiento con Asesores Expertos de principio a fin.
             </p>
             <div className="flex flex-wrap justify-center gap-4 pt-2">
               <Link

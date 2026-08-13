@@ -175,7 +175,7 @@ export default function ServicesPage() {
                                 </div>
 
                                 <div className="bg-amber-50/80 border border-amber-200/60 rounded-lg p-3 text-[11px] text-amber-900 leading-relaxed">
-                                    <strong>Nota importante:</strong> VIPRO es un diagnóstico automatizado. <em>No incluye asesor humano 1-a-1 ni llenado de formularios DS-160/UKVI.</em>
+                                    <strong>Nota importante:</strong> VIPRO es un diagnóstico automatizado. <em>No incluye asesor humano ni llenado de formularios DS-160/UKVI.</em>
                                 </div>
                             </div>
 
@@ -212,7 +212,7 @@ export default function ServicesPage() {
                                         <span className="text-xs text-text-muted font-sans">USD / paquete completo</span>
                                     </div>
                                     <p className="text-xs text-text-secondary leading-relaxed">
-                                        Representación 1-a-1 por un asesor certificado que asume la elaboración técnica de tu expediente de inicio a fin.
+                                        Representación por un asesor certificado que asume la elaboración técnica y personalizada de tu expediente de inicio a fin.
                                     </p>
                                 </div>
 
@@ -221,7 +221,7 @@ export default function ServicesPage() {
                                     <ul className="space-y-2.5 text-xs text-text-secondary">
                                         <li className="flex items-start gap-2">
                                             <span className="text-emerald-600 font-bold">✓</span>
-                                            <span><strong>Asesor Consular Asignado</strong> con comunicación ilimitada vía Chat 1-a-1.</span>
+                                            <span><strong>Asesor Consular Asignado</strong> con comunicación ilimitada vía Chat con tu asesor experto.</span>
                                         </li>
                                         <li className="flex items-start gap-2">
                                             <span className="text-emerald-600 font-bold">✓</span>

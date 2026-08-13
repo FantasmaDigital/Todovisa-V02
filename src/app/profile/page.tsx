@@ -229,7 +229,50 @@ export default function PerfilUsuarioPage() {
     proposedDate: "",
     proposedTime: "10:00",
     agentNotes: "",
+    meetingLink: "",
   });
+  const [userAppointmentRequest, setUserAppointmentRequest] = useState<any>(user?.appointmentRequest || null);
+  const [userRating, setUserRating] = useState<number>(0);
+  const [userReviewComment, setUserReviewComment] = useState<string>("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
+  const [agentReviewSubmitted, setAgentReviewSubmitted] = useState<boolean>(false);
+
+  const handleSaveAgentReview = async () => {
+    if (!user?.id) return;
+    if (userRating === 0) {
+      showToast("Selecciona una calificación de 1 a 5 estrellas para continuar.", "error");
+      return;
+    }
+    try {
+      setIsSubmittingReview(true);
+      const reviewData = {
+        rating: userRating,
+        comment: userReviewComment,
+        created_at: new Date().toISOString(),
+        user_id: user.id,
+        user_name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+        agent_id: assignedAgentProfile?.id || null,
+      };
+
+      await ProfileClientService.updateProfile(user.id, {
+        agent_review: reviewData,
+      });
+
+      setAgentReviewSubmitted(true);
+      showToast("¡Muchas gracias por calificar el servicio de tu asesor!", "success");
+    } catch (err: any) {
+      console.error("Error al guardar calificación:", err);
+      showToast("Error al guardar reseña: " + (err.message || String(err)), "error");
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.appointmentRequest) {
+      setUserAppointmentRequest(user.appointmentRequest);
+    }
+  }, [user?.appointmentRequest]);
 
   useEffect(() => {
     if (!selectedClientProfile) return;
@@ -242,18 +285,39 @@ export default function PerfilUsuarioPage() {
     } else if (anyObservedOrRejected) {
       setAuditExpedienteStatus("draft");
     }
-  }, [docReviews]);
 
-  const handleAgentAcceptCita = async (agentNotes?: string) => {
+    const appt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+    if (appt) {
+      setAgentCitaProposal(prev => ({
+        ...prev,
+        proposedDate: appt.agent_proposed_date || appt.requested_date || appt.confirmed_date || "",
+        proposedTime: appt.agent_proposed_time || appt.requested_time || appt.confirmed_time || "10:00",
+        agentNotes: appt.agent_notes || "",
+        meetingLink: appt.meeting_link || "",
+      }));
+    }
+  }, [docReviews, selectedClientProfile]);
+
+  const handleAgentAcceptCita = async (agentNotes?: string, meetingLink?: string) => {
     if (!selectedClientProfile) return;
     try {
       const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const linkToUse = meetingLink !== undefined ? meetingLink : (agentCitaProposal.meetingLink || currentAppt?.meeting_link || "");
+
+      if (!linkToUse || !linkToUse.trim()) {
+        showToast("⚠️ Para confirmar la cita es OBLIGATORIO ingresar el enlace a la reunión virtual (Zoom / Google Meet).", "error");
+        return;
+      }
+
+      const notesToUse = agentNotes !== undefined ? agentNotes : (agentCitaProposal.agentNotes || "Cita admitida y confirmada por el asesor.");
+
       const updatedAppt = {
         ...(currentAppt || {}),
         status: "confirmed" as const,
         confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
         confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
-        agent_notes: agentNotes || "Cita admitida y confirmada por el asesor.",
+        agent_notes: notesToUse,
+        meeting_link: linkToUse,
       };
 
       await ProfileClientService.updateProfile(selectedClientProfile.id, {
@@ -262,7 +326,8 @@ export default function PerfilUsuarioPage() {
 
       setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
 
-      const msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs. ${agentNotes ? `\n\n💬 Nota del Asesor: "${agentNotes}"` : ""}`;
+      const msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.${linkToUse ? `\n\n🎥 Enlace de Videollamada (Zoom / Meet):\n${linkToUse}` : ""}${notesToUse ? `\n\n💬 Nota del Asesor: "${notesToUse}"` : ""}`;
+      
       await MessageClientService.createMessage({
         sender: "agent",
         text: msgText,
@@ -270,7 +335,7 @@ export default function PerfilUsuarioPage() {
         agent_id: user?.id || "",
       });
 
-      showToast("Cita admitida y confirmada exitosamente.", "success");
+      showToast("Cita confirmada exitosamente con enlace de videollamada.", "success");
     } catch (err: any) {
       console.error("Error al admitir cita:", err);
       showToast("Error al admitir cita: " + (err.message || String(err)), "error");
@@ -312,11 +377,19 @@ export default function PerfilUsuarioPage() {
     if (!selectedClientProfile) return;
     try {
       const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const linkToUse = agentCitaProposal.meetingLink || currentAppt?.meeting_link || "";
+
+      if (newStatus === "confirmed" && (!linkToUse || !linkToUse.trim())) {
+        showToast("⚠️ Para confirmar la cita es OBLIGATORIO ingresar el enlace a la reunión virtual (Zoom / Google Meet).", "error");
+        return;
+      }
+
       const updatedAppt = {
         ...(currentAppt || {}),
         status: newStatus as any,
         confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
         confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
+        meeting_link: linkToUse,
       };
 
       const updates: any = {
@@ -332,7 +405,7 @@ export default function PerfilUsuarioPage() {
 
       let msgText = "";
       if (newStatus === "confirmed") {
-        msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.`;
+        msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.${updatedAppt.meeting_link ? `\n\n🎥 Enlace Zoom/Meet: ${updatedAppt.meeting_link}` : ""}`;
       } else if (newStatus === "rejected") {
         msgText = `❌ Tu solicitud de cita ha sido rechazada por el asesor. Puedes ingresar al apartado de Citas y reagendar en un nuevo horario.`;
       } else if (newStatus === "proposed") {
@@ -368,6 +441,7 @@ export default function PerfilUsuarioPage() {
         agent_proposed_date: agentCitaProposal.proposedDate,
         agent_proposed_time: agentCitaProposal.proposedTime,
         agent_notes: agentCitaProposal.agentNotes || "El asesor propone este nuevo horario.",
+        meeting_link: agentCitaProposal.meetingLink || currentAppt?.meeting_link || "",
       };
 
       await ProfileClientService.updateProfile(selectedClientProfile.id, {
@@ -377,7 +451,7 @@ export default function PerfilUsuarioPage() {
       setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
       setIsAgentProposingCita(false);
 
-      const msgText = `📅 El asesor ha propuesto un NUEVO HORARIO para la cita:\n- Fecha propuesta: ${agentCitaProposal.proposedDate}\n- Hora propuesta: ${agentCitaProposal.proposedTime} hrs${agentCitaProposal.agentNotes ? `\n- Nota: ${agentCitaProposal.agentNotes}` : ""}\n\nIngresa al apartado de Citas para Aceptar la propuesta.`;
+      const msgText = `📅 El asesor ha propuesto un NUEVO HORARIO para la cita:\n- Fecha propuesta: ${agentCitaProposal.proposedDate}\n- Hora propuesta: ${agentCitaProposal.proposedTime} hrs${agentCitaProposal.meetingLink ? `\n- Enlace de reunión: ${agentCitaProposal.meetingLink}` : ""}${agentCitaProposal.agentNotes ? `\n- Nota: ${agentCitaProposal.agentNotes}` : ""}\n\nIngresa al apartado de Citas para Aceptar la propuesta.`;
       await MessageClientService.createMessage({
         sender: "agent",
         text: msgText,
@@ -630,10 +704,15 @@ export default function PerfilUsuarioPage() {
         const dest = user?.viproDestination || "US";
         const data = await FormClientService.getPreformulario(user.id);
 
-        if (data) {
+        if (data && Object.keys(data).length > 0) {
           setPreformMetadata(data);
+          setIsPreformularioCompleted(true);
         } else {
           // Check if there is anything in localstorage as fallback
+          const completed = localStorage.getItem(`preformulario_completed_user_id_${user.id}`);
+          if (completed === "true") {
+            setIsPreformularioCompleted(true);
+          }
           const localIntakeType = localStorage.getItem(`preform_progress_intake_type_${dest}_${user.id}`);
           const localWaiverEligible = localStorage.getItem(`preform_progress_waiver_eligible_${dest}_${user.id}`);
           if (localIntakeType || localWaiverEligible) {
@@ -648,7 +727,7 @@ export default function PerfilUsuarioPage() {
       }
     };
     fetchPreformMetadata();
-  }, [user?.id, user?.viproDestination, isPreformularioCompleted]);
+  }, [user?.id, user?.viproDestination]);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setToast({ message, type });
@@ -1578,6 +1657,19 @@ export default function PerfilUsuarioPage() {
             if (profData.document_reviews) {
               setClientDocReviews(profData.document_reviews);
             }
+            const apptData = profData.appointment_request || profData.cita_details || profData.document_reviews?.appointment_request;
+            if (apptData) {
+              setUserAppointmentRequest(apptData);
+              if (user) {
+                setUser({ ...user, appointmentRequest: apptData });
+              }
+            }
+            const revData = profData.agent_review || profData.document_reviews?.agent_review;
+            if (revData) {
+              setUserRating(revData.rating || 0);
+              setUserReviewComment(revData.comment || "");
+              setAgentReviewSubmitted(true);
+            }
             if (profData.ds160_confirmed !== undefined) {
               setDs160Confirmed(!!profData.ds160_confirmed);
             }
@@ -1669,32 +1761,98 @@ export default function PerfilUsuarioPage() {
             setAllPreformulariosList(preforms);
           }
         });
-      // Fetch VIPRO evaluations and commissions in parallel to compute real stats
+      // Fetch VIPRO evaluations, commissions, and profiles in parallel to compute real stats
       Promise.all([
         FormClientService.getAllViproEvaluations().catch(() => []),
-        Promise.resolve(supabase.from("agent_commissions").select("*")).catch(() => ({ data: [] }))
-      ]).then(([evals, commsResult]) => {
+        Promise.resolve(supabase.from("agent_commissions").select("*")).catch(() => ({ data: [] })),
+        ProfileClientService.getAllProfiles().catch(() => [])
+      ]).then(([evals, commsResult, profiles]) => {
         const validEvals = Array.isArray(evals) ? evals : [];
         const commissions = Array.isArray(commsResult?.data) ? commsResult.data : [];
+        const allProfs = Array.isArray(profiles) ? profiles : [];
+
+        // Build a profile map by ID & email for quick lookup
+        const pMap: Record<string, { email: string; name: string }> = {};
+        allProfs.forEach((p: any) => {
+          const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+          const entry = { email: p.email || "", name: full || p.email || "Cliente" };
+          if (p.id) {
+            pMap[p.id] = entry;
+            pMap[p.id.toLowerCase()] = entry;
+          }
+          if (p.email) pMap[p.email.toLowerCase()] = entry;
+        });
+        setDbProfilesMap((prev) => ({ ...prev, ...pMap }));
 
         setViproEvaluations(validEvals);
 
-        // Build purchases array from real DB records
-        const viproPurchases = validEvals.map((ev: any) => ({
-          id: ev.id,
-          product_type: "vipro",
-          amount: Number(viproPrice) || 19.99,
-          created_at: ev.created_at
-        }));
+        // Build purchases array from real DB records (vipro_evaluations)
+        const viproPurchases = validEvals.map((ev: any) => {
+          const prof = ev.user_id ? pMap[ev.user_id] : (ev.user_email ? pMap[ev.user_email.toLowerCase()] : null);
+          return {
+            id: ev.id,
+            user_id: ev.user_id,
+            user_name: prof?.name || ev.full_name || ev.user_name || null,
+            user_email: ev.user_email || prof?.email || "",
+            product_type: "vipro",
+            amount: Number(ev.amount || ev.price || viproPrice) || 19.99,
+            paypal_tx_id: ev.paypal_tx_id || ev.transaction_id || null,
+            created_at: ev.created_at || new Date().toISOString()
+          };
+        });
 
-        const advisorPurchases = commissions.map((c: any) => ({
-          id: c.id,
-          product_type: "advisor",
-          amount: Number(c.sale_amount) || 112.50,
-          created_at: c.created_at
-        }));
+        // Build purchases array from real DB records (agent_commissions)
+        const advisorPurchases = commissions.map((c: any) => {
+          const prof = c.client_id ? pMap[c.client_id] : (c.client_email ? pMap[c.client_email.toLowerCase()] : null);
+          return {
+            id: c.id,
+            user_id: c.client_id || c.user_id,
+            user_name: c.client_name || prof?.name || null,
+            user_email: c.client_email || prof?.email || "",
+            product_type: "advisor",
+            amount: Number(c.gross_amount) || Number(c.sale_amount) || Number(fullServicePrice) || 150,
+            paypal_tx_id: c.paypal_tx_id || c.transaction_id || null,
+            created_at: c.created_at || new Date().toISOString()
+          };
+        });
 
-        setDbPurchases([...viproPurchases, ...advisorPurchases]);
+        // Also check profiles table for users who have paid vipro or advisor
+        const profilePurchases: any[] = [];
+        allProfs.forEach((p: any) => {
+          const full = `${p.first_name || ""} ${p.last_name || ""}`.trim() || p.email;
+          if (p.has_paid_vipro) {
+            const exists = viproPurchases.some(vp => vp.user_id === p.id);
+            if (!exists) {
+              profilePurchases.push({
+                id: `prof-vipro-${p.id}`,
+                user_id: p.id,
+                user_name: full,
+                user_email: p.email || "",
+                product_type: "vipro",
+                amount: Number(viproPrice) || 19.99,
+                paypal_tx_id: p.last_paypal_tx || null,
+                created_at: p.updated_at || new Date().toISOString()
+              });
+            }
+          }
+          if (p.has_paid_advisor) {
+            const exists = advisorPurchases.some(ap => ap.user_id === p.id);
+            if (!exists) {
+              profilePurchases.push({
+                id: `prof-advisor-${p.id}`,
+                user_id: p.id,
+                user_name: full,
+                user_email: p.email || "",
+                product_type: "advisor",
+                amount: Number(fullServicePrice) || 150,
+                paypal_tx_id: p.last_paypal_tx || null,
+                created_at: p.updated_at || new Date().toISOString()
+              });
+            }
+          }
+        });
+
+        setDbPurchases([...viproPurchases, ...advisorPurchases, ...profilePurchases]);
       }).catch(err => {
         console.error("Error loading admin stats:", err);
       });
@@ -2669,7 +2827,7 @@ export default function PerfilUsuarioPage() {
                           </div>
                           <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento (${fullServicePrice.toFixed(2)} USD)</h4>
                           <p className="text-xs text-text-secondary leading-relaxed mb-4">
-                            Asesoría 1-a-1, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
+                            Asesoría con Asesores Expertos, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
                           </p>
                           {user.hasPaidAdvisor ? (
                             <div className="flex items-center justify-between pt-1">
@@ -2680,7 +2838,7 @@ export default function PerfilUsuarioPage() {
                                 onClick={() => setActiveTab("asesor")}
                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 transition-colors cursor-pointer"
                               >
-                                Chat 1-a-1 &rarr;
+                                Chat con Asesor
                               </button>
                             </div>
                           ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
@@ -2797,7 +2955,7 @@ export default function PerfilUsuarioPage() {
                           <div className="mt-8 p-6 bg-gradient-to-r from-brand-light/60 to-white border border-brand-primary/20 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 text-left shadow-sm">
                             <div className="space-y-1">
                               <span className="text-[10px] font-extrabold text-brand-primary uppercase tracking-widest bg-white border border-brand-primary/20 px-2.5 py-0.5 rounded-full">
-                                Paso Opcional: Asesoría Personalizada 1-a-1
+                                Paso Opcional: Asesoría Personalizada
                               </span>
                               <h4 className="text-base font-bold text-text-primary">
                                 ¿Deseas que un asesor experto llene tu DS-160 y audite tu expediente?
@@ -2815,8 +2973,44 @@ export default function PerfilUsuarioPage() {
                           </div>
                         </div>
                       ) : (
-                        /* TIMELINE COMPLETO DE 7 PASOS (CON ASESOR) */
+                        /* TIMELINE COMPLETO DE 6 PASOS (CON ASESOR) */
                         <div className="space-y-8 relative before:absolute before:inset-0 before:left-3.5 before:right-auto before:w-0.5 before:bg-gray-200 mt-4 text-left">
+
+                          {/* BANNER DE SERVICIO COMPLETADO AL 100% */}
+                          {(() => {
+                            const activeCita = userAppointmentRequest || user?.appointmentRequest;
+                            const isCitaConfirmed = activeCita?.status === 'confirmed';
+                            const isStep1Done = true;
+                            const isStep2Done = isPreformularioCompleted;
+                            const isStep3Done = !!user?.hasPaidAdvisor || !!assignedAgentProfile || !!user?.assignedAgencyName;
+                            const isStep4Done = expedienteStatus === 'approved';
+                            const isStep5Done = isCitaConfirmed;
+                            const isStep6Done = agentReviewSubmitted;
+
+                            const isAllComplete = isStep1Done && isStep2Done && isStep3Done && isStep4Done && isStep5Done && isStep6Done;
+
+                            if (!isAllComplete) return null;
+
+                            return (
+                              <div className="p-5 bg-emerald-50 border border-emerald-300 rounded-md text-left space-y-2 mb-6 shadow-2xs">
+                                <div className="flex items-center justify-between gap-2 border-b border-emerald-200/80 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base">🎉</span>
+                                    <h3 className="text-sm font-extrabold text-emerald-950 uppercase tracking-wider">
+                                      ¡Servicio Consular TodoVisa Completado al 100%!
+                                    </h3>
+                                  </div>
+                                  <span className="bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-sm uppercase tracking-wider">
+                                    6 / 6 PASOS COMPLETADOS
+                                  </span>
+                                </div>
+                                <p className="text-xs text-emerald-900 leading-relaxed">
+                                  Has completado exitosamente todos los 6 Pasos del proceso de acompañamiento consular. Tu expediente ha sido auditado por tu asesor, tu cita presencial / simulacro consular ha sido confirmada y has dejado tu reseña oficial. ¡Éxitos en tu trámite consular!
+                                </p>
+                              </div>
+                            );
+                          })()}
+
                           {/* Paso 1 */}
                           <div className="flex gap-4 relative">
                             <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 shadow-xs">
@@ -2880,7 +3074,7 @@ export default function PerfilUsuarioPage() {
                             </div>
                             <div className={`flex-1 rounded-md p-4 border ${user.hasPaidAdvisor ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"}`}>
                               <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                                <h4 className="text-sm font-bold text-text-primary">Paso 3: Conexión con Asesor Experto y Chat 1-a-1</h4>
+                                <h4 className="text-sm font-bold text-text-primary">Paso 3: Conexión con Asesor Experto y Chat</h4>
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.hasPaidAdvisor ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-800 border-amber-200"}`}>
                                   {user.hasPaidAdvisor ? "COMPLETADO" : "ACCIÓN REQUERIDA"}
                                 </span>
@@ -2895,19 +3089,19 @@ export default function PerfilUsuarioPage() {
                                     onClick={() => setActiveTab("asesor")}
                                     className="mt-3 text-xs text-brand-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
                                   >
-                                    💬 Ir a mi Chat de Soporte 1-a-1 &rarr;
+                                    💬 Ir a mi Chat con Asesor
                                   </button>
                                 </div>
                               ) : (
-                                <div>
-                                  <p className="text-xs text-text-secondary mb-3">
-                                    Selecciona un asesor consular de nuestra red certificada para guiar el armado de tu expediente y resolver dudas por chat.
+                                <div className="flex items-center justify-between flex-wrap gap-3">
+                                  <p className="text-xs text-text-secondary leading-relaxed">
+                                    Selecciona tu asesor certificado preferido para iniciar la atención 1-a-1.
                                   </p>
                                   <button
                                     onClick={() => router.push("/agents")}
                                     className="bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold px-4 py-2 rounded-sm transition-colors shadow-sm cursor-pointer"
                                   >
-                                    Elegir Asesor Consular &rarr;
+                                    Elegir Asesor Consular
                                   </button>
                                 </div>
                               )}
@@ -2915,56 +3109,74 @@ export default function PerfilUsuarioPage() {
                           </div>
 
                           {/* Paso 4 */}
-                          <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-emerald-500 text-white" : user.hasPaidAdvisor ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
+                          <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-brand-primary text-white shadow-xs" : expedienteStatus === 'submitted' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
                               {expedienteStatus === 'approved' ? "✓" : "4"}
                             </div>
-                            <div className={`flex-1 border rounded-md p-4 ${expedienteStatus === 'approved' ? "bg-white border-emerald-200 shadow-sm" : user.hasPaidAdvisor ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                            <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-emerald-200 shadow-sm" : expedienteStatus === 'submitted' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
                               <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                                <h4 className={`text-sm font-bold ${user.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
-                                  Paso 4: Auditoría de Expediente y Formulario Consular
+                                <h4 className={`text-sm font-bold ${user?.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
+                                  Paso 4: Expediente Probatorio (4 Requisitos) y Formulario Oficial DS-160
                                 </h4>
-                                {user.hasPaidAdvisor && (
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${expedienteStatus === 'approved' ? "bg-emerald-50 text-emerald-800 border-emerald-200" : expedienteStatus === 'submitted' ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse" : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"}`}>
-                                    {expedienteStatus === 'approved' ? "COMPLETADO" : expedienteStatus === 'submitted' ? "EN AUDITORÍA" : "EN PROGRESO"}
-                                  </span>
-                                )}
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider ${
+                                  expedienteStatus === 'approved'
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold"
+                                    : expedienteStatus === 'submitted'
+                                      ? "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
+                                      : "bg-slate-100 text-slate-600 border-slate-200"
+                                }`}>
+                                  {expedienteStatus === 'approved' ? "✅ EXPEDIENTE APROBADO" : expedienteStatus === 'submitted' ? "⏳ EN AUDITORÍA" : "PENDIENTE DE ENVIAR"}
+                                </span>
                               </div>
-                              <p className={`text-xs ${user.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"}`}>
-                                Carga digital de soporte probatorio (pasaporte, arraigos, solvencia) y auditoría previa del formulario DS-160 por parte de tu asesor.
+                              <p className={`text-xs ${user?.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
+                                Sube la documentación probatoria requerida y revisa los datos de tu formulario consular oficial antes de enviarlo a dictamen del asesor.
                               </p>
-
-                              {user.hasPaidAdvisor && (
-                                <div className="mt-4 pt-4 border-t border-border-light space-y-4">
+                              {user?.hasPaidAdvisor && (
+                                <div className="mt-4 pt-3 border-t border-border-light space-y-4">
+                                  {/* Grid 4 Requisitos */}
                                   <div>
-                                    <span className="text-xs font-bold text-text-primary uppercase tracking-wider block mb-1">
-                                      📂 Expediente Digital Consular
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                                      📁 Documentos de Arraigo Probatorio:
                                     </span>
                                     {(() => {
-                                      const renderDocReviewBadge = (docKey: string) => {
-                                        const rev = clientDocReviews[docKey];
-                                        if (!rev || !rev.status || rev.status === 'pending') return null;
-
-                                        const bgMap = {
-                                          approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                                          observed: 'bg-amber-50 text-amber-800 border-amber-200',
-                                          rejected: 'bg-red-50 text-red-700 border-red-200'
-                                        };
-
-                                        const labelMap = {
-                                          approved: '✅ Aprobado por Asesor',
-                                          observed: '⚠️ Observado por Asesor',
-                                          rejected: '❌ Rechazado por Asesor'
-                                        };
-
+                                      const renderDocReviewBadge = (docType: string) => {
+                                        const rev = clientDocReviews[docType];
+                                        if (!rev || rev.status === 'pending') {
+                                          return (
+                                            <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                              Pendiente de Revisión
+                                            </span>
+                                          );
+                                        }
+                                        if (rev.status === 'approved') {
+                                          return (
+                                            <span className="text-[9px] font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300">
+                                              ✅ Aprobado
+                                            </span>
+                                          );
+                                        }
+                                        if (rev.status === 'observed') {
+                                          return (
+                                            <div className="space-y-1">
+                                              <span className="text-[9px] font-extrabold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                                ⚠️ Observado por Asesor
+                                              </span>
+                                              {rev.comment && (
+                                                <p className="text-[10px] text-amber-950 italic bg-amber-50 p-1.5 rounded border border-amber-200">
+                                                  💬 &quot;{rev.comment}&quot;
+                                                </p>
+                                              )}
+                                            </div>
+                                          );
+                                        }
                                         return (
-                                          <div className="mt-2 pt-2 border-t border-border-light text-left">
-                                            <span className={`inline-block text-[9px] font-extrabold px-2 py-0.5 rounded border ${bgMap[rev.status as keyof typeof bgMap] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                                              {labelMap[rev.status as keyof typeof labelMap] || rev.status}
+                                          <div className="space-y-1">
+                                            <span className="text-[9px] font-extrabold text-red-900 bg-red-100 px-1.5 py-0.5 rounded border border-red-300">
+                                              ❌ Rechazado
                                             </span>
                                             {rev.comment && (
-                                              <p className="text-[10px] text-text-secondary mt-1 bg-white p-2 rounded border border-slate-100 italic">
-                                                💬 Asesor: &quot;{rev.comment}&quot;
+                                              <p className="text-[10px] text-red-950 italic bg-red-50 p-1.5 rounded border border-red-200">
+                                                💬 &quot;{rev.comment}&quot;
                                               </p>
                                             )}
                                           </div>
@@ -2972,44 +3184,44 @@ export default function PerfilUsuarioPage() {
                                       };
 
                                       return (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                           {/* Pasaporte */}
                                           <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">1. Pasaporte Vigente</span>
                                               <span className="text-[9px] text-text-muted">Primera página con datos de identidad.</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.passport || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.passport_url && (
-                                                  <a
-                                                    href={clientDocs.passport_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.passport || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.passport_url && (
+                                                    <a
+                                                      href={clientDocs.passport_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('passport', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('passport', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('passport')}
                                             </div>
-                                            {renderDocReviewBadge('passport')}
                                           </div>
 
                                           {/* DUI */}
@@ -3017,38 +3229,38 @@ export default function PerfilUsuarioPage() {
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">2. DUI / Identificación</span>
                                               <span className="text-[9px] text-text-muted">Copia legible por ambos lados.</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.dui || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.dui_url && (
-                                                  <a
-                                                    href={clientDocs.dui_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.dui || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.dui_url && (
+                                                    <a
+                                                      href={clientDocs.dui_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('dui', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('dui', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('dui')}
                                             </div>
-                                            {renderDocReviewBadge('dui')}
                                           </div>
 
                                           {/* Constancia Laboral */}
@@ -3056,38 +3268,38 @@ export default function PerfilUsuarioPage() {
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">3. Arraigo Laboral / Académico</span>
                                               <span className="text-[9px] text-text-muted">Constancia laboral firmada o matrícula de estudios.</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.workCert || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.workCert_url && (
-                                                  <a
-                                                    href={clientDocs.workCert_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.workCert || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.workCert_url && (
+                                                    <a
+                                                      href={clientDocs.workCert_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('workCert', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('workCert', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('workCert')}
                                             </div>
-                                            {renderDocReviewBadge('workCert')}
                                           </div>
 
                                           {/* Solvencia Bancaria */}
@@ -3095,45 +3307,42 @@ export default function PerfilUsuarioPage() {
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">4. Solvencia Económica</span>
                                               <span className="text-[9px] text-text-muted">Estados de cuenta bancarios (últimos 3 meses).</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.bankStatements || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.bankStatements_url && (
-                                                  <a
-                                                    href={clientDocs.bankStatements_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.bankStatements || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.bankStatements_url && (
+                                                    <a
+                                                      href={clientDocs.bankStatements_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('bankStatements', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('bankStatements', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('bankStatements')}
                                             </div>
-                                            {renderDocReviewBadge('bankStatements')}
                                           </div>
                                         </div>
                                       );
                                     })()}
-                                    <span className="text-[11px] text-text-secondary block mt-3 leading-relaxed">
-                                      Carga los archivos requeridos para que tu asesor {assignedAgent?.name || "asignado"} los audite antes de programar tu cita:
-                                    </span>
                                   </div>
 
                                   {/* DS-160 Form Review Section */}
@@ -3175,69 +3384,262 @@ export default function PerfilUsuarioPage() {
                           </div>
 
                           {/* Paso 5 */}
-                          <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
-                              5
-                            </div>
-                            <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
-                              <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                                <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                                  Paso 5: Programación de Cita / Entrega Drop Box y Simulacro Consular por Zoom
-                                </h4>
-                                {expedienteStatus === 'approved' && (
-                                  <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
-                                    LISTO PARA AGENDAR
-                                  </span>
-                                )}
-                              </div>
-                              <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
+                          {(() => {
+                            const activeCita = userAppointmentRequest || user?.appointmentRequest;
+                            const isConfirmed = activeCita?.status === 'confirmed';
+                            const isPaso5Enabled = expedienteStatus === 'approved' && isPreformularioCompleted;
+                            return (
+                              <div className={`flex gap-4 relative transition-all ${isPaso5Enabled ? "" : "opacity-60"}`}>
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
+                                  isConfirmed
+                                    ? "bg-emerald-600 text-white shadow-xs"
+                                    : isPaso5Enabled
+                                      ? "bg-amber-500 text-white animate-pulse"
+                                      : "bg-gray-200 text-text-muted"
+                                }`}>
+                                  {isConfirmed ? "✓" : "5"}
+                                </div>
+                                <div className={`flex-1 rounded-md p-4 border ${isPaso5Enabled ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                                  <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                                    <h4 className={`text-sm font-bold ${isPaso5Enabled ? "text-text-primary" : "text-text-secondary"}`}>
+                                      Paso 5: Programación de Cita / Entrega Drop Box y Simulacro Consular por Zoom
+                                    </h4>
+                                    {isPaso5Enabled ? (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border uppercase tracking-wider ${
+                                        isConfirmed
+                                          ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold"
+                                          : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
+                                      }`}>
+                                        {isConfirmed ? "✓ CITA CONFIRMADA" : "LISTO PARA AGENDAR"}
+                                      </span>
+                                    ) : (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border uppercase tracking-wider ${!isPreformularioCompleted ? "bg-red-50 text-red-800 border-red-200 font-bold" : "bg-amber-50 text-amber-800 border-amber-200 font-bold"}`}>
+                                        {!isPreformularioCompleted ? "REQUIERE PREFORMULARIO (PASO 2)" : "REQUIERE AUDITORÍA (PASO 4)"}
+                                      </span>
+                                    )}
+                                  </div>
+                              <p className={`text-xs ${isPaso5Enabled ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
                                 <strong>Primera Vez:</strong> Agendamiento de cita en CAS y Embajada con entrenamiento de simulacro por Zoom.<br />
                                 <strong>Renovación EE.UU. (Interview Waiver):</strong> Depósito de paquete en buzón CAS sin cita presencial ante cónsul (si vence &lt;48 meses).<br />
                                 <strong>Renovación México / Canadá / Australia / China:</strong> Flujo de cita regular o biométricos asistidos con alta seguridad de aprobación por historial positivo.
                               </p>
-                              {expedienteStatus === 'approved' && (
-                                <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
+                              {!isPaso5Enabled && (
+                                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-sm text-xs text-amber-950 flex items-center gap-2 font-semibold">
+                                  <span>⚠️</span>
+                                  <span>
+                                    {!isPreformularioCompleted
+                                      ? "Debes completar tu Preformulario Consular (Paso 2) antes de agendar tu cita."
+                                      : "Tu expediente (Paso 4) debe ser aprobado por tu asesor antes de agendar tu cita."}
+                                  </span>
+                                </div>
+                              )}
+                              {isPaso5Enabled && (() => {
+                                const activeCita = userAppointmentRequest || user?.appointmentRequest;
+                                const isConfirmed = activeCita?.status === 'confirmed';
+                                return (
+                                  <div className="mt-3 pt-3 border-t border-border-light space-y-3">
+                                    {/* Muestra corporativa limpia de los detalles de la cita confirmada */}
+                                    {isConfirmed && activeCita && (
+                                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-md space-y-3">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs text-brand-primary">📅</span>
+                                            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                                              Detalles de tu Cita Confirmada
+                                            </span>
+                                          </div>
+                                          <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider">
+                                            CONFIRMADA
+                                          </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-sm border border-slate-200">
+                                          <div>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Trámite</span>
+                                            <span className="font-semibold text-slate-900 block mt-0.5">{activeCita.appointment_type || "Simulacro / Cita Consular"}</span>
+                                          </div>
+                                          <div>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Fecha Confirmada</span>
+                                            <span className="font-bold text-brand-primary text-xs block mt-0.5">{activeCita.confirmed_date || activeCita.requested_date || "Por definir"}</span>
+                                          </div>
+                                          <div>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Hora Confirmada</span>
+                                            <span className="font-bold text-brand-primary text-xs block mt-0.5">{activeCita.confirmed_time || activeCita.requested_time || "10:00"} hrs</span>
+                                          </div>
+                                        </div>
+
+                                        {activeCita.meeting_link ? (
+                                          <div className="bg-white p-3 rounded-sm border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                            <div className="min-w-0 flex-1">
+                                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Enlace Virtual (Zoom / Meet):</span>
+                                              <span className="text-xs font-mono font-medium text-slate-800 block truncate mt-0.5">
+                                                {activeCita.meeting_link}
+                                              </span>
+                                            </div>
+                                            <a
+                                              href={activeCita.meeting_link}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all flex items-center gap-1.5 no-underline shrink-0"
+                                            >
+                                              <span>🎥 Unirse a la Reunión →</span>
+                                            </a>
+                                          </div>
+                                        ) : activeCita.agent_notes && (
+                                          <p className="text-xs text-slate-700 italic bg-white p-3 rounded-sm border border-slate-200">
+                                            💬 Nota del Asesor: &quot;{activeCita.agent_notes}&quot;
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {!isConfirmed && activeCita?.meeting_link && (
+                                      <div className="p-3 bg-white border border-slate-200 rounded-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                        <div>
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                            🎥 Enlace de Reunión (Zoom / Meet)
+                                          </span>
+                                          <span className="text-xs text-slate-800 font-mono font-medium block truncate max-w-sm mt-0.5">
+                                            {activeCita.meeting_link}
+                                          </span>
+                                        </div>
+                                        <a
+                                          href={activeCita.meeting_link}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all flex items-center gap-1.5 no-underline shrink-0"
+                                        >
+                                          <span>🎥 Unirse a la Reunión →</span>
+                                        </a>
+                                      </div>
+                                    )}
+
+                                    <div className="flex flex-wrap gap-3 items-center">
+                                      <button
+                                        onClick={() => {
+                                          if (!isConfirmed) {
+                                            router.push(`/citas?processId=${user.id}`);
+                                          }
+                                        }}
+                                        disabled={isConfirmed}
+                                        className={`px-4 py-2 text-xs font-bold rounded-sm transition-colors ${
+                                          isConfirmed
+                                            ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                                            : "bg-brand-primary text-white hover:bg-brand-hover cursor-pointer"
+                                        }`}
+                                      >
+                                        {isConfirmed ? "🔒 Cita Confirmada (No Modificable)" : "🎥 Coordinar Fechas / Citas →"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                        {/* Paso 6: Calificación y Reseña del Servicio del Asesor */}
+                          <div className={`flex gap-4 relative transition-all ${user?.appointmentRequest?.status === 'confirmed' || userAppointmentRequest?.status === 'confirmed' || expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${agentReviewSubmitted ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>
+                              6
+                            </div>
+                            <div className="flex-1 bg-white border border-border-light rounded-md p-4 space-y-3 shadow-2xs">
+                              <div className="flex justify-between items-start flex-wrap gap-2">
+                                <div>
+                                  <h4 className="text-sm font-bold text-text-primary">
+                                    Paso 6: Calificación y Reseña del Servicio de tu Asesor
+                                  </h4>
+                                  <p className="text-xs text-text-muted mt-0.5">
+                                    Califica la atención brindada por tu asesor para finalizar el proceso de acompañamiento.
+                                  </p>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border uppercase tracking-wider ${
+                                  agentReviewSubmitted
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                                    : "bg-amber-50 text-amber-800 border-amber-200"
+                                }`}>
+                                  {agentReviewSubmitted ? "✓ RESEÑA COMPLETADA" : "PENDIENTE DE CALIFICAR"}
+                                </span>
+                              </div>
+
+                              {agentReviewSubmitted ? (
+                                <div className="p-3 bg-slate-50 border border-slate-200 rounded-sm space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-700">Tu Calificación:</span>
+                                    <div className="flex items-center gap-1 text-amber-500">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <span key={star} className="text-sm">
+                                          {star <= userRating ? "★" : "☆"}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-900">({userRating}/5 estrellas)</span>
+                                  </div>
+                                  {userReviewComment && (
+                                    <p className="text-xs text-slate-700 italic bg-white p-2.5 rounded-sm border border-slate-200">
+                                      💬 Comentario enviado: &quot;{userReviewComment}&quot;
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-3 pt-1">
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                      Selecciona tu Calificación (Estrellas):
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <button
+                                          key={star}
+                                          type="button"
+                                          onClick={() => setUserRating(star)}
+                                          className={`text-2xl transition-transform cursor-pointer hover:scale-125 focus:outline-none ${
+                                            star <= userRating ? "text-amber-400" : "text-slate-300 hover:text-amber-200"
+                                          }`}
+                                        >
+                                          ★
+                                        </button>
+                                      ))}
+                                      {userRating > 0 && (
+                                        <span className="text-xs font-bold text-slate-700 ml-2">
+                                          {userRating === 5 ? "Excelente" : userRating === 4 ? "Muy Bueno" : userRating === 3 ? "Bueno" : userRating === 2 ? "Regular" : "Malo"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label htmlFor="userReviewComment" className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                      Comentario o Reseña sobre tu Asesor:
+                                    </label>
+                                    <textarea
+                                      id="userReviewComment"
+                                      rows={3}
+                                      value={userReviewComment}
+                                      onChange={(e) => setUserReviewComment(e.target.value)}
+                                      placeholder="Escribe tu reseña sobre la atención, puntualidad y asesoría recibida..."
+                                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-sm text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium"
+                                    />
+                                  </div>
+
                                   <button
-                                    onClick={() => router.push(`/citas?processId=${user.id}`)}
-                                    className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
+                                    type="button"
+                                    onClick={handleSaveAgentReview}
+                                    disabled={isSubmittingReview || userRating === 0}
+                                    className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-xs cursor-pointer disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed border-none flex items-center gap-2"
                                   >
-                                    🎥 Coordinar Fechas / Citas →
+                                    {isSubmittingReview ? (
+                                      <span>Guardando reseña...</span>
+                                    ) : (
+                                      <>
+                                        <span>⭐</span>
+                                        <span>Enviar Calificación y Reseña</span>
+                                      </>
+                                    )}
                                   </button>
                                 </div>
                               )}
-                            </div>
-                          </div>
-
-                          {/* Paso 6 */}
-                          <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                            <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                              6
-                            </div>
-                            <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                              <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención de Entrevista (Drop Box)</h4>
-                              <p className="text-xs text-text-muted leading-relaxed">
-                                Presentación formal a tu cita consular oficial (biométricos y entrevista) o entrega del sobre cerrado en buzón de courier para renovaciones sin entrevista de EE.UU.
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Paso 7 */}
-                          <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                            <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                              7
-                            </div>
-                            <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4 space-y-2">
-                              <div className="flex justify-between items-start flex-wrap gap-2">
-                                <h4 className="text-sm font-bold text-text-secondary">Paso 7: Retorno de Pasaporte y Monitoreo de Visa</h4>
-                                {user?.hasPaidAdvisor && (
-                                  <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
-                                    MONITOREO ACTIVO
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-text-muted leading-relaxed">
-                                Rastreo de la estampación de visa y entrega del pasaporte en la sucursal de Courier autorizada (DHL / Cargo Express).
-                              </p>
                             </div>
                           </div>
                         </div>
@@ -4943,17 +5345,20 @@ export default function PerfilUsuarioPage() {
                             [...dbPurchases]
                               .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                               .map((item: any, idx: number) => {
-                                const userProf = item.user_id ? dbProfilesMap[item.user_id] : null;
-                                const clientName = item.user_name || userProf?.name || (item.user_id === user.id ? `${firstName} ${lastName}` : "Cliente Solicitante");
+                                const userProf = item.user_id ? dbProfilesMap[item.user_id] : (item.user_email ? dbProfilesMap[item.user_email.toLowerCase()] : null);
+                                const clientName = item.user_name || userProf?.name || (item.user_id === user.id ? `${firstName} ${lastName}`.trim() : null) || item.user_email || "Cliente Registrado";
                                 const clientEmail = item.user_email || userProf?.email || "";
                                 const conceptName = item.product_type === "vipro" ? "Evaluación Diagnóstica VIPRO" : "Servicio Completo con Asesor Acreditado";
-                                const transactionId = item.id ? `PAYPAL-${item.id.substring(0, 8).toUpperCase()}` : `PAYPAL-TX-${idx}`;
+                                const rawTxId = item.paypal_tx_id || item.last_paypal_tx;
+                                const transactionId = rawTxId 
+                                  ? (rawTxId.startsWith("PAYPAL") ? rawTxId : `PAYPAL-${rawTxId}`)
+                                  : (item.id && !item.id.startsWith("prof-") ? `PAYPAL-${item.id.substring(0, 8).toUpperCase()}` : `PAYPAL-TX-${idx + 101}`);
                                 return (
                                   <tr key={item.id || idx} className="hover:bg-gray-50/80 transition-colors">
                                     <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">{transactionId}</td>
                                     <td className="py-3.5 px-4 font-semibold">
                                       <div>{clientName}</div>
-                                      {clientEmail && <div className="text-[10px] text-text-muted font-normal">{clientEmail}</div>}
+                                      {clientEmail && clientEmail !== clientName && <div className="text-[10px] text-text-muted font-normal">{clientEmail}</div>}
                                     </td>
                                     <td className="py-3.5 px-4">{conceptName}</td>
                                     <td className="py-3.5 px-4 font-extrabold text-emerald-700">${Number(item.amount).toFixed(2)} USD</td>
@@ -4966,7 +5371,7 @@ export default function PerfilUsuarioPage() {
                           ) : (
                             <tr>
                               <td colSpan={5} className="py-8 text-center text-text-muted">
-                                No se encontraron transacciones registradas.
+                                No se encontraron transacciones registradas en la base de datos Supabase.
                               </td>
                             </tr>
                           )}
@@ -5278,17 +5683,35 @@ export default function PerfilUsuarioPage() {
                                               </p>
                                             )}
 
+                                            {/* Enlace a Videollamada (Zoom / Google Meet) */}
+                                            <div>
+                                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                                                <span>🎥 Enlace a Reunión Virtual (Zoom / Google Meet)</span>
+                                                <span className="text-brand-primary font-bold text-[10px] normal-case">El cliente podrá unirse haciendo clic</span>
+                                              </label>
+                                              <div className="relative">
+                                                <input
+                                                  type="url"
+                                                  value={agentCitaProposal.meetingLink}
+                                                  onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, meetingLink: e.target.value }))}
+                                                  placeholder="Ej. https://zoom.us/j/123456789 o https://meet.google.com/abc-defg-hij"
+                                                  className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-mono shadow-2xs font-medium"
+                                                />
+                                                <span className="absolute left-2.5 top-2 text-slate-400 text-xs">🔗</span>
+                                              </div>
+                                            </div>
+
                                             {/* Input para Comentario / Respuesta del Asesor */}
                                             <div>
-                                              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                                                Respuesta / Comentario del Asesor para el Cliente
+                                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                                                💬 Respuesta / Instrucciones del Asesor para el Cliente
                                               </label>
                                               <input
                                                 type="text"
                                                 value={agentCitaProposal.agentNotes}
                                                 onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
                                                 placeholder="Ej. Cita aprobada exitosamente. Favor conectarse a Zoom 5 min antes..."
-                                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium"
+                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium shadow-2xs"
                                               />
                                             </div>
 
@@ -5296,11 +5719,11 @@ export default function PerfilUsuarioPage() {
                                             <div className="flex flex-wrap gap-2.5 pt-1">
                                               <button
                                                 type="button"
-                                                onClick={() => handleAgentAcceptCita(agentCitaProposal.agentNotes)}
-                                                className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                                                onClick={() => handleAgentAcceptCita(agentCitaProposal.agentNotes, agentCitaProposal.meetingLink)}
+                                                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5 border-none"
                                               >
-                                                <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                                <span>Admitir / Aprobar Cita</span>
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                <span>✅ Confirmar Cita y Guardar Enlace</span>
                                               </button>
                                               <button
                                                 type="button"

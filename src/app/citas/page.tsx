@@ -123,6 +123,7 @@ function CitasPageContent() {
     agent_proposed_date?: string;
     agent_proposed_time?: string;
     agent_notes?: string;
+    meeting_link?: string;
     confirmed_date?: string;
     confirmed_time?: string;
     confirmation_id?: string;
@@ -492,6 +493,34 @@ function CitasPageContent() {
                     <span className="font-semibold text-slate-800 block mt-0.5">{appointmentRequest.office_id === 'meet' ? '📹 Google Meet' : '🎥 Zoom'}</span>
                   </div>
                 </div>
+
+                {/* Enlace de Reunión Zoom / Meet */}
+                {appointmentRequest.meeting_link ? (
+                  <div className="p-4 bg-white border border-emerald-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-emerald-900 uppercase tracking-wider block">
+                        🎥 Enlace de Reunión Virtual (Zoom / Google Meet)
+                      </span>
+                      <span className="text-xs text-emerald-700 font-mono font-bold block truncate max-w-sm mt-0.5">
+                        {appointmentRequest.meeting_link}
+                      </span>
+                    </div>
+                    <a
+                      href={appointmentRequest.meeting_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-xl shadow-md transition-all flex items-center gap-1.5 shrink-0 no-underline"
+                    >
+                      <span>🎥 Unirse a la Reunión →</span>
+                    </a>
+                  </div>
+                ) : (
+                  appointmentRequest.agent_notes && (
+                    <p className="text-xs text-emerald-950 italic bg-white p-3 rounded-xl border border-emerald-200">
+                      💬 Nota del Asesor: &quot;{appointmentRequest.agent_notes}&quot;
+                    </p>
+                  )
+                )}
               </div>
             ) : appointmentRequest.status === 'proposed' ? (
               <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-6 shadow-md space-y-4">
@@ -669,15 +698,22 @@ function CitasPageContent() {
                       )}
                     </div>
                     <p className="text-xs text-text-secondary mt-0.5">
-                      {isEditing
-                        ? "Edita los campos y presiona Guardar Cambios para actualizar tu solicitud."
-                        : "Los datos de tu cita se encuentran registrados. Haz clic en 'Modificar Cita' si deseas realizar cambios."}
+                      {appointmentRequest?.status === 'confirmed'
+                        ? "Tu cita ha sido confirmada por el asesor y no puede ser modificada."
+                        : isEditing
+                          ? "Edita los campos y presiona Guardar Cambios para actualizar tu solicitud."
+                          : "Los datos de tu cita se encuentran registrados. Haz clic en 'Modificar Cita' si deseas realizar cambios."}
                     </p>
                   </div>
 
                   {/* Header Edit / Read-only Button */}
                   {appointmentRequest && (
-                    !isEditing ? (
+                    appointmentRequest.status === 'confirmed' ? (
+                      <span className="px-3.5 py-1.5 bg-slate-100 text-slate-500 text-xs font-bold rounded-xl border border-slate-200 shrink-0 flex items-center gap-1.5">
+                        <span>🔒</span>
+                        <span>Confirmada (No Modificable)</span>
+                      </span>
+                    ) : !isEditing ? (
                       <button
                         type="button"
                         onClick={() => setIsEditing(true)}
@@ -901,6 +937,15 @@ function CitasPageContent() {
                           </button>
                         )}
                       </div>
+                    ) : appointmentRequest?.status === 'confirmed' ? (
+                      <button
+                        type="button"
+                        disabled={true}
+                        className="w-full px-8 py-3.5 bg-slate-200 text-slate-500 text-sm font-bold rounded-xl flex items-center justify-center gap-2 cursor-not-allowed border-none opacity-90 shadow-none"
+                      >
+                        <span>🔒</span>
+                        <span>Cita Confirmada por el Asesor (No Modificable)</span>
+                      </button>
                     ) : (
                       <button
                         type="button"

@@ -17,7 +17,7 @@ export const faqs: FAQs[] = [
         answer: "Para México, Canadá, Australia y el Reino Unido, la renovación requiere la presentación de formularios y expediente formal. Sin embargo, haber contado con un visado previo sin faltas migratorias te otorga un perfil de 'Bajo Riesgo Migratorio', garantizando una tramitación prioritaria y una tasa de éxito sumamente elevada."
     },
     {
-        question: "¿Qué incluye la Asesoría Consular Completa ($150 USD / $112.50 USD con VIPRO)?",
-        answer: "Incluye la asignación de un Asesor Certificado 1-a-1, llenado y revisión exhaustiva de tu preformulario y formulario oficial (DS-160 / UKVI), auditoría de expediente probatorio, agendamiento de citas, simulacros de entrevista consular presencial por Zoom y monitoreo del pasaporte hasta su entrega por courier."
+        question: "¿Qué incluye la Asesoría Consular Completa?",
+        answer: "Incluye la asignación de un Asesor Certificado, llenado y revisión exhaustiva de tu preformulario y formulario oficial (DS-160 / UKVI), auditoría de expediente probatorio, agendamiento de citas, simulacros de entrevista consular presencial por Zoom y monitoreo del pasaporte hasta su entrega por courier."
     }
 ];
