@@ -60,8 +60,8 @@ export default function AboutUsPage() {
 
       <main className="flex-1 w-full">
         {/* HERO SECTION */}
-        <section className="w-full bg-brand-primary text-white py-16 md:py-24 px-6 relative overflow-hidden">
-          <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
+        <section className="w-full text-white py-16 md:py-24 px-6 relative overflow-hidden bg-cover bg-center" style={{ backgroundImage: "url('/images/about_hero_bg.png')" }}>
+          <div className="absolute inset-0 bg-gradient-to-r from-brand-primary/95 via-brand-primary/90 to-brand-primary/95"></div>
           <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10 space-y-6">
             <span className="bg-white/10 text-white font-bold text-xs uppercase tracking-widest px-4 py-1.5 rounded-full border border-white/20">
               Acerca de TodoVisa
@@ -173,7 +173,7 @@ export default function AboutUsPage() {
           <div className="space-y-3">
             <span className="text-xs font-bold uppercase tracking-widest text-brand-primary">COBERURA GLOBAL</span>
             <h2 className="text-3xl md:text-4xl font-bold text-text-primary font-serif italic">
-              Especialistas en 5 Destinos Internacionales
+              Especialistas en {destinations.length} Destinos Internacionales
             </h2>
             <p className="text-sm text-text-secondary max-w-2xl mx-auto">
               Gestionamos trámites de primera vez y programas de renovación agilizada para los principales destinos del mundo.

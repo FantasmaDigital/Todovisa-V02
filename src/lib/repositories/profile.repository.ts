@@ -36,17 +36,59 @@ export class ProfileRepository {
 
   static async updateProfile(userId: string, updates: Record<string, any>) {
     const adminClient = getAdminClient();
-    const { data, error } = await adminClient
-      .from("profiles")
-      .update(updates)
-      .eq("id", userId)
-      .select();
+    try {
+      const { data, error } = await adminClient
+        .from("profiles")
+        .update(updates)
+        .eq("id", userId)
+        .select();
 
-    if (error) {
-      console.error("[ProfileRepository.updateProfile Error]", error);
-      throw new Error(error.message);
+      if (error) {
+        // If error is due to missing physical column in Supabase profiles schema cache
+        const isColumnError = error.message.includes("column") || error.code === "PGRST204" || error.message.includes("schema cache");
+        if (isColumnError) {
+          console.warn("[ProfileRepository.updateProfile] Column missing in profiles schema, redirecting to document_reviews JSONB column:", error.message);
+          
+          const { data: currentProf } = await adminClient
+            .from("profiles")
+            .select("document_reviews")
+            .eq("id", userId)
+            .maybeSingle();
+
+          const currentReviews = (currentProf?.document_reviews && typeof currentProf.document_reviews === 'object') 
+            ? { ...currentProf.document_reviews } 
+            : {};
+          
+          const safeUpdates = { ...updates };
+          
+          if (safeUpdates.appointment_request !== undefined) {
+            currentReviews.appointment_request = safeUpdates.appointment_request;
+            delete safeUpdates.appointment_request;
+          }
+          if (safeUpdates.cita_details !== undefined) {
+            currentReviews.cita_details = safeUpdates.cita_details;
+            delete safeUpdates.cita_details;
+          }
+          
+          safeUpdates.document_reviews = currentReviews;
+
+          const { data: fallbackData, error: fallbackError } = await adminClient
+            .from("profiles")
+            .update(safeUpdates)
+            .eq("id", userId)
+            .select();
+
+          if (fallbackError) throw new Error(fallbackError.message);
+          return fallbackData;
+        }
+        console.error("[ProfileRepository.updateProfile Error]", error);
+        throw new Error(error.message);
+      }
+      return data;
+    } catch (err: any) {
+      console.error("[ProfileRepository.updateProfile Catch]", err);
+      throw err;
     }
-    return data;
   }
 
   static async getCommissionsByAgentId(agentId: string) {

@@ -173,6 +173,7 @@ export default function PerfilUsuarioPage() {
   };
 
   // Partner / Agent application states
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [partnerApp, setPartnerApp] = useState<AgentApplicationData | null>(null);
   const [allApplications, setAllApplications] = useState<AgentApplicationData[]>([]);
   const [selectedApp, setSelectedApp] = useState<AgentApplicationData | null>(null);
@@ -223,6 +224,173 @@ export default function PerfilUsuarioPage() {
   const [docReviews, setDocReviews] = useState<Record<string, { status: 'approved' | 'observed' | 'rejected' | 'pending'; comment: string }>>({});
   const [auditExpedienteStatus, setAuditExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>('submitted');
   const [isSavingAudit, setIsSavingAudit] = useState(false);
+  const [isAgentProposingCita, setIsAgentProposingCita] = useState(false);
+  const [agentCitaProposal, setAgentCitaProposal] = useState({
+    proposedDate: "",
+    proposedTime: "10:00",
+    agentNotes: "",
+  });
+
+  useEffect(() => {
+    if (!selectedClientProfile) return;
+    const keys = ["passport", "dui", "workCert", "bankStatements", "ds160"];
+    const allApproved = keys.every(key => docReviews[key]?.status === "approved");
+    const anyObservedOrRejected = keys.some(key => docReviews[key]?.status === "observed" || docReviews[key]?.status === "rejected");
+
+    if (allApproved) {
+      setAuditExpedienteStatus("approved");
+    } else if (anyObservedOrRejected) {
+      setAuditExpedienteStatus("draft");
+    }
+  }, [docReviews]);
+
+  const handleAgentAcceptCita = async (agentNotes?: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "confirmed" as const,
+        confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
+        confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
+        agent_notes: agentNotes || "Cita admitida y confirmada por el asesor.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+
+      const msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs. ${agentNotes ? `\n\n💬 Nota del Asesor: "${agentNotes}"` : ""}`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Cita admitida y confirmada exitosamente.", "success");
+    } catch (err: any) {
+      console.error("Error al admitir cita:", err);
+      showToast("Error al admitir cita: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleAgentRejectCita = async (agentNotes?: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "rejected" as const,
+        agent_notes: agentNotes || "La cita ha sido rechazada por el asesor.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+
+      const msgText = `❌ Tu solicitud de cita ha sido rechazada por el asesor. ${agentNotes ? `\n\n💬 Motivo/Observación: "${agentNotes}"` : ""}\n\nPuedes ingresar al apartado de Citas y reagendar en un nuevo horario.`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Cita rechazada. Se notificó al cliente.", "info");
+    } catch (err: any) {
+      console.error("Error al rechazar cita:", err);
+      showToast("Error al rechazar cita: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleCitaStatusChange = async (newStatus: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: newStatus as any,
+        confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
+        confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
+      };
+
+      const updates: any = {
+        appointment_request: updatedAppt,
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, updates);
+
+      setSelectedClientProfile((prev: any) => ({
+        ...prev,
+        appointment_request: updatedAppt,
+      }));
+
+      let msgText = "";
+      if (newStatus === "confirmed") {
+        msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.`;
+      } else if (newStatus === "rejected") {
+        msgText = `❌ Tu solicitud de cita ha sido rechazada por el asesor. Puedes ingresar al apartado de Citas y reagendar en un nuevo horario.`;
+      } else if (newStatus === "proposed") {
+        msgText = `⚡ Tu asesor ha propuesto un nuevo horario para tu cita/simulacro: ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.`;
+      } else {
+        msgText = `⏳ El estado de tu cita/simulacro ha sido cambiado a pendiente de revisión.`;
+      }
+
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast(`Estado de cita actualizado a: ${newStatus}`, "success");
+    } catch (err: any) {
+      console.error("Error al actualizar estado de cita:", err);
+      showToast("Error al cambiar estado: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleAgentProposeCita = async () => {
+    if (!selectedClientProfile || !agentCitaProposal.proposedDate) {
+      showToast("Selecciona una fecha válida para proponer al cliente.", "error");
+      return;
+    }
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "proposed" as const,
+        agent_proposed_date: agentCitaProposal.proposedDate,
+        agent_proposed_time: agentCitaProposal.proposedTime,
+        agent_notes: agentCitaProposal.agentNotes || "El asesor propone este nuevo horario.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+      setIsAgentProposingCita(false);
+
+      const msgText = `📅 El asesor ha propuesto un NUEVO HORARIO para la cita:\n- Fecha propuesta: ${agentCitaProposal.proposedDate}\n- Hora propuesta: ${agentCitaProposal.proposedTime} hrs${agentCitaProposal.agentNotes ? `\n- Nota: ${agentCitaProposal.agentNotes}` : ""}\n\nIngresa al apartado de Citas para Aceptar la propuesta.`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Propuesta de cita enviada al cliente.", "success");
+    } catch (err: any) {
+      console.error("Error al proponer cita:", err);
+      showToast("Error al proponer cita: " + (err.message || String(err)), "error");
+    }
+  };
   const [assignedAgencyProfile, setAssignedAgencyProfile] = useState<any | null>(null);
   const [assignedAgentProfile, setAssignedAgentProfile] = useState<any | null>(null);
   const [realAgentsData, setRealAgentsData] = useState<any[]>([]);
@@ -625,7 +793,7 @@ export default function PerfilUsuarioPage() {
 
           setUser(updatedUser);
 
-           await AuthService.updateUser({
+          await AuthService.updateUser({
             photo_url: publicUrl,
             avatar_changes_this_month: changesThisMonth,
             last_avatar_change_month: currentMonthStr,
@@ -750,10 +918,10 @@ export default function PerfilUsuarioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const assignedAgent = user?.assignedAgentId && realAgentsData.length > 0
     ? realAgentsData.find((a: any) =>
-        a.userId === user.assignedAgentId ||
-        a.id === user.assignedAgentId ||
-        a.id === `agent-${user.assignedAgentId}`
-      ) || null
+      a.userId === user.assignedAgentId ||
+      a.id === user.assignedAgentId ||
+      a.id === `agent-${user.assignedAgentId}`
+    ) || null
     : null;
 
   // Sync user profile state with API on page load
@@ -822,7 +990,7 @@ export default function PerfilUsuarioPage() {
             hasPaidAdvisor: metadata.has_paid_advisor || dbProfile?.has_paid_advisor || (fallbackAgentId ? true : false),
             assignedAgentId: metadata.assigned_agent_id || dbProfile?.assigned_agent_id || fallbackAgentId || null,
             assignedAgencyName: metadata.assigned_agency_name || dbProfile?.assigned_agency_name || null,
-            photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
+            photoUrl: dbProfile?.photo_url || metadata.photo_url || metadata.avatar_url || metadata.picture || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
             ds160FullName: metadata.ds160_full_name || null,
@@ -831,7 +999,7 @@ export default function PerfilUsuarioPage() {
             ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
-            expedienteStatus: metadata.expediente_status || dbProfile?.expediente_status || 'draft',
+            expedienteStatus: dbProfile?.expediente_status || metadata.expediente_status || 'draft',
             role: finalRole,
             clientDocs: metadata.client_docs || {},
             documentReviews: dbProfile?.document_reviews || metadata.document_reviews || {},
@@ -913,7 +1081,7 @@ export default function PerfilUsuarioPage() {
         const targetUserId = agencyId || user.id;
 
         const portalRes = await AgentClientService.getPortalData(targetUserId);
-        if (portalRes && portalRes.application) {
+        if (portalRes?.application) {
           setPartnerApp(portalRes.application);
           setAgentApp(portalRes.application);
           if (portalRes.application.signature_name) {
@@ -1032,7 +1200,7 @@ export default function PerfilUsuarioPage() {
         setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
           ...prev,
           ...updatePayload,
-         }) : null);
+        }) : null);
       }
 
       setIsEditingStatus(false);
@@ -1193,7 +1361,7 @@ export default function PerfilUsuarioPage() {
         }
       }
       const portalRes = await AgentClientService.getPortalData(targetUserId);
-      const data = portalRes.application;
+      const data = portalRes?.application;
       setAgentApp(data || null);
       if (data?.signature_name) setSignatureName(data.signature_name);
     } catch (err) {
@@ -1303,6 +1471,7 @@ export default function PerfilUsuarioPage() {
     const timer = setTimeout(() => {
       if (activeTab === "comisiones") {
         loadCommissions();
+        loadAssignedClients();
       }
       if (activeTab === "invitar_agentes" && user.role === ROLES.AGENCY) {
         loadAgencyMembers();
@@ -1499,18 +1668,38 @@ export default function PerfilUsuarioPage() {
           if (preforms && Array.isArray(preforms)) {
             setAllPreformulariosList(preforms);
           }
-        })
-        .catch((err) => console.error("Error fetching all preformularios:", err));
+        });
+      // Fetch VIPRO evaluations and commissions in parallel to compute real stats
+      Promise.all([
+        FormClientService.getAllViproEvaluations().catch(() => []),
+        Promise.resolve(supabase.from("agent_commissions").select("*")).catch(() => ({ data: [] }))
+      ]).then(([evals, commsResult]) => {
+        const validEvals = Array.isArray(evals) ? evals : [];
+        const commissions = Array.isArray(commsResult?.data) ? commsResult.data : [];
 
-      FormClientService.getAllViproEvaluations()
-        .then((evals) => {
-          if (evals && Array.isArray(evals)) {
-            setViproEvaluations(evals);
-          }
-        })
-        .catch((err) => console.error("Error fetching all vipro evals:", err));
+        setViproEvaluations(validEvals);
+
+        // Build purchases array from real DB records
+        const viproPurchases = validEvals.map((ev: any) => ({
+          id: ev.id,
+          product_type: "vipro",
+          amount: Number(viproPrice) || 19.99,
+          created_at: ev.created_at
+        }));
+
+        const advisorPurchases = commissions.map((c: any) => ({
+          id: c.id,
+          product_type: "advisor",
+          amount: Number(c.sale_amount) || 112.50,
+          created_at: c.created_at
+        }));
+
+        setDbPurchases([...viproPurchases, ...advisorPurchases]);
+      }).catch(err => {
+        console.error("Error loading admin stats:", err);
+      });
     }
-  }, [user, activeTab]);
+  }, [user, activeTab, viproPrice]);
 
   // Load messages from API Service
   const [isSupabaseDbAvailable, setIsSupabaseDbAvailable] = useState<boolean | null>(null);
@@ -1592,7 +1781,7 @@ export default function PerfilUsuarioPage() {
           partnerType: "outsourced_agent",
         }));
         setRealAgentsData(mapped);
-      }).catch(() => {});
+      }).catch(() => { });
     });
   }, [user?.hasPaidAdvisor]);
 
@@ -1931,13 +2120,12 @@ export default function PerfilUsuarioPage() {
     if (review.status === 'pending' || !review.status) return null;
 
     return (
-      <div className={`mt-2.5 p-2.5 rounded border text-left text-[10px] leading-relaxed ${
-        review.status === 'approved'
+      <div className={`mt-2.5 p-2.5 rounded border text-left text-[10px] leading-relaxed ${review.status === 'approved'
           ? "bg-emerald-50/70 border-emerald-100 text-emerald-800"
           : review.status === 'observed'
-          ? "bg-amber-50/70 border-amber-200 text-amber-800"
-          : "bg-red-50/70 border-red-200 text-red-800"
-      }`}>
+            ? "bg-amber-50/70 border-amber-200 text-amber-800"
+            : "bg-red-50/70 border-red-200 text-red-800"
+        }`}>
         <div className="flex items-center gap-1 font-bold">
           {review.status === 'approved' ? (
             <span>✅ Aprobado por Asesor</span>
@@ -1955,6 +2143,11 @@ export default function PerfilUsuarioPage() {
       </div>
     );
   };
+
+  const agentsCount = allProfilesList.filter((p: any) => p.role === ROLES.AGENT).length;
+  const agenciesCount = allProfilesList.filter((p: any) => p.role === ROLES.AGENCY).length;
+  const clientsCount = allProfilesList.filter((p: any) => p.role === ROLES.USER || !p.role).length;
+  const pendingAppsCount = allApplications.filter((a: any) => a.status === "pending").length;
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-background-main">
@@ -2024,11 +2217,27 @@ export default function PerfilUsuarioPage() {
 
 
       {/* Grid Principal */}
-      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8">
+      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8 transition-all duration-300">
 
         {/* Columna Izquierda: Tarjeta de Resumen y Menú */}
-        <aside className="w-full lg:w-1/4 flex-shrink-0">
+        <aside className={`w-full ${isSidebarCollapsed ? 'lg:w-[70px]' : 'lg:w-1/4'} flex-shrink-0 transition-all duration-300`}>
           <div className="bg-white rounded-lg border border-border-light overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
+
+            {/* Sidebar Header with collapse toggle */}
+            <div className="p-3 border-b border-border-light flex items-center justify-between">
+              {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Menú</span>}
+              <button
+                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                className={`p-1.5 hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-500 cursor-pointer focus:outline-none transition-colors ${isSidebarCollapsed ? 'mx-auto' : ''}`}
+                title={isSidebarCollapsed ? "Expandir menú" : "Contraer menú"}
+              >
+                {isSidebarCollapsed ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" /></svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" /></svg>
+                )}
+              </button>
+            </div>
 
             {/* Navegación Vertical */}
             <nav className="p-2 flex flex-col gap-1">
@@ -2131,7 +2340,7 @@ export default function PerfilUsuarioPage() {
 
                     if (isAccredited) {
                       agentTabs.push(
-                        { id: "chat_agente", label: "Chat con Clientes" },
+                        { id: "chat_agente", label: "Gestión de Casos" },
                         { id: "comisiones", label: "Comisiones Realizadas" },
                         { id: "metodos_cobro", label: "Métodos de Cobro" }
                       );
@@ -2158,15 +2367,17 @@ export default function PerfilUsuarioPage() {
                         handleTabChange(tab.id);
                       }
                     }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
+                    title={isSidebarCollapsed ? tab.label : undefined}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${isSidebarCollapsed ? "lg:justify-center lg:px-0" : ""} ${activeTab === tab.id
                       ? "bg-brand-light text-brand-primary font-semibold"
                       : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
                       }`}
                   >
-                    <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"}`}>
+                    <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"} ${isSidebarCollapsed ? "lg:mx-auto" : ""}`}>
                       {tab.svgIcon || <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg>}
                     </span>
-                    <span>{tab.label}</span>
+                    {!isSidebarCollapsed && <span>{tab.label}</span>}
+                    {isSidebarCollapsed && <span className="lg:hidden">{tab.label}</span>}
                   </button>
                 ))
               )}
@@ -2175,7 +2386,7 @@ export default function PerfilUsuarioPage() {
         </aside>
 
         {/* Columna Derecha: Contenido del Tab Activo */}
-        <section className="w-full lg:w-3/4">
+        <section className={`w-full ${isSidebarCollapsed ? 'lg:flex-grow lg:w-[calc(100%-90px)]' : 'lg:w-3/4'} transition-all duration-300`}>
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
             {isLoadingPartnerApp ? (
               <div className="space-y-6 text-left animate-pulse">
@@ -2780,7 +2991,7 @@ export default function PerfilUsuarioPage() {
                                                     rel="noopener noreferrer"
                                                     className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
                                                   >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                                                     Ver
                                                   </a>
                                                 )}
@@ -2819,7 +3030,7 @@ export default function PerfilUsuarioPage() {
                                                     rel="noopener noreferrer"
                                                     className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
                                                   >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                                                     Ver
                                                   </a>
                                                 )}
@@ -2858,7 +3069,7 @@ export default function PerfilUsuarioPage() {
                                                     rel="noopener noreferrer"
                                                     className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
                                                   >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                                                     Ver
                                                   </a>
                                                 )}
@@ -2897,7 +3108,7 @@ export default function PerfilUsuarioPage() {
                                                     rel="noopener noreferrer"
                                                     className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
                                                   >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                                                     Ver
                                                   </a>
                                                 )}
@@ -2987,10 +3198,10 @@ export default function PerfilUsuarioPage() {
                               {expedienteStatus === 'approved' && (
                                 <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
                                   <button
-                                    onClick={() => setActiveTab("asesor")}
+                                    onClick={() => router.push(`/citas?processId=${user.id}`)}
                                     className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
                                   >
-                                    🎥 Coordinar Fechas / Buzón por Chat &rarr;
+                                    🎥 Coordinar Fechas / Citas →
                                   </button>
                                 </div>
                               )}
@@ -3254,141 +3465,141 @@ export default function PerfilUsuarioPage() {
 
                     {user.hasPaidAdvisor ? (
                       <div className="space-y-6 animate-fade-in">
-                          {/* Advisor Info Bar (Company / Agency Details) */}
-                          <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
-                            <div className="relative">
-                              <img
-                                src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
-                                alt={assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}` : "Asesor"}
-                                className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
-                              />
-                              <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
-                            </div>
-                            <div className="text-center sm:text-left flex-1 space-y-1">
-                              <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                                <h5 className="font-bold text-text-primary text-base tracking-tight">
-                                  {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
-                                </h5>
-                                <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200">
-                                  👤 ASESOR ASIGNADO
-                                </span>
-                              </div>
-                              <p className="text-xs text-brand-primary font-bold">
-                                {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa")}
-                              </p>
-                              <p className="text-xs text-text-secondary leading-relaxed">
-                                {assignedAgentProfile?.bio || assignedAgencyProfile?.bio || "Asesor consular certificado. Tu expediente cuenta con auditoría y respaldo institucional."}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary mt-2 pt-1.5 border-t border-dashed border-border-light">
-                                {assignedAgencyProfile && (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] bg-brand-light text-brand-primary font-semibold px-2 py-0.5 rounded-sm">
-                                      Empresa: {assignedAgencyProfile.first_name} {assignedAgencyProfile.last_name}
-                                    </span>
-                                  </div>
-                                )}
-                                {assignedAgentProfile?.phone && (
-                                  <span>• Tel: {assignedAgentProfile.phone}</span>
-                                )}
-                              </div>
-                            </div>
+                        {/* Advisor Info Bar (Company / Agency Details) */}
+                        <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
+                          <div className="relative">
+                            <img
+                              src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
+                              alt={assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}` : "Asesor"}
+                              className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
+                            />
+                            <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
                           </div>
- 
-                          {/* Chat Window */}
-                          <div className="border border-border-light rounded-2xl overflow-hidden flex flex-col h-[550px] bg-[#FAF9F6] shadow-sm relative">
-                            {/* Chat Header */}
-                            <div className="bg-white px-6 py-4 border-b border-border-light flex items-center justify-between shadow-sm z-10">
-                              <div className="flex items-center gap-3">
-                                <div className="relative">
-                                  <img
-                                    src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
-                                    alt="Asesor"
-                                    className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
-                                  />
-                                  <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                          <div className="text-center sm:text-left flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                              <h5 className="font-bold text-text-primary text-base tracking-tight">
+                                {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
+                              </h5>
+                              <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200">
+                                👤 ASESOR ASIGNADO
+                              </span>
+                            </div>
+                            <p className="text-xs text-brand-primary font-bold">
+                              {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa")}
+                            </p>
+                            <p className="text-xs text-text-secondary leading-relaxed">
+                              {assignedAgentProfile?.bio || assignedAgencyProfile?.bio || "Asesor consular certificado. Tu expediente cuenta con auditoría y respaldo institucional."}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary mt-2 pt-1.5 border-t border-dashed border-border-light">
+                              {assignedAgencyProfile && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] bg-brand-light text-brand-primary font-semibold px-2 py-0.5 rounded-sm">
+                                    Empresa: {assignedAgencyProfile.first_name} {assignedAgencyProfile.last_name}
                                   </span>
                                 </div>
-                                <div>
-                                  <h4 className="font-bold text-text-primary text-sm leading-tight">
-                                    {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
-                                  </h4>
-                                  <p className="text-[9px] text-text-muted mt-0.5">
-                                    {assignedAgentProfile ? "Asesor Consular Acreditado" : "Soporte Técnico Especializado"}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="text-right hidden sm:flex flex-col items-end gap-1">
-                                <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
-                                  Soporte Activo
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Messages Box */}
-                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
-                              {messages.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-center p-8 gap-2">
-                                  <span className="text-3xl">💬</span>
-                                  <p className="text-xs font-semibold text-text-primary">Chat seguro habilitado</p>
-                                  <p className="text-[11px] text-text-muted max-w-xs">Escribe tu primer mensaje abajo para iniciar la conversación directa con tu asesoría.</p>
-                                </div>
-                              ) : (
-                                messages.map((msg) => {
-                                  const isSelf = msg.sender === "user";
-                                  return (
-                                    <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
-                                      <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
-                                        {!isSelf && (
-                                          <img
-                                            src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
-                                            alt="Asesor"
-                                            className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
-                                          />
-                                        )}
-                                        <div className="flex flex-col">
-                                          <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
-                                            ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
-                                            : "bg-white border border-border-light text-text-primary rounded-tl-none"
-                                            }`}>
-                                            <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
-                                          </div>
-                                          <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
-                                            {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })
+                              )}
+                              {assignedAgentProfile?.phone && (
+                                <span>• Tel: {assignedAgentProfile.phone}</span>
                               )}
                             </div>
-
-                            {/* Input Form */}
-                            <form onSubmit={handleSendMessage} className="bg-white p-4 border-t border-border-light flex gap-3 items-center z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.01)]">
-                              <div className="relative flex-1">
-                                <input
-                                  type="text"
-                                  value={inputValue}
-                                  onChange={(e) => setInputValue(e.target.value)}
-                                  placeholder="Escribe tu mensaje aquí..."
-                                  className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted transition-all shadow-inner"
-                                />
-                              </div>
-                              <button
-                                type="submit"
-                                disabled={!inputValue.trim()}
-                                className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
-                                title="Enviar mensaje"
-                              >
-                                <svg className="w-4 h-4 transform rotate-45 translate-x-[-1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                </svg>
-                              </button>
-                            </form>
                           </div>
                         </div>
+
+                        {/* Chat Window */}
+                        <div className="border border-border-light rounded-2xl overflow-hidden flex flex-col h-[550px] bg-[#FAF9F6] shadow-sm relative">
+                          {/* Chat Header */}
+                          <div className="bg-white px-6 py-4 border-b border-border-light flex items-center justify-between shadow-sm z-10">
+                            <div className="flex items-center gap-3">
+                              <div className="relative">
+                                <img
+                                  src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
+                                  alt="Asesor"
+                                  className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
+                                />
+                                <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                </span>
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-text-primary text-sm leading-tight">
+                                  {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
+                                </h4>
+                                <p className="text-[9px] text-text-muted mt-0.5">
+                                  {assignedAgentProfile ? "Asesor Consular Acreditado" : "Soporte Técnico Especializado"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right hidden sm:flex flex-col items-end gap-1">
+                              <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                                Soporte Activo
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Messages Box */}
+                          <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
+                            {messages.length === 0 ? (
+                              <div className="h-full flex flex-col items-center justify-center text-center p-8 gap-2">
+                                <span className="text-3xl">💬</span>
+                                <p className="text-xs font-semibold text-text-primary">Chat seguro habilitado</p>
+                                <p className="text-[11px] text-text-muted max-w-xs">Escribe tu primer mensaje abajo para iniciar la conversación directa con tu asesoría.</p>
+                              </div>
+                            ) : (
+                              messages.map((msg) => {
+                                const isSelf = msg.sender === "user";
+                                return (
+                                  <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
+                                    <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                                      {!isSelf && (
+                                        <img
+                                          src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
+                                          alt="Asesor"
+                                          className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
+                                        />
+                                      )}
+                                      <div className="flex flex-col">
+                                        <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
+                                          ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
+                                          : "bg-white border border-border-light text-text-primary rounded-tl-none"
+                                          }`}>
+                                          <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
+                                        </div>
+                                        <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
+                                          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+
+                          {/* Input Form */}
+                          <form onSubmit={handleSendMessage} className="bg-white p-4 border-t border-border-light flex gap-3 items-center z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.01)]">
+                            <div className="relative flex-1">
+                              <input
+                                type="text"
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                placeholder="Escribe tu mensaje aquí..."
+                                className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted transition-all shadow-inner"
+                              />
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={!inputValue.trim()}
+                              className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
+                              title="Enviar mensaje"
+                            >
+                              <svg className="w-4 h-4 transform rotate-45 translate-x-[-1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                              </svg>
+                            </button>
+                          </form>
+                        </div>
+                      </div>
                     ) : (
                       // UNPAID STATE: Prompt to pay, no WhatsApp link
                       <div>
@@ -3703,30 +3914,30 @@ export default function PerfilUsuarioPage() {
                       </div>
 
                       <div className="space-y-6">
-                         {/* Status Banner */}
-                         <div className={`p-4 rounded-md border text-left ${partnerApp.status === "approved" || partnerApp.status === "active"
-                           ? (partnerApp.signed_at ? "bg-emerald-50/50 border-emerald-200 text-emerald-800" : "bg-amber-50/50 border-amber-200 text-amber-800")
-                           : partnerApp.status === "rejected"
-                             ? "bg-red-50/50 border-red-200 text-red-800"
-                             : "bg-amber-50/50 border-amber-200 text-amber-800"
-                           }`}>
-                           <h4 className="font-bold text-sm mb-1">
-                             {partnerApp.status === "approved" || partnerApp.status === "active"
-                               ? (partnerApp.signed_at ? "¡Tu solicitud ha sido aprobada!" : "⚠️ Firma de Acuerdo Comercial Requerida")
-                               : partnerApp.status === "rejected"
-                                 ? "Tu solicitud requiere cambios"
-                                 : "Postulación recibida"}
-                           </h4>
-                           <p className="text-xs leading-relaxed opacity-90">
-                             {partnerApp.status === "approved" || partnerApp.status === "active"
-                               ? (partnerApp.signed_at
-                                 ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
-                                 : "Tu postulación ha sido aprobada por la administración. Para comenzar a operar y recibir clientes, por favor firma digitalmente el acuerdo comercial desde tu portal de socio.")
-                               : partnerApp.status === "rejected"
-                                 ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
-                                 : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
-                           </p>
-                         </div>
+                        {/* Status Banner */}
+                        <div className={`p-4 rounded-md border text-left ${partnerApp.status === "approved" || partnerApp.status === "active"
+                          ? (partnerApp.signed_at ? "bg-emerald-50/50 border-emerald-200 text-emerald-800" : "bg-amber-50/50 border-amber-200 text-amber-800")
+                          : partnerApp.status === "rejected"
+                            ? "bg-red-50/50 border-red-200 text-red-800"
+                            : "bg-amber-50/50 border-amber-200 text-amber-800"
+                          }`}>
+                          <h4 className="font-bold text-sm mb-1">
+                            {partnerApp.status === "approved" || partnerApp.status === "active"
+                              ? (partnerApp.signed_at ? "¡Tu solicitud ha sido aprobada!" : "⚠️ Firma de Acuerdo Comercial Requerida")
+                              : partnerApp.status === "rejected"
+                                ? "Tu solicitud requiere cambios"
+                                : "Postulación recibida"}
+                          </h4>
+                          <p className="text-xs leading-relaxed opacity-90">
+                            {partnerApp.status === "approved" || partnerApp.status === "active"
+                              ? (partnerApp.signed_at
+                                ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
+                                : "Tu postulación ha sido aprobada por la administración. Para comenzar a operar y recibir clientes, por favor firma digitalmente el acuerdo comercial desde tu portal de socio.")
+                              : partnerApp.status === "rejected"
+                                ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
+                                : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
+                          </p>
+                        </div>
 
                         {/* Admin Notes */}
                         {partnerApp.admin_notes && (
@@ -3973,11 +4184,10 @@ export default function PerfilUsuarioPage() {
                             </div>
                           ) : (
                             <div className="flex items-center gap-3">
-                              <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${
-                                selectedApp.status === "approved" || selectedApp.status === "active"
+                              <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${selectedApp.status === "approved" || selectedApp.status === "active"
                                   ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                                   : "bg-red-50 text-red-700 border-red-100"
-                              }`}>
+                                }`}>
                                 {selectedApp.status === "approved" || selectedApp.status === "active" ? "✓ APROBADO" : "✕ RECHAZADO / DEVUELTO"}
                               </span>
                               <button
@@ -4190,72 +4400,70 @@ export default function PerfilUsuarioPage() {
                         <h2 className="text-xl font-bold text-text-primary">Panel de Control General del Sistema</h2>
                         <p className="text-xs text-text-secondary mt-1">Supervisión en tiempo real de operaciones, usuarios, expedientes e ingresos de TodoVisa.</p>
                       </div>
-
                     </div>
 
-                    {/* KPI Metrics Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Usuarios</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                            </svg>
+                        {/* KPI Metrics Cards */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Usuarios</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              {allProfilesList.length.toLocaleString()}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Total de usuarios registrados</p>
                           </div>
-                        </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          {(allProfilesList.length + 1).toLocaleString()}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">Clientes y Agentes Registrados</p>
-                      </div>
 
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">VIPRO</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                            </svg>
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">VIPRO C</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              {viproEvaluations.length.toLocaleString()}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Evaluaciones VIPRO adquiridas</p>
                           </div>
-                        </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          {viproEvaluations.length.toLocaleString()}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">Evaluaciones expres completadas</p>
-                      </div>
 
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Socios</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                            </svg>
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Agentes</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              {agentsCount.toLocaleString()}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Agentes registrados ({agenciesCount} agencias, {pendingAppsCount} pend.)</p>
                           </div>
-                        </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          {allApplications.filter((a: any) => a.status === "pending").length}
-                          <span className="text-base font-semibold text-text-muted ml-1">pendientes</span>
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">Solicitudes de agentes a evaluar</p>
-                      </div>
 
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Ingresos</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Ingreso Total</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Total procesado</p>
                           </div>
                         </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">USD procesados</p>
-                      </div>
-                    </div>
 
                     {/* Direct Action Hub */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -4731,24 +4939,37 @@ export default function PerfilUsuarioPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
-                          <tr className="hover:bg-gray-50/80 transition-colors">
-                            <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-948271</td>
-                            <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
-                            <td className="py-3.5 px-4">Evaluación Diagnóstica VIPRO</td>
-                            <td className="py-3.5 px-4 font-extrabold text-emerald-700">${viproPrice.toFixed(2)} USD</td>
-                            <td className="py-3.5 px-4">
-                              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
-                            </td>
-                          </tr>
-                          <tr className="hover:bg-gray-50/80 transition-colors">
-                            <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-827410</td>
-                            <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
-                            <td className="py-3.5 px-4">Servicio Completo con Asesor Acreditado</td>
-                            <td className="py-3.5 px-4 font-extrabold text-emerald-700">${(fullServicePrice * 0.75).toFixed(2)} USD</td>
-                            <td className="py-3.5 px-4">
-                              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
-                            </td>
-                          </tr>
+                          {dbPurchases && dbPurchases.length > 0 ? (
+                            [...dbPurchases]
+                              .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                              .map((item: any, idx: number) => {
+                                const userProf = item.user_id ? dbProfilesMap[item.user_id] : null;
+                                const clientName = item.user_name || userProf?.name || (item.user_id === user.id ? `${firstName} ${lastName}` : "Cliente Solicitante");
+                                const clientEmail = item.user_email || userProf?.email || "";
+                                const conceptName = item.product_type === "vipro" ? "Evaluación Diagnóstica VIPRO" : "Servicio Completo con Asesor Acreditado";
+                                const transactionId = item.id ? `PAYPAL-${item.id.substring(0, 8).toUpperCase()}` : `PAYPAL-TX-${idx}`;
+                                return (
+                                  <tr key={item.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                                    <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">{transactionId}</td>
+                                    <td className="py-3.5 px-4 font-semibold">
+                                      <div>{clientName}</div>
+                                      {clientEmail && <div className="text-[10px] text-text-muted font-normal">{clientEmail}</div>}
+                                    </td>
+                                    <td className="py-3.5 px-4">{conceptName}</td>
+                                    <td className="py-3.5 px-4 font-extrabold text-emerald-700">${Number(item.amount).toFixed(2)} USD</td>
+                                    <td className="py-3.5 px-4">
+                                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                          ) : (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-text-muted">
+                                No se encontraron transacciones registradas.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -4760,8 +4981,8 @@ export default function PerfilUsuarioPage() {
                 {activeTab === "chat_agente" && user && user.role === ROLES.AGENT && (
                   <div className="animate-fadeIn h-full">
                     <div className="mb-4 pb-4 border-b border-border-light">
-                      <h2 className="text-lg font-bold text-text-primary">Chat con Clientes</h2>
-                      <p className="text-xs text-text-secondary mt-1">Clientes asignados por tu empresa. El chat se habilita automáticamente cuando la agencia te asigna un caso.</p>
+                      <h2 className="text-lg font-bold text-text-primary">Gestión de Casos y Clientes</h2>
+                      <p className="text-xs text-text-secondary mt-1">Casos y clientes asignados por tu empresa. Aquí podrás auditar documentos, gestionar citas y chatear directamente.</p>
                     </div>
 
                     {isLoadingClients ? (
@@ -4777,7 +4998,7 @@ export default function PerfilUsuarioPage() {
                         </div>
                       </div>
                     ) : !selectedClient ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-300">
+                      <div className="flex flex-col gap-3 animate-in fade-in duration-300">
                         {assignedClients.map((client) => (
                           <div
                             key={client.id}
@@ -4805,22 +5026,22 @@ export default function PerfilUsuarioPage() {
                               };
                               fetchLatestClientProfile();
                             }}
-                            className="bg-gradient-to-br from-white to-[#FAF9F6] border border-slate-100 rounded-3xl p-6 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:border-brand-primary/20 transition-all duration-300 cursor-pointer flex flex-col justify-between"
+                            className="bg-gradient-to-br from-white to-[#FAF9F6] border border-slate-200 rounded-lg p-4 hover:border-brand-primary hover:shadow-xs transition-all duration-200 cursor-pointer flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
                           >
-                            <div className="flex items-center gap-4 mb-5 text-left">
+                            <div className="flex items-center gap-4 text-left">
                               <div className="relative flex-shrink-0">
                                 {client.photo_url ? (
                                   <img
                                     src={client.photo_url}
                                     alt="Avatar"
-                                    className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-md"
+                                    className="w-12 h-12 rounded-full object-cover border border-slate-200 shadow-sm"
                                   />
                                 ) : (
-                                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-lg border-2 border-white shadow-md">
+                                  <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-500 font-bold text-base border border-slate-200 shadow-sm">
                                     {(client.first_name || client.client_name || "?").charAt(0).toUpperCase()}
                                   </div>
                                 )}
-                                <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
+                                <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white bg-emerald-500"></span>
                               </div>
                               <div className="min-w-0">
                                 <h4 className="font-bold text-text-primary text-sm tracking-tight truncate">
@@ -4829,15 +5050,16 @@ export default function PerfilUsuarioPage() {
                                 <p className="text-[11px] text-text-secondary mt-0.5 truncate">{client.client_email || ""}</p>
                               </div>
                             </div>
-                            
-                            <div className="border-t border-slate-100/60 pt-4 flex justify-between items-center mt-auto">
-                              <span className="inline-flex items-center gap-1.5 text-[9px] text-emerald-700 font-extrabold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+
+                            <div className="flex items-center gap-4 flex-shrink-0 justify-between sm:justify-end">
+                              <span className="inline-flex items-center gap-1.5 text-[9px] text-emerald-700 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                 Asignado
                               </span>
-                              
-                              <span className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-[11px] font-extrabold rounded-xl transition-all shadow-sm flex items-center gap-1">
-                                Abrir Chat &rarr;
+
+                              <span className="text-[11px] font-bold text-brand-primary hover:text-brand-hover transition-all flex items-center gap-1">
+                                Abrir Chat
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                               </span>
                             </div>
                           </div>
@@ -4883,22 +5105,20 @@ export default function PerfilUsuarioPage() {
                                 <button
                                   type="button"
                                   onClick={() => setAdvisorSubTab('chat')}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                                    advisorSubTab === 'chat'
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${advisorSubTab === 'chat'
                                       ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                                       : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200"
-                                  }`}
+                                    }`}
                                 >
                                   💬 Chat
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setAdvisorSubTab('audit')}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                                    advisorSubTab === 'audit'
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${advisorSubTab === 'audit'
                                       ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                                       : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200"
-                                  }`}
+                                    }`}
                                 >
                                   📂 Expediente
                                 </button>
@@ -4921,7 +5141,7 @@ export default function PerfilUsuarioPage() {
                                         key={msg.id}
                                         className={`flex ${msg.sender === "agent" ? "justify-end" : "justify-start"}`}
                                       >
-                                        <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${msg.sender === "agent"
+                                        <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.sender === "agent"
                                           ? "bg-brand-primary text-white rounded-br-sm"
                                           : "bg-white border border-border-light text-text-primary rounded-bl-sm"
                                           }`}>
@@ -4964,220 +5184,437 @@ export default function PerfilUsuarioPage() {
                                 {/* Header strip */}
                                 <div className="px-5 py-4 bg-white border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                   <div>
-                                    <h3 className="font-extrabold text-slate-800 text-[13px] tracking-tight">📂 Expediente Consular</h3>
+                                    <h3 className="font-extrabold text-slate-800 text-[13px] tracking-tight">📋 Expediente y Auditoría Consular</h3>
                                     <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
                                       {selectedClientProfile?.first_name} {selectedClientProfile?.last_name} — Revisa y dictamina cada documento
                                     </p>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold text-slate-500">Estado:</span>
-                                    <select
-                                      value={auditExpedienteStatus}
-                                      onChange={(e: any) => setAuditExpedienteStatus(e.target.value)}
-                                      className="text-[11px] bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-primary font-bold cursor-pointer shadow-sm"
-                                    >
-                                      <option value="submitted">⏳ En Auditoría</option>
-                                      <option value="approved">✅ Aprobado</option>
-                                      <option value="draft">✍️ Requiere Correcciones</option>
-                                    </select>
+                                  <div className="flex flex-wrap items-center gap-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-slate-500">Auditoría:</span>
+                                      <select
+                                        value={auditExpedienteStatus}
+                                        onChange={(e: any) => setAuditExpedienteStatus(e.target.value)}
+                                        disabled={true}
+                                        className="text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-primary font-bold cursor-not-allowed text-slate-500 shadow-sm opacity-80"
+                                      >
+                                        <option value="submitted">⏳ En Auditoría</option>
+                                        <option value="approved">✅ Aprobado</option>
+                                        <option value="draft">✍️ Requiere Correcciones</option>
+                                      </select>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-slate-500">Simulacro:</span>
+                                      <select
+                                        value={selectedClientProfile?.appointment_request?.status || selectedClientProfile?.cita_details?.status || selectedClientProfile?.document_reviews?.appointment_request?.status || 'pending'}
+                                        onChange={(e: any) => handleCitaStatusChange(e.target.value)}
+                                        disabled={true}
+                                        className="text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-primary font-bold cursor-not-allowed text-slate-500 shadow-sm opacity-80"
+                                      >
+                                        <option value="pending">⏳ Cita Pendiente</option>
+                                        <option value="confirmed">✅ Cita Confirmada</option>
+                                        <option value="proposed">⚡ Propuesta Enviada</option>
+                                        <option value="rejected">❌ Cita Rechazada</option>
+                                      </select>
+                                    </div>
                                   </div>
                                 </div>
 
-                                <div className="p-4 space-y-3">
-                                  {/* Documents grid */}
-                                  {[
-                                    { key: "passport", label: "Pasaporte Vigente", desc: "Primera página con datos de identidad", icon: "🛂", color: "blue" },
-                                    { key: "dui", label: "DUI / Identificación", desc: "Copia legible por ambos lados", icon: "🪪", color: "indigo" },
-                                    { key: "workCert", label: "Arraigo Laboral / Académico", desc: "Constancia laboral o matrícula firmada", icon: "💼", color: "violet" },
-                                    { key: "bankStatements", label: "Solvencia Económica", desc: "Estados de cuenta (últimos 3 meses)", icon: "🏦", color: "purple" },
-                                  ].map((doc) => {
-                                    const clientDocsMap = selectedClientProfile?.client_docs || {};
-                                    const fileName = clientDocsMap[doc.key];
-                                    const fileUrl = clientDocsMap[`${doc.key}_url`];
-                                    const review = docReviews[doc.key] || { status: 'pending', comment: '' };
-                                    const statusColor = review.status === 'approved' ? 'emerald' : review.status === 'rejected' ? 'red' : review.status === 'observed' ? 'amber' : 'slate';
-                                    const statusLabel = review.status === 'approved' ? '✅ Aprobado' : review.status === 'rejected' ? '❌ Rechazado' : review.status === 'observed' ? '⚠️ Observado' : '— Pendiente';
-
+                                <div className="p-5 space-y-6">
+                                  {/* BLOQUE 1: GESTIÓN Y APROBACIÓN DE CITAS CONSULARES */}
+                                  {(() => {
+                                    const clientAppt = selectedClientProfile?.appointment_request || selectedClientProfile?.cita_details || selectedClientProfile?.document_reviews?.appointment_request || selectedClientProfile?.document_reviews?.cita_details;
                                     return (
-                                      <div key={doc.key} className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 ${
-                                        review.status === 'approved' ? 'border-emerald-200' :
-                                        review.status === 'rejected' ? 'border-red-200' :
-                                        review.status === 'observed' ? 'border-amber-200' :
-                                        'border-slate-100 hover:border-slate-200'
-                                      }`}>
-                                        {/* Card top row */}
-                                        <div className="flex items-start gap-3 p-4">
-                                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 ${
-                                            review.status === 'approved' ? 'bg-emerald-50' :
-                                            review.status === 'rejected' ? 'bg-red-50' :
-                                            review.status === 'observed' ? 'bg-amber-50' :
-                                            'bg-slate-50'
-                                          }`}>
-                                            {doc.icon}
+                                      <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                          <div>
+                                            <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                                              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                              <span>Aprobación y Agendamiento de Cita / Simulacro</span>
+                                            </h4>
+                                            <p className="text-[11px] text-slate-500 mt-0.5">Admite, propone o rechaza los horarios para la cita del cliente.</p>
                                           </div>
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between gap-2">
-                                              <span className="text-[12px] font-bold text-slate-800 block">{doc.label}</span>
-                                              <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${
-                                                review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
-                                                review.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                                                review.status === 'observed' ? 'bg-amber-100 text-amber-700' :
-                                                'bg-slate-100 text-slate-500'
-                                              }`}>{statusLabel}</span>
-                                            </div>
-                                            <span className="text-[10px] text-slate-400 block mt-0.5">{doc.desc}</span>
-                                            {/* File status */}
-                                            <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                              {fileName ? (
-                                                <>
-                                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 max-w-[160px] truncate">
-                                                    📄 {fileName}
-                                                  </span>
-                                                  {fileUrl && (
-                                                    <a
-                                                      href={fileUrl}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      className="inline-flex items-center gap-1 px-3 py-1 bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold rounded-lg shadow-sm transition-all no-underline"
-                                                    >
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                      Ver documento
-                                                    </a>
-                                                  )}
-                                                </>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
-                                                  ⬜ Aún no subido por el cliente
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Review controls */}
-                                        <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                                          <div className="flex gap-1.5 flex-shrink-0">
-                                            <button
-                                              type="button"
-                                              onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'approved' } }))}
-                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
-                                                review.status === 'approved'
-                                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                                                  : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'
-                                              }`}
-                                            >✓ Aprobar</button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'observed' } }))}
-                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
-                                                review.status === 'observed'
-                                                  ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
-                                                  : 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600'
-                                              }`}
-                                            >⚠ Observar</button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'rejected' } }))}
-                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
-                                                review.status === 'rejected'
-                                                  ? 'bg-red-600 text-white border-red-600 shadow-sm'
-                                                  : 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600'
-                                              }`}
-                                            >✗ Rechazar</button>
-                                          </div>
-                                          <input
-                                            type="text"
-                                            value={review.comment || ""}
-                                            onChange={(e) => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, comment: e.target.value } }))}
-                                            placeholder="Comentario al cliente (opcional)..."
-                                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
-                                          />
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* DS-160 Block */}
-                                  <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 ${
-                                    (docReviews.ds160?.status || 'pending') === 'approved' ? 'border-emerald-200' :
-                                    (docReviews.ds160?.status || 'pending') === 'rejected' ? 'border-red-200' :
-                                    (docReviews.ds160?.status || 'pending') === 'observed' ? 'border-amber-200' :
-                                    'border-amber-100'
-                                  }`}>
-                                    <div className="flex items-start gap-3 p-4">
-                                      <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center text-base flex-shrink-0">📝</div>
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <span className="text-[12px] font-bold text-slate-800">Formulario DS-160 / UKVI</span>
-                                          <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
-                                            (docReviews.ds160?.status || 'pending') === 'approved' ? 'bg-emerald-100 text-emerald-700' :
-                                            (docReviews.ds160?.status || 'pending') === 'rejected' ? 'bg-red-100 text-red-700' :
-                                            (docReviews.ds160?.status || 'pending') === 'observed' ? 'bg-amber-100 text-amber-700' :
-                                            'bg-amber-50 text-amber-600'
-                                          }`}>
-                                            {(docReviews.ds160?.status || 'pending') === 'approved' ? '✅ Aprobado' :
-                                             (docReviews.ds160?.status || 'pending') === 'rejected' ? '❌ Rechazado' :
-                                             (docReviews.ds160?.status || 'pending') === 'observed' ? '⚠️ Observado' : '⏳ Pendiente'}
+                                          <span className={`text-[10px] font-extrabold px-3 py-1 rounded-full ${clientAppt?.status === 'confirmed'
+                                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                              : clientAppt?.status === 'rejected'
+                                                ? 'bg-red-100 text-red-800 border border-red-300'
+                                                : clientAppt?.status === 'proposed'
+                                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
+                                            }`}>
+                                            {clientAppt?.status === 'confirmed' ? 'Cita Confirmada' :
+                                              clientAppt?.status === 'rejected' ? 'Rechazada' :
+                                                clientAppt?.status === 'proposed' ? 'Propuesta Enviada' : 'Pendiente de Revisión'}
                                           </span>
                                         </div>
-                                        <span className="text-[10px] text-slate-400 block mt-0.5">Datos consulates llenados y confirmados por el cliente</span>
-                                        {(selectedClientProfile?.ds160_confirmed || selectedClientProfile?.ds160_full_name) ? (
-                                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                            {[
-                                              { label: "Nombre completo", value: selectedClientProfile.ds160_full_name },
-                                              { label: "N° Pasaporte", value: selectedClientProfile.ds160_passport_num },
-                                              { label: "Fecha de nacimiento", value: selectedClientProfile.ds160_birth_date },
-                                              { label: "Propósito del viaje", value: selectedClientProfile.ds160_purpose_of_trip },
-                                              { label: "¿Posee arraigos/bienes?", value: selectedClientProfile.ds160_has_assets ? "Sí" : "No" },
-                                            ].map(f => (
-                                              <div key={f.label} className="bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-100 text-left">
-                                                <span className="text-[9px] text-slate-400 uppercase font-bold tracking-wider block">{f.label}</span>
-                                                <span className="text-[11px] font-semibold text-slate-700 mt-0.5 block">{f.value || "—"}</span>
+
+                                        {auditExpedienteStatus !== 'approved' ? (
+                                          <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-xl text-center">
+                                            <p className="text-xs text-amber-800 font-bold flex items-center justify-center gap-1.5">
+                                              <span>⚠️</span>
+                                              <span>La auditoría debe estar aprobada para habilitar las citas y simulacros.</span>
+                                            </p>
+                                          </div>
+                                        ) : clientAppt ? (
+                                          <div className="space-y-4">
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-50/50 p-3 rounded-lg border border-slate-100">
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Trámite</span>
+                                                <span className="font-semibold text-slate-800 block mt-0.5">{clientAppt.appointment_type}</span>
                                               </div>
-                                            ))}
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Fecha Solicitada</span>
+                                                <span className="font-bold text-slate-800 block mt-0.5">{clientAppt.requested_date || clientAppt.confirmed_date}</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Hora Solicitada</span>
+                                                <span className="font-bold text-slate-800 block mt-0.5">{clientAppt.requested_time || clientAppt.confirmed_time} hrs</span>
+                                              </div>
+                                            </div>
+
+                                            {clientAppt.client_notes && (
+                                              <p className="text-xs text-slate-700 italic bg-slate-100/70 p-3 rounded-xl border border-slate-200">
+                                                💬 Comentario del Cliente: &quot;{clientAppt.client_notes}&quot;
+                                              </p>
+                                            )}
+
+                                            {/* Input para Comentario / Respuesta del Asesor */}
+                                            <div>
+                                              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                                Respuesta / Comentario del Asesor para el Cliente
+                                              </label>
+                                              <input
+                                                type="text"
+                                                value={agentCitaProposal.agentNotes}
+                                                onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
+                                                placeholder="Ej. Cita aprobada exitosamente. Favor conectarse a Zoom 5 min antes..."
+                                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium"
+                                              />
+                                            </div>
+
+                                            {/* Botones de Acción Directa del Asesor */}
+                                            <div className="flex flex-wrap gap-2.5 pt-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAgentAcceptCita(agentCitaProposal.agentNotes)}
+                                                className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                                              >
+                                                <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                <span>Admitir / Aprobar Cita</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setIsAgentProposingCita(!isAgentProposingCita)}
+                                                className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                                              >
+                                                <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                <span>Proponer Horario Alternativo</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAgentRejectCita(agentCitaProposal.agentNotes)}
+                                                className="px-4 py-2 bg-red-50 hover:bg-red-100/80 text-red-700 border border-red-200 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                                              >
+                                                <svg className="w-3.5 h-3.5 text-red-600" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                <span>Rechazar Cita</span>
+                                              </button>
+                                            </div>
+
+                                            {/* Formulario de Proposición de Horario Alternativo por el Asesor */}
+                                            {isAgentProposingCita && (
+                                              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 animate-in fade-in duration-200">
+                                                <span className="text-xs font-extrabold text-amber-950 block">Ingresa la nueva fecha y hora propuesta al cliente:</span>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Nueva Fecha Propuesta</span>
+                                                    <input
+                                                      type="date"
+                                                      value={agentCitaProposal.proposedDate}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedDate: e.target.value }))}
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Nueva Hora Propuesta</span>
+                                                    <input
+                                                      type="text"
+                                                      value={agentCitaProposal.proposedTime}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedTime: e.target.value }))}
+                                                      placeholder="Ej. 14:00"
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleAgentProposeCita}
+                                                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                                >
+                                                  📩 Enviar Propuesta al Cliente por Chat
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
                                         ) : (
-                                          <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                                            ⏳ Pendiente de confirmación por el cliente
+                                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-center">
+                                            <p className="text-xs text-slate-600 font-medium">El cliente aún no ha registrado una solicitud de cita en el portal.</p>
+                                            <button
+                                              type="button"
+                                              onClick={() => setIsAgentProposingCita(!isAgentProposingCita)}
+                                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                                            >
+                                              <span>📅</span>
+                                              <span>Asignar Horario de Cita al Cliente</span>
+                                            </button>
+                                            {isAgentProposingCita && (
+                                              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 text-left animate-in fade-in duration-200 mt-2">
+                                                <span className="text-xs font-extrabold text-amber-950 block">Asignar / Proponer Cita al Cliente:</span>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Fecha</span>
+                                                    <input
+                                                      type="date"
+                                                      value={agentCitaProposal.proposedDate}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedDate: e.target.value }))}
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Hora</span>
+                                                    <input
+                                                      type="text"
+                                                      value={agentCitaProposal.proposedTime}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedTime: e.target.value }))}
+                                                      placeholder="Ej. 10:00"
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <div>
+                                                  <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Comentario para el cliente</span>
+                                                  <input
+                                                    type="text"
+                                                    value={agentCitaProposal.agentNotes}
+                                                    onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
+                                                    placeholder="Comentario sobre el horario..."
+                                                    className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                  />
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleAgentProposeCita}
+                                                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                                >
+                                                  📩 Notificar Cita al Cliente
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
                                         )}
                                       </div>
+                                    );
+                                  })()}
+
+                                  {/* BLOQUE 2: AUDITORÍA DE DOCUMENTACIÓN CONSULAR */}
+                                  <div className="space-y-3 pt-2">
+                                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                      <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                                        <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                        <span>Documentación Adjunta y Formulario Consular</span>
+                                      </h4>
+                                      <span className="text-[10px] text-slate-400 font-bold">4 Requisitos + DS-160</span>
                                     </div>
 
-                                    <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                                      <div className="flex gap-1.5 flex-shrink-0">
-                                        {[
-                                          { s: 'approved', label: '✓ Aprobar', active: 'bg-emerald-600 text-white border-emerald-600', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600' },
-                                          { s: 'observed', label: '⚠ Observar', active: 'bg-amber-500 text-white border-amber-500', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600' },
-                                          { s: 'rejected', label: '✗ Rechazar', active: 'bg-red-600 text-white border-red-600', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600' },
-                                        ].map(btn => (
-                                          <button
-                                            key={btn.s}
-                                            type="button"
-                                            onClick={() => setDocReviews(prev => ({
-                                              ...prev,
-                                              ds160: { ...(docReviews.ds160 || { status: 'pending' as const, comment: '' }), status: btn.s as 'pending' | 'approved' | 'rejected' | 'observed' }
-                                            }))}
-                                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border shadow-sm ${
-                                              (docReviews.ds160?.status || 'pending') === btn.s ? btn.active : btn.inactive
-                                            }`}
-                                          >{btn.label}</button>
-                                        ))}
+                                    {/* Documents grid */}
+                                    {/* Documents grid */}
+                                    {[
+                                      { key: "passport", label: "Pasaporte Vigente", desc: "Primera página con datos de identidad", icon: "", color: "blue" },
+                                      { key: "dui", label: "DUI / Identificación", desc: "Copia legible por ambos lados", icon: "", color: "indigo" },
+                                      { key: "workCert", label: "Arraigo Laboral / Académico", desc: "Constancia laboral o matrícula firmada", icon: "", color: "violet" },
+                                      { key: "bankStatements", label: "Solvencia Económica", desc: "Estados de cuenta (últimos 3 meses)", icon: "", color: "purple" },
+                                    ].map((doc) => {
+                                      const clientDocsMap = selectedClientProfile?.client_docs || {};
+                                      const fileName = clientDocsMap[doc.key];
+                                      const fileUrl = clientDocsMap[`${doc.key}_url`];
+                                      const review = docReviews[doc.key] || { status: 'pending', comment: '' };
+                                      const statusColor = review.status === 'approved' ? 'emerald' : review.status === 'rejected' ? 'red' : review.status === 'observed' ? 'amber' : 'slate';
+                                      const statusLabel = review.status === 'approved' ? 'Aprobado' : review.status === 'rejected' ? 'Rechazado' : review.status === 'observed' ? 'Observado' : 'Pendiente';
+
+                                      return (
+                                        <div key={doc.key} className={`bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 ${review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/10' :
+                                            review.status === 'rejected' ? 'border-red-200 bg-red-50/10' :
+                                              review.status === 'observed' ? 'border-amber-200 bg-amber-50/10' :
+                                                'border-slate-200 hover:border-slate-300'
+                                          }`}>
+                                          {/* Card top row */}
+                                          <div className="flex items-start gap-3 p-4">
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${review.status === 'approved' ? 'bg-emerald-50' :
+                                                review.status === 'rejected' ? 'bg-red-50' :
+                                                  review.status === 'observed' ? 'bg-amber-50' :
+                                                    'bg-slate-50'
+                                              }`}>
+                                              {doc.key === 'passport' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>}
+                                              {doc.key === 'dui' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0" /></svg>}
+                                              {doc.key === 'workCert' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>}
+                                              {doc.key === 'bankStatements' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[12px] font-bold text-slate-800 block">{doc.label}</span>
+                                                <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                                                    review.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                      review.status === 'observed' ? 'bg-amber-100 text-amber-700' :
+                                                        'bg-slate-100 text-slate-500'
+                                                  }`}>{statusLabel}</span>
+                                              </div>
+                                              <span className="text-[10px] text-slate-400 block mt-0.5">{doc.desc}</span>
+                                              {/* File status */}
+                                              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                                {fileName ? (
+                                                  <>
+                                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 max-w-[160px] truncate">
+                                                      📄 {fileName}
+                                                    </span>
+                                                    {fileUrl && (
+                                                      <a
+                                                        href={fileUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold rounded-lg shadow-sm transition-all no-underline"
+                                                      >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                        Ver documento
+                                                      </a>
+                                                    )}
+                                                  </>
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
+                                                    ⬜ Aún no subido por el cliente
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+
+                                          {/* Review controls */}
+                                          <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                                            <div className="flex gap-1.5 flex-shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'approved' } }))}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${review.status === 'approved'
+                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'
+                                                  }`}
+                                              >Aprobar</button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'observed' } }))}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${review.status === 'observed'
+                                                    ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600'
+                                                  }`}
+                                              >Observar</button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'rejected' } }))}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${review.status === 'rejected'
+                                                    ? 'bg-red-50 text-red-700 border-red-200 shadow-sm'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600'
+                                                  }`}
+                                              >Rechazar</button>
+                                            </div>
+                                            <input
+                                              type="text"
+                                              value={review.comment || ""}
+                                              onChange={(e) => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, comment: e.target.value } }))}
+                                              placeholder="Comentario al cliente (opcional)..."
+                                              className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+
+                                    {/* DS-160 Block */}
+                                    <div className={`bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 ${(docReviews.ds160?.status || 'pending') === 'approved' ? 'border-emerald-200' :
+                                        (docReviews.ds160?.status || 'pending') === 'rejected' ? 'border-red-200' :
+                                          (docReviews.ds160?.status || 'pending') === 'observed' ? 'border-amber-200' :
+                                            'border-amber-100'
+                                      }`}>
+                                      <div className="flex items-start gap-3 p-4">
+                                        <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0"><svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg></div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="text-[12px] font-bold text-slate-800">Formulario DS-160 / UKVI</span>
+                                            <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${(docReviews.ds160?.status || 'pending') === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                                                (docReviews.ds160?.status || 'pending') === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                  (docReviews.ds160?.status || 'pending') === 'observed' ? 'bg-amber-100 text-amber-700' :
+                                                    'bg-amber-50 text-amber-600'
+                                              }`}>
+                                              {(docReviews.ds160?.status || 'pending') === 'approved' ? 'Aprobado' :
+                                                (docReviews.ds160?.status || 'pending') === 'rejected' ? 'Rechazado' :
+                                                  (docReviews.ds160?.status || 'pending') === 'observed' ? 'Observado' : 'Pendiente'}
+                                            </span>
+                                          </div>
+                                          <span className="text-[10px] text-slate-400 block mt-0.5">Datos consulates llenados y confirmados por el cliente</span>
+                                          {(selectedClientProfile?.ds160_confirmed || selectedClientProfile?.ds160_full_name) ? (
+                                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                              {[
+                                                { label: "Nombre completo", value: selectedClientProfile.ds160_full_name },
+                                                { label: "N° Pasaporte", value: selectedClientProfile.ds160_passport_num },
+                                                { label: "Fecha de nacimiento", value: selectedClientProfile.ds160_birth_date },
+                                                { label: "Propósito del viaje", value: selectedClientProfile.ds160_purpose_of_trip },
+                                                { label: "¿Posee arraigos/bienes?", value: selectedClientProfile.ds160_has_assets ? "Sí" : "No" },
+                                              ].map(f => (
+                                                <div key={f.label} className="bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-100 text-left">
+                                                  <span className="text-[9px] text-slate-400 uppercase font-bold tracking-wider block">{f.label}</span>
+                                                  <span className="text-[11px] font-semibold text-slate-700 mt-0.5 block">{f.value || "—"}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                                              ⏳ Pendiente de confirmación por el cliente
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                      <input
-                                        type="text"
-                                        value={docReviews.ds160?.comment || ""}
-                                        onChange={(e) => setDocReviews(prev => ({
-                                          ...prev,
-                                          ds160: { ...(docReviews.ds160 || { status: 'pending', comment: '' }), comment: e.target.value }
-                                        }))}
-                                        placeholder="Comentario al cliente (opcional)..."
-                                        className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
-                                      />
+
+                                      <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                                        <div className="flex gap-1.5 flex-shrink-0">
+                                          {[
+                                            { s: 'approved', label: 'Aprobar', active: 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600' },
+                                            { s: 'observed', label: 'Observar', active: 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600' },
+                                            { s: 'rejected', label: 'Rechazar', active: 'bg-red-50 text-red-700 border-red-200 shadow-sm', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600' },
+                                          ].map(btn => (
+                                            <button
+                                              key={btn.s}
+                                              type="button"
+                                              onClick={() => setDocReviews(prev => ({
+                                                ...prev,
+                                                ds160: { ...(docReviews.ds160 || { status: 'pending' as const, comment: '' }), status: btn.s as 'pending' | 'approved' | 'rejected' | 'observed' }
+                                              }))}
+                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border shadow-sm ${(docReviews.ds160?.status || 'pending') === btn.s ? btn.active : btn.inactive
+                                                }`}
+                                            >{btn.label}</button>
+                                          ))}
+                                        </div>
+                                        <input
+                                          type="text"
+                                          value={docReviews.ds160?.comment || ""}
+                                          onChange={(e) => setDocReviews(prev => ({
+                                            ...prev,
+                                            ds160: { ...(docReviews.ds160 || { status: 'pending', comment: '' }), comment: e.target.value }
+                                          }))}
+                                          placeholder="Comentario al cliente (opcional)..."
+                                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
+                                        />
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
 
+                                </div>
                                 {/* Save footer */}
                                 <div className="sticky bottom-0 bg-white border-t border-slate-100 px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
                                   <span className="text-[10px] text-slate-400">Los cambios se notificarán al cliente vía chat automáticamente.</span>
@@ -5185,7 +5622,7 @@ export default function PerfilUsuarioPage() {
                                     type="button"
                                     onClick={handleSaveAudit}
                                     disabled={isSavingAudit}
-                                    className="px-5 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+                                    className="px-5 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
                                   >
                                     {isSavingAudit ? (
                                       <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Guardando...</>
@@ -5200,9 +5637,9 @@ export default function PerfilUsuarioPage() {
                         </div>
                       </div>
                     )
-                  }
-                </div>
-              )}
+                    }
+                  </div>
+                )}
 
                 {/* TAB: MI ACREDITACIÓN */}
                 {activeTab === "mi_acreditacion" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
@@ -5410,86 +5847,125 @@ export default function PerfilUsuarioPage() {
                         </p>
                       ) : (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                          Como Asesor Certificado de la red TodoVisa, el monto de tu comisión estará disponible al terminar la asesoría del cliente. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
                         </p>
                       )}
                     </div>
 
-                    {/* Financial metrics */}
+                    {/* Financial metrics & Table */}
                     {(() => {
-                      const rateLabel = user.role === ROLES.AGENCY ? "30% (Referido)" : "60% (Asesor)";
-                      const gross = agentCommissions.reduce((sum, c) => sum + (c.gross_amount || (user.role === ROLES.AGENCY ? c.commission_amount / 0.30 : c.commission_amount / 0.60) || 0), 0);
-                      const net = agentCommissions.reduce((sum, c) => sum + (c.commission_amount || 0), 0);
-                      const platformShare = gross - net;
+                      const fullServicePrice = Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150.00;
+                      const commissionRate = 0.60;
+                      const agentCommissionAmount = fullServicePrice * commissionRate;
+
+                      // Merge real database commissions with synthetic ones for assigned clients that don't have a commission record yet
+                      const mergedCommissions: Commission[] = [...agentCommissions];
+
+                      assignedClients.forEach(client => {
+                        const clientName = client.client_name || `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente';
+                        const hasRealComm = agentCommissions.some(c => {
+                          const cName = (c.client_name || "").toLowerCase();
+                          const clName = clientName.toLowerCase();
+                          return cName.includes(clName) || clName.includes(cName);
+                        });
+
+                        if (!hasRealComm) {
+                          // Determine status: if the appointment status is confirmed/completed, it is paid, otherwise pending/processing
+                          const isCompleted = client.appointment_request?.status === 'confirmed' || client.cita_details?.status === 'confirmed' || selectedClientProfile?.appointment_request?.status === 'confirmed';
+
+                          mergedCommissions.push({
+                            id: `synthetic-comm-${client.id}`,
+                            agent_id: user.id,
+                            client_folio: client.id.substring(0, 8).toUpperCase(),
+                            client_name: clientName,
+                            service_type: 'full_service' as any,
+                            gross_amount: fullServicePrice,
+                            commission_rate: commissionRate,
+                            commission_amount: agentCommissionAmount,
+                            status: isCompleted ? 'paid' : 'processing',
+                            paid_at: isCompleted ? new Date().toISOString() : null,
+                            notes: 'Comisión de trámite en curso',
+                            created_at: client.created_at || new Date().toISOString()
+                          });
+                        }
+                      });
+
+                      const totalClients = assignedClients.length;
+                      const pendingBalance = mergedCommissions.filter(c => c.status === 'pending' || c.status === 'processing').reduce((sum, c) => sum + c.commission_amount, 0);
+                      const availableBalance = mergedCommissions.filter(c => c.status === 'paid').reduce((sum, c) => sum + c.commission_amount, 0);
+                      const totalEarned = mergedCommissions.reduce((sum, c) => sum + c.commission_amount, 0);
+
                       return (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
-                          <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                            <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Facturación Bruta</span>
-                            <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)} USD</p>
+                        <>
+                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
+                            <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Clientes Activos</span>
+                              <p className="text-lg font-bold text-text-primary font-mono mt-1">{totalClients}</p>
+                            </div>
+                            <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Saldo en Trámite</span>
+                              <p className="text-lg font-bold text-amber-600 font-mono mt-1">${pendingBalance.toFixed(2)} USD</p>
+                            </div>
+                            <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Líquido por Retirar</span>
+                              <p className="text-lg font-bold text-emerald-600 font-mono mt-1">${availableBalance.toFixed(2)} USD</p>
+                            </div>
+                            <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
+                              <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Histórico Acumulado</span>
+                              <p className="text-lg font-bold text-brand-primary font-mono mt-1">${totalEarned.toFixed(2)} USD</p>
+                            </div>
                           </div>
-                          <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                            <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Esquema de Comisión</span>
-                            <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{rateLabel}</p>
+
+                          {/* Table */}
+                          <div className="border border-border-light rounded-sm p-5 bg-white text-left">
+                            <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes</h3>
+                            {isLoadingCommissions ? (
+                              <div className="flex justify-center py-8">
+                                <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                              </div>
+                            ) : mergedCommissions.length === 0 ? (
+                              <div className="py-8 text-center text-text-muted italic text-xs border-t border-border-light">
+                                No se han encontrado registros de comisiones aprobadas para tu cuenta.
+                              </div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
+                                      <th className="py-2.5">Fecha</th>
+                                      <th className="py-2.5">Cliente</th>
+                                      <th className="py-2.5">Trámite</th>
+                                      <th className="py-2.5">Importe</th>
+                                      <th className="py-2.5">Estado</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-border-light">
+                                    {mergedCommissions.map((c) => (
+                                      <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
+                                        <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
+                                        <td className="py-3 font-semibold">{c.client_name}</td>
+                                        <td className="py-3 text-text-secondary">{c.service_type === 'full_service' ? 'Asesoría Consular Completa' : c.service_type}</td>
+                                        <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
+                                        <td className="py-3">
+                                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid"
+                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                            : c.status === "processing" || c.status === "pending"
+                                              ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                              : "bg-gray-100 text-gray-500"
+                                            }`}>
+                                            {c.status === "paid" ? "Pagado" : (c.status === "processing" || c.status === "pending") ? "En Proceso" : "Pendiente"}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
                           </div>
-                          <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                            <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Parte TodoVisa</span>
-                            <p className="text-lg font-bold text-text-secondary font-mono mt-1">${platformShare.toFixed(2)} USD</p>
-                          </div>
-                          <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
-                            <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Liquidación Neta</span>
-                            <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)} USD</p>
-                          </div>
-                        </div>
+                        </>
                       );
                     })()}
-
-                    {/* Table */}
-                    <div className="border border-border-light rounded-sm p-5 bg-white">
-                      <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes</h3>
-                      {isLoadingCommissions ? (
-                        <div className="flex justify-center py-8">
-                          <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
-                        </div>
-                      ) : agentCommissions.length === 0 ? (
-                        <div className="py-8 text-center text-text-muted italic text-xs border-t border-border-light">
-                          No se han encontrado registros de comisiones aprobadas para tu cuenta.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
-                                <th className="py-2.5">Fecha</th>
-                                <th className="py-2.5">Cliente</th>
-                                <th className="py-2.5">Trámite</th>
-                                <th className="py-2.5">Importe</th>
-                                <th className="py-2.5">Estado</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border-light">
-                              {agentCommissions.map((c) => (
-                                <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
-                                  <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
-                                  <td className="py-3 font-semibold">{c.client_name}</td>
-                                  <td className="py-3 text-text-secondary">{c.service_type}</td>
-                                  <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
-                                  <td className="py-3">
-                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : c.status === "processing"
-                                        ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                        : "bg-gray-100 text-gray-500"
-                                      }`}>
-                                      {c.status === "paid" ? "Pagado" : c.status === "processing" ? "En Proceso" : "Pendiente"}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
 

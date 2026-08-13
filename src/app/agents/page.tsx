@@ -177,9 +177,9 @@ export default function AgentesPage() {
       <Header headerRef={headerRef} />
 
       {/* Banner de Bienvenida */}
-      <div className="w-full bg-brand-primary py-14 px-6 relative overflow-hidden">
+      <div className="w-full bg-brand-primary py-14 px-4 sm:px-6 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        <div className="w-[80%] mx-auto relative z-10">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-3">Red TodoVisa</p>
           <h1 className="text-4xl md:text-5xl text-white leading-tight mb-4 font-semibold font-serif italic">
             Encuentra a tu agente certificado
@@ -190,7 +190,7 @@ export default function AgentesPage() {
         </div>
       </div>
 
-      <main className="w-[80%] mx-auto py-12 flex-1 flex flex-col lg:flex-row gap-8">
+      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12 flex-1 flex flex-col lg:flex-row gap-8">
 
         {/* Panel Izquierdo: Filtros */}
         <aside className="w-full lg:w-1/4 flex-shrink-0">
@@ -318,7 +318,7 @@ export default function AgentesPage() {
             <p className="text-sm font-medium text-text-secondary">
               {loadingAgents
                 ? "Cargando asesores..."
-                : <>Mostrando <span className="font-semibold text-text-primary">{filteredAgents.length}</span> {filteredAgents.length === 1 ? "resultado" : "resultados"}</> 
+                : <>Mostrando <span className="font-semibold text-text-primary">{filteredAgents.length}</span> {filteredAgents.length === 1 ? "resultado" : "resultados"}</>
               }
             </p>
           </div>
@@ -326,7 +326,7 @@ export default function AgentesPage() {
           {/* Loading skeleton */}
           {loadingAgents ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {[1,2,3,4].map(i => (
+              {[1, 2, 3, 4].map(i => (
                 <div key={i} className="bg-white rounded-lg border border-border-light p-6 animate-pulse">
                   <div className="flex gap-4 mb-4">
                     <div className="w-16 h-16 rounded-full bg-gray-200 flex-shrink-0"></div>
@@ -463,28 +463,27 @@ export default function AgentesPage() {
                     </div>
                   </div>
 
-                   {/* Pie de la Carta / Acciones */}
-                   <div className="p-6 pt-4 border-t border-border-light bg-background-main/50 flex gap-3">
-                     <button
-                       onClick={() => router.push(`/agents/${agent.id}`)}
-                       className="flex-1 px-4 py-2 bg-white border border-border-light text-text-secondary hover:text-brand-primary hover:border-brand-primary text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1"
-                     >
-                       Ver Perfil
-                     </button>
+                  {/* Pie de la Carta / Acciones */}
+                  <div className="p-6 pt-4 border-t border-border-light bg-background-main/50 flex gap-3">
+                    <button
+                      onClick={() => router.push(`/agents/${agent.id}`)}
+                      className="flex-1 px-4 py-2 bg-white border border-border-light text-text-secondary hover:text-brand-primary hover:border-brand-primary text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1"
+                    >
+                      Ver Perfil
+                    </button>
 
-                      {(!user || (user.role !== "agent" && user.role !== "agency")) && (
-                        <button
-                          onClick={() => handleHireAgent(agent)}
-                          disabled={Boolean(user?.hasPaidAdvisor)}
-                          className={`flex-1 px-4 py-2 text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 ${
-                            user?.hasPaidAdvisor
-                              ? "bg-gray-200 text-gray-400 border border-gray-200 cursor-not-allowed shadow-none"
-                              : "bg-brand-primary hover:bg-brand-hover text-white shadow-sm"
+                    {(!user || (user.role !== "agent" && user.role !== "agency")) && (
+                      <button
+                        onClick={() => handleHireAgent(agent)}
+                        disabled={Boolean(user?.hasPaidAdvisor)}
+                        className={`flex-1 px-4 py-2 text-xs font-semibold rounded-sm transition-all focus:outline-none flex items-center justify-center gap-1.5 ${user?.hasPaidAdvisor
+                            ? "bg-gray-200 text-gray-400 border border-gray-200 cursor-not-allowed shadow-none"
+                            : "bg-brand-primary hover:bg-brand-hover text-white shadow-sm"
                           }`}
-                        >
-                          {user?.hasPaidAdvisor ? "Asesoría Contratada" : "Contratar Asesoría"}
-                        </button>
-                      )}
+                      >
+                        {user?.hasPaidAdvisor ? "Asesoría Contratada" : "Contratar Asesoría"}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -509,10 +508,10 @@ export default function AgentesPage() {
       )}
       {toast && (
         <div className={`fixed bottom-5 right-5 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-sm border shadow-xl animate-in slide-in-from-bottom-5 duration-300 ${toast.type === 'success'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : toast.type === 'error'
-              ? 'bg-red-50 border-red-200 text-red-800'
-              : 'bg-blue-50 border-blue-200 text-blue-850'
+          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          : toast.type === 'error'
+            ? 'bg-red-50 border-red-200 text-red-800'
+            : 'bg-blue-50 border-blue-200 text-blue-850'
           }`}>
           <span className="text-base select-none">
             {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
