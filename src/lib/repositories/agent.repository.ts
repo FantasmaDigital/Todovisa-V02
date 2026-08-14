@@ -1,4 +1,5 @@
 import supabase from "@/app/lib/supabase";
+import { UserRole } from "@/app/constants/roles";
 
 export class AgentRepository {
   static async createApplication(applicationData: Record<string, any>) {
@@ -9,7 +10,7 @@ export class AgentRepository {
     const { data: agencyProfiles, error: profileErr } = await supabase
       .from("profiles")
       .select("id, first_name, last_name, email, photo_url, phone, bio, location")
-      .eq("role", "agency");
+      .eq("role", UserRole.AGENCY);
 
     if (profileErr) throw new Error(profileErr.message);
 

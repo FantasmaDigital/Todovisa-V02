@@ -356,21 +356,41 @@ export default function AgentApplyPage() {
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/75">Modelo de Ingresos</span>
-                        <h3 className="text-lg font-bold font-serif italic text-white mt-0.5">Detalles de Ganancia</h3>
+                        <h3 className="text-lg font-bold font-serif italic text-white mt-0.5">Detalles de Ganancia Asesores</h3>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-3 text-xs">
                         <div className="text-center">
                           <span className="block text-2xl font-bold text-white">60%</span>
-                          <span className="text-white/60 leading-tight">Comisión base</span>
+                          <span className="text-white/60 leading-tight">Comisión base asesor</span>
                         </div>
                         <div className="text-center">
                           <span className="block text-sm font-bold text-white mt-1">Semanal</span>
                           <span className="text-white/60 leading-tight">Cada viernes</span>
                         </div>
                         <div className="text-center">
-                          <span className="block text-sm font-bold text-white mt-1">$100–$350</span>
-                          <span className="text-white/60 leading-tight">USD por trámite</span>
+                          <span className="block text-sm font-bold text-white mt-1">$60.00</span>
+                          <span className="text-white/60 leading-tight">USD por acompañamiento</span>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* B2B Agency Referral Card */}
+                  <div className="bg-gradient-to-r from-slate-900 to-blue-950 text-white rounded-sm p-6 sm:p-8 border border-blue-800/40 shadow-md text-left relative overflow-hidden">
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                      <div className="space-y-2 max-w-xl">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 rounded text-[11px] font-bold tracking-wider uppercase border border-amber-400/30">
+                          <span>🏢 Programa Especial para Agencias B2B</span>
+                        </div>
+                        <h3 className="text-xl font-bold text-white">¿Eres una Agencia de Viajes o Turismo?</h3>
+                        <p className="text-xs text-blue-100/80 leading-relaxed">
+                          Monetiza tus clientes referidos sin preocuparte por la gestión técnica consular. Obtén tu <strong>Enlace Exclusivo de Agencia</strong> para compartir con tus clientes y gana un <strong>30% de comisión directa</strong> por cada venta generada automáticamente.
+                        </p>
+                      </div>
+                      <div className="bg-white/10 p-4 rounded-lg border border-white/10 flex flex-col items-center justify-center min-w-[170px] text-center">
+                        <span className="text-3xl font-extrabold text-amber-300">30%</span>
+                        <span className="text-[11px] font-bold text-white uppercase tracking-wider mt-1">Comisión por Referido</span>
+                        <span className="text-[10px] text-blue-200 mt-1">Enlace personalizado único</span>
                       </div>
                     </div>
                   </div>
@@ -866,15 +886,15 @@ export default function AgentApplyPage() {
               <div>
                 <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-2">1. Estructura de Ganancias y Comisiones</h4>
                 <p>
-                  El Agente Consultor percibirá una retribución económica basada en las asesorías y tramitaciones completadas exitosamente. El modelo financiero se detalla a continuación:
+                  El Agente Consultor percibirá una retribución económica basada en las asesorías y acompañamientos completados exitosamente. El modelo financiero se detalla a continuación:
                 </p>
                 <ul className="list-disc pl-5 mt-2 space-y-1.5">
                   <li>
-                    <strong>Comisión Base:</strong> El agente percibirá el <strong>60% del valor neto</strong> cobrado al cliente por la asesoría de visado.
+                    <strong>Comisión Base para Asesores Independientes:</strong> El agente percibirá el <strong>60% del valor neto</strong> cobrado al cliente por la asesoría de visado.
                   </li>
-                  {/* <li>
-                    <strong>Cuota de Plataforma:</strong> TodoVisa retiene un 5% sobre el valor del servicio para cubrir costos administrativos, procesamiento seguro de pagos, soporte en línea y mantenimiento de herramientas de IA.
-                  </li> */}
+                  <li>
+                    <strong>Comisión para Agencias B2B (Referidos):</strong> La agencia aliada percibirá el <strong>30% de comisión directa</strong> sobre todas las ventas generadas a través de su Enlace Exclusivo de Referido.
+                  </li>
                 </ul>
               </div>
 

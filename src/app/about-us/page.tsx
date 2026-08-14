@@ -39,7 +39,7 @@ export default function AboutUsPage() {
     {
       icon: "⚡",
       title: "Optimización de Renovaciones",
-      description: "Identificamos elegibilidad inmediata para programas de Exención de Entrevista (Drop Box Waiver en EE.UU.) y tramitación ágil de bajo riesgo migratorio para Canadá, Australia, México y el Reino Unido."
+      description: "Identificamos elegibilidad inmediata para programas de Exención de Entrevista (Drop Box Waiver en EE.UU.) y gestión y acompañamiento ágil de bajo riesgo migratorio para Canadá, Australia, México y el Reino Unido."
     },
     {
       icon: "🔒",

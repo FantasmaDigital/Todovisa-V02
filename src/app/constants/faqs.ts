@@ -14,7 +14,7 @@ export const faqs: FAQs[] = [
     },
     {
         question: "¿Cómo es el proceso para Renovaciones de México, Canadá, Australia y Reino Unido?",
-        answer: "Para México, Canadá, Australia y el Reino Unido, la renovación requiere la presentación de formularios y expediente formal. Sin embargo, haber contado con un visado previo sin faltas migratorias te otorga un perfil de 'Bajo Riesgo Migratorio', garantizando una tramitación prioritaria y una tasa de éxito sumamente elevada."
+        answer: "Para México, Canadá, Australia y el Reino Unido, la renovación requiere la presentación de formularios y expediente formal. Sin embargo, haber contado con un visado previo sin faltas migratorias te otorga un perfil de 'Bajo Riesgo Migratorio', garantizando una gestión prioritaria y una tasa de éxito sumamente elevada."
     },
     {
         question: "¿Qué incluye la Asesoría Consular Completa?",

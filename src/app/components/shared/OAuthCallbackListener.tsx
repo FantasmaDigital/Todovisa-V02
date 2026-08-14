@@ -5,6 +5,7 @@ import supabase from "@/app/lib/supabase";
 import { useAuthStore } from "@/app/store/authStore";
 import { AuthService } from "@/app/service/AuthService";
 import { AuthClientService } from "@/services/client/AuthClientService";
+import { AgencyClientService } from "@/services/client/AgencyClientService";
 
 export function OAuthCallbackListener() {
   const setUser = useAuthStore((state) => state.setUser);
@@ -41,6 +42,9 @@ export function OAuthCallbackListener() {
 
         if (event === "SIGNED_IN") {
           try {
+            // Sync / merge local agency referral code to Supabase metadata
+            AgencyClientService.syncReferralOnLogin(u);
+
             await AuthService.updateUser({
               first_name: userData.firstName,
               last_name: userData.lastName,
