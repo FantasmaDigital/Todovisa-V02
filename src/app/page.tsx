@@ -59,7 +59,7 @@ export default function Home() {
             <AnimatedSection className="h-full" delay={300}>
               <HeroCard
                 eyebrow="RED DE ASESORES CERTIFICADOS"
-                title="Acompañamiento 1-a-1 Experto"
+                title="Acompañamiento con Asesores Expertos"
                 description="Selecciona a tu agente especializado para la elaboración de tu DS-160, auditoría de expediente y simulacros intensivos de entrevista presencial por Zoom."
                 imageSrc="/images/virtual-agent.webp"
                 linkUrl="/agents"

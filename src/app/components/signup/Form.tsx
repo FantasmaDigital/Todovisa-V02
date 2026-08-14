@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
 import { AuthService } from '../../service/AuthService';
+import { AgencyClientService } from '@/services/client/AgencyClientService';
 import supabase from '../../lib/supabase';
 
 // Llama a signInWithOAuth directamente desde el cliente para garantizar
@@ -94,6 +95,10 @@ export default function SignUpForm() {
             if (result.data?.user) {
                 const userObj = result.data.user;
                 const metadata = userObj.user_metadata || {};
+
+                // Sync/merge local agency referral code to Supabase metadata upon signup
+                AgencyClientService.syncReferralOnLogin(userObj);
+
                 setUser({
                     id: userObj.id,
                     email: userObj.email || '',

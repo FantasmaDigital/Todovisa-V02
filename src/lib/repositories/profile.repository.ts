@@ -69,6 +69,18 @@ export class ProfileRepository {
             currentReviews.cita_details = safeUpdates.cita_details;
             delete safeUpdates.cita_details;
           }
+          if (safeUpdates.agent_review !== undefined) {
+            currentReviews.agent_review = safeUpdates.agent_review;
+            delete safeUpdates.agent_review;
+          }
+
+          // Dynamic fallback for any other column mentioned in error message
+          const missingColMatch = error.message.match(/Could not find the '([^']+)' column/i);
+          if (missingColMatch && missingColMatch[1] && safeUpdates[missingColMatch[1]] !== undefined) {
+            const missingCol = missingColMatch[1];
+            currentReviews[missingCol] = safeUpdates[missingCol];
+            delete safeUpdates[missingCol];
+          }
           
           safeUpdates.document_reviews = currentReviews;
 

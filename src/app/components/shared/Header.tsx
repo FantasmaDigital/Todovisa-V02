@@ -7,7 +7,9 @@ import { UserAvatar } from "./UserAvatar"
 import { useState, useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
 import { AuthService } from "@/app/service/AuthService"
+import { AuthClientService } from "@/services/client/AuthClientService"
 import { ProfileClientService } from "@/services/client/ProfileClientService"
+import { AgencyClientService } from "@/services/client/AgencyClientService"
 import { ROLES } from "@/app/constants/roles"
 import { visaDestinations } from "@/app/constants/visas/destinations"
 
@@ -85,19 +87,38 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
             const params = new URLSearchParams(window.location.search);
             const refParam = params.get("ref") || params.get("agency_ref");
             if (refParam) {
-                localStorage.setItem("todovisa_agency_ref", refParam);
+                AgencyClientService.processAndStoreAgencyCode(refParam);
             }
+
+            // Registrar escuchadores de eventos para refrescar el tiempo de actividad del usuario
+            const handleUserActivity = () => {
+                AuthClientService.updateLastActivity();
+            };
+
+            window.addEventListener("click", handleUserActivity);
+            window.addEventListener("keydown", handleUserActivity);
+
+            const timer = setTimeout(() => {
+                setShowLoader(false);
+            }, 300);
+            return () => {
+                clearTimeout(timer);
+                window.removeEventListener("click", handleUserActivity);
+                window.removeEventListener("keydown", handleUserActivity);
+            };
         }
-        const timer = setTimeout(() => {
-            setShowLoader(false);
-        }, 300);
-        return () => clearTimeout(timer);
     }, []);
 
 
     useEffect(() => {
         const syncSession = async () => {
             try {
+                // Verificar si la sesión expiró por más de 24 horas de inactividad
+                if (AuthClientService.checkSessionInactivityTimeout()) {
+                    useAuthStore.getState().clearUser();
+                    return;
+                }
+
                 // Pre-check if any supabase session token exists in localStorage to avoid useless 401 calls
                 let hasToken = false;
                 if (typeof window !== "undefined") {
@@ -122,6 +143,9 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                     return;
                 }
 
+                // Si hay sesión activa, actualizar el registro de actividad reciente
+                AuthClientService.updateLastActivity();
+
                 // ⚡ Parallel fetch: user + profile role in one round-trip instead of two sequential calls
                 const [userRes, profileResRaw] = await Promise.all([
                     AuthService.getUser().catch(() => null),
@@ -132,6 +156,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                 const supabaseUser = userRes?.data?.user;
                 if (supabaseUser) {
+                    // Sync / merge local agency referral code to Supabase metadata if exists
+                    AgencyClientService.syncReferralOnLogin(supabaseUser);
                     // Fetch profile role now that we have the userId — this is the only call we can't parallelize
                     // without the user id, but we avoided the getSession() call above being repeated.
                     let profileRole = null;
@@ -325,7 +351,6 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                                 <Link href="/vipro-form" className="hover:text-brand-primary transition-colors duration-200">Evaluación VIPRO</Link>
                                 <Link href="/about-us" className="hover:text-brand-primary transition-colors duration-200">Sobre TodoVisa</Link>
-                                <Link href="/sobre-todovisa" className="hover:text-brand-primary transition-colors duration-200">Noticias</Link>
                             </div>
                         </div>
 
@@ -459,7 +484,6 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                                 <Link href="/vipro-form" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Evaluación VIPRO</Link>
                                 <Link href="/about-us" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Sobre TodoVisa</Link>
-                                <Link href="/sobre-todovisa" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Noticias</Link>
                             </div>
 
                             <hr className="border-border-light/60" />

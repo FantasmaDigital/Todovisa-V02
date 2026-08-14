@@ -4,6 +4,7 @@ import { useForm, SubmitHandler } from 'react-hook-form';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthService } from '../../service/AuthService';
+import { AgencyClientService } from '@/services/client/AgencyClientService';
 import { useAuthStore } from '../../store/authStore';
 import Link from 'next/link';
 import supabase from '../../lib/supabase';
@@ -54,6 +55,9 @@ export function SignInForm() {
                 let viproDestination = metadata.vipro_destination || null;
                 const hasPaidAdvisor = metadata.has_paid_advisor || false;
                 const assignedAgentId = metadata.assigned_agent_id || null;
+
+                // Sync/merge local agency referral code to Supabase metadata if present
+                AgencyClientService.syncReferralOnLogin(userObj);
 
                 // Sync local guest VIPRO evaluation to Supabase if it wasn't saved in Supabase yet
                 if (typeof window !== "undefined" && !viproCompleted) {

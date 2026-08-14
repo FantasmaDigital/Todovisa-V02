@@ -107,6 +107,45 @@ export class AuthClientService {
     return handleResponse(res);
   }
 
+  // Duración máxima de inactividad de sesión: 24 Horas (86,400,000 milisegundos)
+  static SESSION_INACTIVITY_LIMIT_MS = 24 * 60 * 60 * 1000;
+  static LAST_ACTIVITY_KEY = "todovisa_last_activity_ts";
+
+  /**
+   * Actualiza el registro de tiempo de la última interacción del usuario.
+   */
+  static updateLastActivity() {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(this.LAST_ACTIVITY_KEY, Date.now().toString());
+  }
+
+  /**
+   * Verifica si la sesión ha expirado por inactividad (> 24 horas).
+   * Si ha superado las 24 horas, limpia la sesión y retorna true (expirada).
+   */
+  static checkSessionInactivityTimeout(): boolean {
+    if (typeof window === "undefined") return false;
+
+    const lastActivityStr = localStorage.getItem(this.LAST_ACTIVITY_KEY);
+    if (!lastActivityStr) {
+      // Si no existe timestamp pero hay token activo, iniciamos el contador ahora
+      this.updateLastActivity();
+      return false;
+    }
+
+    const lastActivityTs = parseInt(lastActivityStr, 10);
+    const now = Date.now();
+    const elapsed = now - lastActivityTs;
+
+    if (elapsed > this.SESSION_INACTIVITY_LIMIT_MS) {
+      console.warn("⚠️ [Auth] La sesión ha expirado por inactividad de más de 24 horas. Cerrando sesión automáticamente...");
+      this.clearSessionData();
+      return true; // Expirada
+    }
+
+    return false;
+  }
+
   static clearSessionData() {
     if (typeof window === "undefined") return;
 
@@ -130,6 +169,7 @@ export class AuthClientService {
       }
     }
     keysToRemove.forEach((key) => localStorage.removeItem(key));
+    localStorage.removeItem(this.LAST_ACTIVITY_KEY);
   }
 
   static async signOut() {

@@ -7,7 +7,7 @@ const footerLinks = {
   Servicios: [
     { label: "Asesoría Virtual", href: "/citas" },
     { label: "Evaluación VIPRO", href: "/vipro-form" },
-    { label: "Tramitar mi Visa", href: "/visas" },
+    { label: "Solicitar acompañamiento para mi Visa", href: "/visas" },
     { label: "Cómo Funciona", href: "/#como-funciona" },
   ],
   Compañía: [

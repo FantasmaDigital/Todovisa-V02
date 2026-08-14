@@ -5,6 +5,7 @@ import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
+import { ROLES } from "../constants/roles";
 import { FormClientService } from "@/services/client/FormClientService";
 import { VIPROQuestionsUSA, VIPROInfoUSA } from "../constants/vipro/usa.vipro";
 import { VIPROQuestionsUK, VIPROInfoUK } from "../constants/vipro/uk.vipro";
@@ -62,8 +63,8 @@ function PreformularioContent() {
     const countryName = config.name;
     const countryEmoji = config.emoji;
 
-    const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
-    const isAgentOrAgency = user && (user.role === "agent" || user.role === "agency");
+    const isAdminOrStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
+    const isAgentOrAgency = user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY);
     const targetUserId = searchParams.get("userId") || searchParams.get("user_id");
     const isViewingClient = targetUserId && (isAdminOrStaff || isAgentOrAgency);
 
@@ -432,11 +433,11 @@ function PreformularioContent() {
                                         </p>
                                     ) : selectedCountryCode === "CA" ? (
                                         <p className="text-xs text-blue-900 leading-relaxed">
-                                            <strong>Proceso de Renovación Canadá (TRV / eTA):</strong> Se tramita digitalmente en el Portal IRCC. Poseer un historial previo de cumplimiento en Canadá demuestra una solvencia sólida y apego a tu país de origen, lo cual agiliza la revisión y emisión de tu nueva visa de residencia temporal.
+                                            <strong>Proceso de Renovación Canadá (TRV / eTA):</strong> Se gestiona digitalmente en el Portal IRCC. Poseer un historial previo de cumplimiento en Canadá demuestra una solvencia sólida y apego a tu país de origen, lo cual agiliza la revisión y emisión de tu nueva visa de residencia temporal.
                                         </p>
                                     ) : selectedCountryCode === "AU" ? (
                                         <p className="text-xs text-blue-900 leading-relaxed">
-                                            <strong>Proceso de Renovación Australia (Subclass 600):</strong> Tramitación digital vía ImmiAccount. Tu historial de viaje previo sitúa tu expediente en la categoría de <strong>Bajo Riesgo Migratorio (Low-Risk Profile)</strong>, acelerando el otorgamiento de tu visa electrónica.
+                                            <strong>Proceso de Renovación Australia (Subclass 600):</strong> Gestión digital vía ImmiAccount. Tu historial de viaje previo sitúa tu expediente en la categoría de <strong>Bajo Riesgo Migratorio (Low-Risk Profile)</strong>, acelerando el otorgamiento de tu visa electrónica.
                                         </p>
                                     ) : selectedCountryCode === "CN" ? (
                                         <p className="text-xs text-blue-900 leading-relaxed">
@@ -562,7 +563,9 @@ function PreformularioContent() {
                                     key={i}
                                     onClick={() => {
                                         setValidationError(null);
-                                        setAnswers({ ...answers, [currentStep]: opt });
+                                        const updated = { ...answers, [currentStep]: opt };
+                                        setAnswers(updated);
+                                        saveEvaluationProgress(updated, currentStep);
                                     }}
                                     className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
                                             ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
@@ -588,7 +591,15 @@ function PreformularioContent() {
                                 value={answers[currentStep] || ''}
                                 onChange={(e) => {
                                     setValidationError(null);
-                                    setAnswers({ ...answers, [currentStep]: e.target.value });
+                                    const val = e.target.value;
+                                    const updated = { ...answers, [currentStep]: val };
+                                    setAnswers(updated);
+                                    saveEvaluationProgress(updated, currentStep);
+                                }}
+                                onBlur={() => {
+                                    if (answers[currentStep]) {
+                                        saveEvaluationProgress(answers, currentStep);
+                                    }
                                 }}
                                 placeholder="Escribe tu respuesta aquí..."
                                 className={`w-full border ${validationError ? 'border-red-400 focus:ring-red-200' : 'border-border-light focus:ring-brand-primary/50'} rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 transition-all shadow-sm`}

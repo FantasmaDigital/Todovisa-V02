@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { AuthService } from "../../service/AuthService";
 import { AgentClientService } from "@/services/client/AgentClientService";
+import { AgencyClientService } from "@/services/client/AgencyClientService";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 interface Agent {
@@ -41,6 +42,100 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
       }
     }
   }, []);
+
+  const [referralCodeInput, setReferralCodeInput] = useState("");
+  const [agencyReferralInfo, setAgencyReferralInfo] = useState<{ agencyId: string; agencyName: string } | null>(null);
+  const [referralError, setReferralError] = useState<string | null>(null);
+  const [isValidatingCode, setIsValidatingCode] = useState(false);
+
+  // Auto-complete referral code from user metadata (Supabase) or localStorage
+  useEffect(() => {
+    const initReferral = async () => {
+      let codeToUse = "";
+      let infoObj: { agencyId: string; agencyName: string } | null = null;
+
+      // 1. Check Supabase user metadata first
+      if (user) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const metadata = (user as any).user_metadata || {};
+        if (metadata.referred_by_agency_code) {
+          codeToUse = metadata.referred_by_agency_code;
+          if (metadata.referred_by_agency_id) {
+            infoObj = {
+              agencyId: metadata.referred_by_agency_id,
+              agencyName: metadata.referred_by_agency_name || "Agencia Aliada"
+            };
+          }
+        }
+      }
+
+      // 2. Fallback to localStorage if not found in user metadata
+      if (!codeToUse && typeof window !== "undefined") {
+        const localCode = localStorage.getItem("todovisa_agency_ref");
+        if (localCode) {
+          codeToUse = localCode;
+          const infoStr = localStorage.getItem("todovisa_agency_info");
+          if (infoStr) {
+            try {
+              const parsed = JSON.parse(infoStr);
+              infoObj = { agencyId: parsed.agencyId, agencyName: parsed.agencyName };
+            } catch (e) {}
+          }
+        }
+      }
+
+      if (codeToUse) {
+        setReferralCodeInput(codeToUse);
+        if (infoObj) {
+          setAgencyReferralInfo(infoObj);
+        } else {
+          // Validate code with API if info object wasn't stored yet
+          setIsValidatingCode(true);
+          const validation = await AgencyClientService.validateAgencyCode(codeToUse);
+          setIsValidatingCode(false);
+          if (validation.valid && validation.agencyId) {
+            setAgencyReferralInfo({
+              agencyId: validation.agencyId,
+              agencyName: validation.agencyName || "Agencia Aliada"
+            });
+          } else {
+            setReferralError(validation.error || "Código de referido inválido");
+          }
+        }
+      }
+    };
+
+    initReferral();
+  }, [user]);
+
+  const handleApplyReferralCode = async (codeToValidate: string) => {
+    if (!codeToValidate.trim()) {
+      setAgencyReferralInfo(null);
+      setReferralError(null);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("todovisa_agency_ref");
+        localStorage.removeItem("todovisa_agency_info");
+      }
+      return;
+    }
+
+    setIsValidatingCode(true);
+    setReferralError(null);
+
+    const validation = await AgencyClientService.processAndStoreAgencyCode(codeToValidate, user?.id);
+    setIsValidatingCode(false);
+
+    if (validation && validation.valid && validation.agencyId) {
+      setAgencyReferralInfo({
+        agencyId: validation.agencyId,
+        agencyName: validation.agencyName || "Agencia Aliada"
+      });
+      setReferralError(null);
+    } else {
+      setAgencyReferralInfo(null);
+      setReferralError(validation?.error || "Código inválido o no corresponde a una Agencia");
+    }
+  };
 
   const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
   const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || (process.env.NODE_ENV === "production" ? "live" : "sandbox");
@@ -223,6 +318,45 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 </div>
               </div>
             )}
+
+            {/* Agency Referral Code Section */}
+            <div className="px-6 py-4 bg-slate-50 border-b border-border-light space-y-2">
+              <label className="block text-xs font-bold text-text-primary uppercase tracking-wide">
+                🏢 Código de Referido de Agencia (Opcional)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Ej. AGENCIA-SAN-SALVADOR"
+                  className="flex-1 px-3 py-2 text-xs border border-border-light rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleApplyReferralCode(referralCodeInput)}
+                  disabled={isValidatingCode}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isValidatingCode ? "Validando..." : "Aplicar"}
+                </button>
+              </div>
+
+              {agencyReferralInfo && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium">
+                  <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>Agencia Vinculada: <strong>{agencyReferralInfo.agencyName}</strong></span>
+                </div>
+              )}
+
+              {referralError && (
+                <p className="text-xs text-red-600 font-medium flex items-center gap-1">
+                  <span>⚠️ {referralError}</span>
+                </p>
+              )}
+            </div>
 
             {/* Price Details */}
             <div className="px-6 py-4 border-b border-border-light space-y-2">
