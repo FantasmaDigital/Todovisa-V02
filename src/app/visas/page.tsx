@@ -4,25 +4,29 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { visaDestinations } from "../constants/visas/destinations";
-
-const countries = visaDestinations.map(d => ({
-    code: d.code.toUpperCase(),
-    name: d.name,
-    flag: d.flagImage,
-    type: d.type,
-    description: d.description,
-    available: d.enabled,
-    badge: d.badge
-}));
+import { getCentralizedDestinations } from "../constants/visas/destinations";
 
 export default function VisasPage() {
     const headerRef = useRef(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [destinations, setDestinations] = useState(() => getCentralizedDestinations());
 
     useEffect(() => {
-        if (headerRef.current) {}
+        setDestinations(getCentralizedDestinations());
+        const handleStorage = () => setDestinations(getCentralizedDestinations());
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
     }, []);
+
+    const countries = destinations.map(d => ({
+        code: d.code.toUpperCase(),
+        name: d.name,
+        flag: d.flagImage,
+        type: d.type,
+        description: d.description,
+        available: d.enabled,
+        badge: d.badge
+    }));
 
     const filteredCountries = countries.filter(c =>
         c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||

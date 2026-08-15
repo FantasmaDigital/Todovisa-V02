@@ -7,6 +7,7 @@ import { useAuthStore } from "../../store/authStore";
 import { useRouter } from "next/navigation";
 import { ROLES } from "../../constants/roles";
 import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { getSystemConfig } from "@/app/constants/config";
 
 interface AgentCommission {
   id: string;
@@ -70,12 +71,12 @@ export default function ComisionesPage() {
     }
   }, [isMounted, user?.id]);
 
-  // Statistics calculation helper
   const getCommissionRateLabel = () => {
+    const config = getSystemConfig();
     if (user?.role === ROLES.AGENCY) {
-      return "30% (Referido)";
+      return `${config.agencyReferralRate}% (Referido)`;
     }
-    return "60% (Asesor)";
+    return `${config.agentCommissionRate}% (Asesor)`;
   };
 
   const getGrossEarnings = () => {
@@ -137,11 +138,11 @@ export default function ComisionesPage() {
           </div>
           {user.role === ROLES.AGENCY ? (
             <p className="text-xs text-text-secondary leading-relaxed">
-              Como Agencia/Socio Comercial, recibes el <strong>30% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+              Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
             </p>
           ) : (
             <p className="text-xs text-text-secondary leading-relaxed">
-              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>{getSystemConfig().agentCommissionRate}%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
             </p>
           )}
         </div>

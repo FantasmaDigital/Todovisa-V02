@@ -2,22 +2,17 @@
 
 import { faqs } from "@/app/constants/faqs";
 import { useState, useEffect } from "react";
+import { getSystemConfig } from "@/app/constants/config";
 
 export const FAQs = () => {
     const [openFaq, setOpenFaq] = useState<number | null>(null);
-    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+    const [price, setPrice] = useState(() => getSystemConfig().fullServicePrice);
 
     useEffect(() => {
-        const savedPrice = localStorage.getItem("fullServicePrice");
-        if (savedPrice) {
-            setPrice(Number(savedPrice));
-        }
+        setPrice(getSystemConfig().fullServicePrice);
 
         const handleStorage = () => {
-            const saved = localStorage.getItem("fullServicePrice");
-            if (saved) {
-                setPrice(Number(saved));
-            }
+            setPrice(getSystemConfig().fullServicePrice);
         };
         window.addEventListener("storage", handleStorage);
         return () => window.removeEventListener("storage", handleStorage);

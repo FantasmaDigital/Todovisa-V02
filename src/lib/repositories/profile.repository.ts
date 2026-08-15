@@ -36,63 +36,57 @@ export class ProfileRepository {
 
   static async updateProfile(userId: string, updates: Record<string, any>) {
     const adminClient = getAdminClient();
+
+    const PHYSICAL_COLUMNS = new Set([
+      'id', 'email', 'first_name', 'last_name', 'role', 'updated_at',
+      'photo_url', 'phone', 'bio', 'location', 'staff_size',
+      'expediente_status', 'client_docs', 'document_reviews',
+      'ds160_full_name', 'ds160_passport_num', 'ds160_birth_date',
+      'ds160_purpose_of_trip', 'ds160_has_assets', 'ds160_confirmed'
+    ]);
+
     try {
+      const directUpdates: Record<string, any> = {};
+      const customMetadata: Record<string, any> = {};
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (PHYSICAL_COLUMNS.has(key)) {
+          directUpdates[key] = val;
+        } else {
+          customMetadata[key] = val;
+        }
+      }
+
+      if (Object.keys(customMetadata).length > 0) {
+        const { data: currentProf } = await adminClient
+          .from("profiles")
+          .select("document_reviews")
+          .eq("id", userId)
+          .maybeSingle();
+
+        const currentReviews = (currentProf?.document_reviews && typeof currentProf.document_reviews === 'object')
+          ? { ...currentProf.document_reviews }
+          : {};
+
+        const existingDocReviews = directUpdates.document_reviews || {};
+        directUpdates.document_reviews = {
+          ...currentReviews,
+          ...existingDocReviews,
+          ...customMetadata
+        };
+      }
+
+      if (!directUpdates.updated_at) {
+        directUpdates.updated_at = new Date().toISOString();
+      }
+
       const { data, error } = await adminClient
         .from("profiles")
-        .update(updates)
+        .update(directUpdates)
         .eq("id", userId)
         .select();
 
       if (error) {
-        // If error is due to missing physical column in Supabase profiles schema cache
-        const isColumnError = error.message.includes("column") || error.code === "PGRST204" || error.message.includes("schema cache");
-        if (isColumnError) {
-          console.warn("[ProfileRepository.updateProfile] Column missing in profiles schema, redirecting to document_reviews JSONB column:", error.message);
-          
-          const { data: currentProf } = await adminClient
-            .from("profiles")
-            .select("document_reviews")
-            .eq("id", userId)
-            .maybeSingle();
-
-          const currentReviews = (currentProf?.document_reviews && typeof currentProf.document_reviews === 'object') 
-            ? { ...currentProf.document_reviews } 
-            : {};
-          
-          const safeUpdates = { ...updates };
-          
-          if (safeUpdates.appointment_request !== undefined) {
-            currentReviews.appointment_request = safeUpdates.appointment_request;
-            delete safeUpdates.appointment_request;
-          }
-          if (safeUpdates.cita_details !== undefined) {
-            currentReviews.cita_details = safeUpdates.cita_details;
-            delete safeUpdates.cita_details;
-          }
-          if (safeUpdates.agent_review !== undefined) {
-            currentReviews.agent_review = safeUpdates.agent_review;
-            delete safeUpdates.agent_review;
-          }
-
-          // Dynamic fallback for any other column mentioned in error message
-          const missingColMatch = error.message.match(/Could not find the '([^']+)' column/i);
-          if (missingColMatch && missingColMatch[1] && safeUpdates[missingColMatch[1]] !== undefined) {
-            const missingCol = missingColMatch[1];
-            currentReviews[missingCol] = safeUpdates[missingCol];
-            delete safeUpdates[missingCol];
-          }
-          
-          safeUpdates.document_reviews = currentReviews;
-
-          const { data: fallbackData, error: fallbackError } = await adminClient
-            .from("profiles")
-            .update(safeUpdates)
-            .eq("id", userId)
-            .select();
-
-          if (fallbackError) throw new Error(fallbackError.message);
-          return fallbackData;
-        }
         console.error("[ProfileRepository.updateProfile Error]", error);
         throw new Error(error.message);
       }

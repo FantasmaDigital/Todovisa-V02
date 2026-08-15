@@ -17,6 +17,7 @@ import { FormClientService } from "@/services/client/FormClientService";
 import { SettingsClientService } from "@/services/client/SettingsClientService";
 import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
+import { getSystemConfig } from "../constants/config";
 import supabase from "@/app/lib/supabase";
 
 // Convert countries list to sorted array
@@ -113,18 +114,13 @@ export default function PerfilUsuarioPage() {
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
-  const [fullServicePrice, setFullServicePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  const [fullServicePrice, setFullServicePrice] = useState(() => getSystemConfig().fullServicePrice);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("fullServicePrice");
-    if (savedPrice) {
-      setFullServicePrice(Number(savedPrice));
-    }
-    const savedViproPrice = localStorage.getItem("viproPrice");
-    if (savedViproPrice) {
-      setViproPrice(Number(savedViproPrice));
-    }
+    const sysConfig = getSystemConfig();
+    setFullServicePrice(sysConfig.fullServicePrice);
+    setViproPrice(sysConfig.viproPrice);
 
     async function fetchDBPrices() {
       try {
@@ -204,6 +200,10 @@ export default function PerfilUsuarioPage() {
   const [savingPayout, setSavingPayout] = useState(false);
   const [isLoadingPayout, setIsLoadingPayout] = useState(false);
   const [copiedReferral, setCopiedReferral] = useState(false);
+
+  // User's own application state (for B2B agency or independent agent application tracking)
+  const [userApplication, setUserApplication] = useState<AgentApplicationData | null>(null);
+  const [isLoadingUserApp, setIsLoadingUserApp] = useState(true);
 
   // Inline Accreditation states (for mi_acreditacion tab)
   const [agentApp, setAgentApp] = useState<AgentApplicationData | null>(null);
@@ -500,6 +500,26 @@ export default function PerfilUsuarioPage() {
     }
   }, [user?.role]);
 
+  useEffect(() => {
+    async function loadAdminApplications() {
+      if (!user || (user.role !== ROLES.ADMIN && user.role !== ROLES.MODERATOR)) return;
+      try {
+        const { data } = await supabase
+          .from("agent_applications")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (data) {
+          setAllApplications(data as AgentApplicationData[]);
+        }
+      } catch (err) {
+        console.error("Error fetching all agent applications for admin:", err);
+      }
+    }
+
+    loadAdminApplications();
+  }, [user?.role, activeTab]);
+
 
 
   // Crop states
@@ -618,6 +638,80 @@ export default function PerfilUsuarioPage() {
 
     fetchRealInvitation();
   }, [user?.id, user?.role]);  // Only re-run on identity/role changes
+
+  useEffect(() => {
+    async function fetchUserApplication() {
+      if (!user?.email && !user?.id) {
+        setIsLoadingUserApp(false);
+        return;
+      }
+      setIsLoadingUserApp(true);
+      try {
+        let foundData: AgentApplicationData | null = null;
+
+        // 1. Try querying Supabase by user_id or email
+        if (user.id) {
+          const { data: byUserId } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .eq("user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (byUserId) foundData = byUserId as AgentApplicationData;
+        }
+
+        if (!foundData && user.email) {
+          const cleanEmail = user.email.trim().toLowerCase();
+          const { data: byEmail } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .ilike("email", cleanEmail)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (byEmail) foundData = byEmail as AgentApplicationData;
+        }
+
+        // 2. Fallback to localStorage if no DB record found
+        if (!foundData && typeof window !== "undefined") {
+          const cachedUserApp = localStorage.getItem("user_agent_application");
+          if (cachedUserApp) {
+            try {
+              foundData = JSON.parse(cachedUserApp);
+            } catch (e) {}
+          } else {
+            // Find any agent_app_ key in localStorage
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith("agent_app_")) {
+                try {
+                  const val = localStorage.getItem(key);
+                  if (val) {
+                    foundData = JSON.parse(val);
+                    break;
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+        }
+
+        if (foundData) {
+          setUserApplication(foundData);
+          setPartnerApp(foundData);
+        }
+      } catch (err) {
+        console.error("Error loading user application:", err);
+      } finally {
+        setIsLoadingUserApp(false);
+      }
+    }
+
+    fetchUserApplication();
+  }, [user?.id, user?.email]);
 
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -1803,15 +1897,25 @@ export default function PerfilUsuarioPage() {
 
         // Build purchases array from real DB records (agent_commissions)
         const advisorPurchases = commissions.map((c: any) => {
-          const prof = c.client_id ? pMap[c.client_id] : (c.client_email ? pMap[c.client_email.toLowerCase()] : null);
+          let notesObj: any = {};
+          if (c.notes) {
+            try {
+              notesObj = typeof c.notes === "string" ? JSON.parse(c.notes) : c.notes;
+            } catch (e) {}
+          }
+
+          const clientId = c.client_id || c.user_id || notesObj.client_id;
+          const clientEmail = c.client_email || notesObj.client_email || "";
+          const prof = clientId ? pMap[clientId] : (clientEmail ? pMap[clientEmail.toLowerCase()] : null);
+
           return {
             id: c.id,
-            user_id: c.client_id || c.user_id,
-            user_name: c.client_name || prof?.name || null,
-            user_email: c.client_email || prof?.email || "",
-            product_type: "advisor",
-            amount: Number(c.gross_amount) || Number(c.sale_amount) || Number(fullServicePrice) || 150,
-            paypal_tx_id: c.paypal_tx_id || c.transaction_id || null,
+            user_id: clientId,
+            user_name: c.client_name || prof?.name || notesObj.client_name || null,
+            user_email: clientEmail || prof?.email || "",
+            product_type: c.service_type === "vipro" ? "vipro" : "advisor",
+            amount: Number(c.gross_amount) || Number(c.sale_amount) || (c.service_type === "vipro" ? 19.99 : 150),
+            paypal_tx_id: c.paypal_tx_id || c.transaction_id || notesObj.paypal_transaction_id || null,
             created_at: c.created_at || new Date().toISOString()
           };
         });
@@ -2335,7 +2439,7 @@ export default function PerfilUsuarioPage() {
             </label>
           </div>
 
-          <div className="text-center md:text-left text-white">
+          <div className="text-center md:text-left text-white flex flex-col items-center md:items-start">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5 flex items-center justify-center md:justify-start gap-2 min-h-[16px]">
               {isLoadingPartnerApp ? (
                 <span className="inline-block w-24 h-3 bg-white/20 rounded animate-pulse"></span>
@@ -2346,10 +2450,10 @@ export default function PerfilUsuarioPage() {
                   : "Panel del Aplicante"}
             </p>
 
-            <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
+            <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1 text-center md:text-left">
               Hola, {firstName} {lastName}
             </h1>
-            <p className="text-xs text-white/90 font-medium flex flex-wrap items-center gap-x-2 gap-y-1">
+            <div className="text-xs text-white/90 font-medium flex flex-col sm:flex-row items-center justify-center md:justify-start gap-x-2 gap-y-1.5 text-center md:text-left">
               <span>ID de Usuario: <span className="font-mono text-white/70">{user.id.substring(0, 8)}...</span></span>
               <span className="text-white/40 hidden sm:inline">•</span>
               <span>Registrado desde El Salvador</span>
@@ -2357,7 +2461,7 @@ export default function PerfilUsuarioPage() {
               <span className="bg-white/10 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center">
                 Cambios de foto: <span className="font-semibold ml-1">{user?.avatarChangesThisMonth || 0}/3 este mes</span>
               </span>
-            </p>
+            </div>
           </div>
 
           <button
@@ -2513,7 +2617,7 @@ export default function PerfilUsuarioPage() {
                   // --- Default tabs for regular users ---
                   return [
                     ...baseUserTabs,
-                    ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
+                    ...((userApplication || partnerApp) ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
                   ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                 })().map((tab: { id: string; label: string; svgIcon?: React.ReactNode; isLink?: boolean; url?: string }) => (
                   <button
@@ -2581,6 +2685,242 @@ export default function PerfilUsuarioPage() {
                     >
                       Firmar Acuerdo Ahora &rarr;
                     </button>
+                  </div>
+                )}
+
+                {/* TAB: ESTADO DE SOLICITUD B2B / ASESOR */}
+                {activeTab === "solicitud" && (
+                  <div className="space-y-8 animate-fadeIn text-left">
+                    <div className="border-b border-border-light pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-xl font-extrabold text-text-primary font-serif">
+                          Estatus de Solicitud B2B / Asesor
+                        </h2>
+                        <p className="text-xs text-text-secondary mt-1">
+                          Seguimiento en tiempo real del proceso de evaluación de tu postulación como Agencia o Asesor Especializado.
+                        </p>
+                      </div>
+                      {userApplication && (
+                        <div className="flex items-center gap-2 bg-brand-light px-3 py-1.5 rounded-full border border-brand-primary/20 text-xs font-semibold text-brand-primary">
+                          <span>Folio:</span>
+                          <span className="font-mono">{userApplication.application_id || userApplication.id?.substring(0, 8)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {isLoadingUserApp ? (
+                      <div className="p-8 text-center text-text-muted animate-pulse">
+                        Cargando estado de tu solicitud...
+                      </div>
+                    ) : !userApplication ? (
+                      <div className="bg-background-main border border-border-light rounded-xl p-8 text-center space-y-4">
+                        <div className="text-4xl">🏢</div>
+                        <h3 className="text-lg font-bold text-text-primary">No tienes ninguna solicitud activa en este momento</h3>
+                        <p className="text-xs text-text-secondary max-w-md mx-auto leading-relaxed">
+                          Si eres una Agencia de Viajes o deseas integrarte a nuestra Red de Asesores Especializados, puedes enviar tu solicitud ahora.
+                        </p>
+                        <button
+                          onClick={() => router.push("/agents/apply")}
+                          className="inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-hover text-white font-bold text-xs px-5 py-2.5 rounded-sm transition-all shadow-sm cursor-pointer"
+                        >
+                          Enviar Solicitud B2B / Asesor &rarr;
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Status Card Banner */}
+                        <div className={`p-6 rounded-xl border transition-all shadow-sm ${
+                          userApplication.status === "approved" || userApplication.status === "active"
+                            ? "bg-emerald-50/90 border-emerald-200 text-emerald-950"
+                            : userApplication.status === "rejected"
+                            ? "bg-rose-50/90 border-rose-200 text-rose-950"
+                            : "bg-amber-50/90 border-amber-200/80 text-amber-950"
+                        }`}>
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div className="flex items-start gap-4">
+                              <div className="text-3xl flex-shrink-0 mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "🎉" : userApplication.status === "rejected" ? "⚠️" : "⏳"}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-3">
+                                  <h3 className="text-lg font-extrabold">
+                                    {userApplication.status === "approved" || userApplication.status === "active"
+                                      ? "¡Solicitud Aprobada!"
+                                      : userApplication.status === "rejected"
+                                      ? "Solicitud No Aprobada"
+                                      : "En Proceso de Evaluación"}
+                                  </h3>
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                    userApplication.status === "approved" || userApplication.status === "active"
+                                      ? "bg-emerald-600 text-white"
+                                      : userApplication.status === "rejected"
+                                      ? "bg-rose-600 text-white"
+                                      : "bg-amber-500 text-white"
+                                  }`}>
+                                    {userApplication.status === "approved" || userApplication.status === "active"
+                                      ? "Aprobado"
+                                      : userApplication.status === "rejected"
+                                      ? "Rechazado"
+                                      : "Pendiente de Revisión"}
+                                  </span>
+                                </div>
+                                <p className="text-xs mt-2 leading-relaxed">
+                                  {userApplication.status === "approved" || userApplication.status === "active"
+                                    ? "Tu expediente ha sido verificado satisfactoriamente por el equipo directivo de TodoVisa. Ya dispones de acreditación comercial."
+                                    : userApplication.status === "rejected"
+                                    ? "Tu solicitud fue evaluada por nuestro equipo administrativo pero no cumple con los criterios de admisión requeridos en este momento."
+                                    : "Tu postulación ha sido recibida y se encuentra actualmente bajo auditoría por parte del comité de admisiones de TodoVisa."}
+                                </p>
+                              </div>
+                            </div>
+
+                            {(userApplication.status === "approved" || userApplication.status === "active") && (
+                              <button
+                                onClick={() => router.push(`/agents/portal?id=${userApplication.application_id || userApplication.id}`)}
+                                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-md shadow-sm transition-all flex-shrink-0 cursor-pointer"
+                              >
+                                Acceder al Portal B2B &rarr;
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Stepper Progress */}
+                        <div className="bg-white border border-border-light rounded-xl p-6 shadow-xs">
+                          <h4 className="text-xs font-extrabold uppercase tracking-wider text-text-secondary mb-6 text-left">
+                            Línea de Proceso de Admisión
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 relative">
+                            {/* Step 1 */}
+                            <div className="flex flex-col items-start p-4 rounded-lg bg-emerald-50/60 border border-emerald-200">
+                              <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center mb-2">✓</span>
+                              <span className="text-xs font-bold text-emerald-950">1. Envió de Solicitud</span>
+                              <span className="text-[10px] text-emerald-700 mt-1">
+                                {userApplication.created_at ? new Date(userApplication.created_at).toLocaleDateString("es-ES") : "Completado"}
+                              </span>
+                            </div>
+
+                            {/* Step 2 */}
+                            <div className={`flex flex-col items-start p-4 rounded-lg border ${
+                              userApplication.status === "approved" || userApplication.status === "active"
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : userApplication.status === "rejected"
+                                ? "bg-rose-50/60 border-rose-200"
+                                : "bg-amber-50/80 border-amber-300 animate-pulse"
+                            }`}>
+                              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center mb-2 ${
+                                userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "bg-emerald-600 text-white"
+                                  : userApplication.status === "rejected"
+                                  ? "bg-rose-600 text-white"
+                                  : "bg-amber-500 text-white"
+                              }`}>
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "✓" : userApplication.status === "rejected" ? "✕" : "2"}
+                              </span>
+                              <span className="text-xs font-bold text-text-primary">2. Revisión de Documentos</span>
+                              <span className="text-[10px] text-text-secondary mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "Verificado"
+                                  : userApplication.status === "rejected"
+                                  ? "No aprobado"
+                                  : "En auditoría presencial"}
+                              </span>
+                            </div>
+
+                            {/* Step 3 */}
+                            <div className={`flex flex-col items-start p-4 rounded-lg border ${
+                              userApplication.status === "approved" || userApplication.status === "active"
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : "bg-gray-50 border-gray-200 opacity-60"
+                            }`}>
+                              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center mb-2 ${
+                                userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-gray-300 text-gray-600"
+                              }`}>
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "✓" : "3"}
+                              </span>
+                              <span className="text-xs font-bold text-text-primary">3. Aprobación y Convenio</span>
+                              <span className="text-[10px] text-text-secondary mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "Acreditado" : "Pendiente"}
+                              </span>
+                            </div>
+
+                            {/* Step 4 */}
+                            <div className={`flex flex-col items-start p-4 rounded-lg border ${
+                              userApplication.status === "approved" || userApplication.status === "active"
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : "bg-gray-50 border-gray-200 opacity-60"
+                            }`}>
+                              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center mb-2 ${
+                                userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-gray-300 text-gray-600"
+                              }`}>
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "✓" : "4"}
+                              </span>
+                              <span className="text-xs font-bold text-text-primary">4. Activación de Portal</span>
+                              <span className="text-[10px] text-text-secondary mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "Habilitado" : "Pendiente"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Details Card */}
+                        <div className="bg-white border border-border-light rounded-xl p-6 shadow-xs space-y-4">
+                          <h4 className="text-xs font-extrabold uppercase tracking-wider text-text-secondary border-b border-border-light pb-3 text-left">
+                            Resumen del Expediente Registrado
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-left">
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Nombre / Empresa</span>
+                              <span className="text-text-primary font-bold text-sm">{userApplication.full_name || user.email}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Correo Electrónico</span>
+                              <span className="text-text-primary font-bold text-sm">{userApplication.email}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Teléfono de Contacto</span>
+                              <span className="text-text-primary font-bold">{userApplication.phone || "No especificado"}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">País de Residencia</span>
+                              <span className="text-text-primary font-bold">{userApplication.country_residence || "No especificado"}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Años de Experiencia</span>
+                              <span className="text-text-primary font-bold">{userApplication.experience_years ? `${userApplication.experience_years} años` : "No especificado"}</span>
+                            </div>
+                            {userApplication.specialties && userApplication.specialties.length > 0 && (
+                              <div className="col-span-2">
+                                <span className="text-text-muted block font-semibold uppercase text-[10px] mb-1">Especialidades</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {userApplication.specialties.map((spec: string, idx: number) => (
+                                    <span key={idx} className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-brand-primary/20">
+                                      {spec}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {userApplication.target_countries && userApplication.target_countries.length > 0 && (
+                              <div className="col-span-2">
+                                <span className="text-text-muted block font-semibold uppercase text-[10px] mb-1">Países Destino que Domina</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {userApplication.target_countries.map((c: string, idx: number) => (
+                                    <span key={idx} className="bg-slate-100 text-slate-800 text-[10px] font-bold px-2 py-0.5 rounded border border-slate-200">
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -4403,7 +4743,14 @@ export default function PerfilUsuarioPage() {
                         {/* Actions for editing application & viewing full portal */}
                         <div className="flex flex-wrap justify-between items-center gap-3 pt-4 border-t border-border-light">
                           <button
-                            onClick={() => router.push(`/agents/portal?id=${partnerApp.application_id}`)}
+                            onClick={() => {
+                              const targetId = partnerApp.application_id || partnerApp.id;
+                              if (targetId) {
+                                router.push(`/agents/portal?id=${encodeURIComponent(targetId)}`);
+                              } else {
+                                router.push("/agents/portal");
+                              }
+                            }}
                             className="px-5 py-2.5 bg-white border border-border-light text-text-primary text-xs font-bold rounded-sm hover:bg-background-hover transition-colors cursor-pointer shadow-2xs"
                           >
                             👁 Ver Solicitud Completa →
@@ -5154,20 +5501,18 @@ export default function PerfilUsuarioPage() {
                             // Add Agent/Partner Applications (solicitudes de asesoría/socio)
                             if (allApplications && Array.isArray(allApplications)) {
                               allApplications.forEach((app: any) => {
-                                const uid = app.user_id || app.id;
-                                if (uid && !solicitudesMap.has(uid)) {
-                                  solicitudesMap.set(uid, {
-                                    id: app.id,
-                                    user_id: uid,
-                                    type: app.application_type === "agency" ? "Acreditación de Agencia" : "Solicitud de Asesor",
-                                    status: app.status,
-                                    is_completed: true,
-                                    answers: app,
-                                    documents: app.documents,
-                                    updated_at: app.updated_at || app.created_at,
-                                    raw: app,
-                                  });
-                                }
+                                const key = `app_${app.id || app.application_id || app.email}`;
+                                solicitudesMap.set(key, {
+                                  id: app.id || app.application_id,
+                                  user_id: app.user_id || app.id,
+                                  type: app.documents?.partner_type === "b2b_agency" || app.application_type === "agency" ? "🏢 Acreditación de Agencia B2B" : "👤 Solicitud de Asesor",
+                                  status: app.status,
+                                  is_completed: true,
+                                  answers: app,
+                                  documents: app.documents,
+                                  updated_at: app.updated_at || app.created_at,
+                                  raw: app,
+                                });
                               });
                             }
 
@@ -6266,19 +6611,20 @@ export default function PerfilUsuarioPage() {
                       </div>
                       {user.role === ROLES.AGENCY ? (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Agencia/Socio Comercial, recibes el <strong>30% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+                          Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
                         </p>
                       ) : (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Asesor Certificado de la red TodoVisa, el monto de tu comisión estará disponible al terminar la asesoría del cliente. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                          Como Asesor Certificado de la red TodoVisa, recibes el <strong>{getSystemConfig().agentCommissionRate}% del importe bruto</strong> de cada trámite consular asignado. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
                         </p>
                       )}
                     </div>
 
                     {/* Financial metrics & Table */}
                     {(() => {
-                      const fullServicePrice = Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150.00;
-                      const commissionRate = 0.60;
+                      const sysConfig = getSystemConfig();
+                      const fullServicePrice = sysConfig.fullServicePrice;
+                      const commissionRate = (user.role === ROLES.AGENCY ? sysConfig.agencyReferralRate : sysConfig.agentCommissionRate) / 100;
                       const agentCommissionAmount = fullServicePrice * commissionRate;
 
                       // Merge real database commissions with synthetic ones for assigned clients that don't have a commission record yet

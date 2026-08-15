@@ -5,6 +5,8 @@ import { useAuthStore } from "../../store/authStore";
 import { AuthService } from "../../service/AuthService";
 import { AgentClientService } from "@/services/client/AgentClientService";
 import { AgencyClientService } from "@/services/client/AgencyClientService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { getSystemConfig } from "@/app/constants/config";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 interface Agent {
@@ -141,18 +143,22 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || (process.env.NODE_ENV === "production" ? "live" : "sandbox");
   const isSandbox = paypalMode === "sandbox" || paypalClientId === "test";
 
-  const [basePrice, setBasePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  const [basePrice, setBasePrice] = useState(() => getSystemConfig().fullServicePrice);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("fullServicePrice");
-    if (savedPrice) {
-      setBasePrice(Number(savedPrice));
-    }
-    const savedViproPrice = localStorage.getItem("viproPrice");
-    if (savedViproPrice) {
-      setViproPrice(Number(savedViproPrice));
-    }
+    const config = getSystemConfig();
+    setBasePrice(config.fullServicePrice);
+    setViproPrice(config.viproPrice);
+
+    const handleStorageChange = () => {
+      const updated = getSystemConfig();
+      setBasePrice(updated.fullServicePrice);
+      setViproPrice(updated.viproPrice);
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const amountToPay = product === "vipro" ? viproPrice : basePrice;
@@ -161,78 +167,179 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     setStep("processing");
     try {
       if (user) {
+        const txId = paypalTransactionId || `PAYPAL_SIM_${Date.now()}`;
+        const sysConfig = getSystemConfig();
+        
+        // ── 1. FETCH FULL CLIENT DATA FROM DATABASE ───────────────────────────
+        let dbProfile: any = null;
+        try {
+          const profRes = await ProfileClientService.getProfile(user.id);
+          dbProfile = profRes?.profile || null;
+        } catch (dbErr) {
+          console.warn("Notice: could not fetch profile from DB, using auth store fallback:", dbErr);
+        }
+
+        const clientName = `${user.firstName || dbProfile?.first_name || ""} ${user.lastName || dbProfile?.last_name || ""}`.trim() || user.email;
+        const clientEmail = user.email || dbProfile?.email || "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const userMeta = (user as any).user_metadata || {};
+        const clientFolio = dbProfile?.folio_number || dbProfile?.client_folio || userMeta.folio_number || `TDA-${Math.floor(100000 + Math.random() * 900000)}`;
+
+        // Resolve Agency Referral Info
+        const agencyRefId = agencyReferralInfo?.agencyId || 
+                            (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null) || 
+                            userMeta.referred_by_agency_id || null;
+        const agencyRefName = agencyReferralInfo?.agencyName || 
+                              userMeta.referred_by_agency_name || 
+                              (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_info") : null) || null;
+
+        // ── 2. PREPARE & SAVE PROFILE / AUTH UPDATE ───────────────────────────
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updateData: any = {
-          last_paypal_tx: paypalTransactionId || `PAYPAL_SIM_${Date.now()}`
+          last_paypal_tx: txId
         };
         if (product === "vipro") {
           updateData.has_paid_vipro = true;
         } else {
           updateData.has_paid_advisor = true;
           if (agent) {
-            // Store the real Supabase user UUID (agent.userId), NOT the computed "agent-{id}" string
             updateData.assigned_agent_id = agent.userId || agent.id;
-            updateData.assigned_agency_name = agent.agencyName || null;
+            updateData.assigned_agency_name = agent.agencyName || agencyRefName || null;
           }
         }
 
-        // Persist to Supabase Auth metadata via API
+        // Persist to Supabase Auth metadata & profiles table
         try {
           await AuthService.updateUser(updateData);
-          console.log("Status successfully saved to Supabase user metadata.");
+          await ProfileClientService.updateProfile(user.id, {
+            ...updateData,
+            updated_at: new Date().toISOString()
+          });
+          console.log("Purchase & status successfully saved to Supabase database & user metadata.");
         } catch (err) {
-          console.error("Failed to save status to Supabase:", err);
+          console.error("Failed to save status to Supabase profile:", err);
         }
 
-        // ── ALWAYS LINK CLIENT TO AGENT/AGENCY UPON ADVISOR HIRE ──────────────────
-        if (product === "advisor" && agent) {
+        // ── 3. STORE CLIENT REQUEST IN AGENCY_CLIENT_REQUESTS TABLE ───────────
+        if (product === "advisor" && (agent || agencyRefId)) {
           try {
             await AgentClientService.createClientRequest({
-              agency_id: agent.userId || agent.id,
-              agencyName: agent.agencyName || null,
+              agency_id: agencyRefId || agent?.userId || agent?.id,
+              agencyName: agent?.agencyName || agencyRefName || null,
+              agent_hired_id: agent?.userId || agent?.id || null,
               client_id: user.id,
-              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-              client_email: user.email,
-              service_type: "Full Advisor Concierge",
+              client_name: clientName,
+              client_email: clientEmail,
             });
           } catch (agencyErr) {
             console.warn("Notice: agency_client_requests API error:", agencyErr);
           }
         }
 
-        // ── COMMISSION LOGGING ───────────────────────────────────────
-        if (product === "advisor" && agent?.id) {
-          try {
-            const agencyRef = typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null;
-            let commissionRate = 0.40;
-            let commissionType = "standard_advisor";
+        // ── 4. CALCULATE & STORE ALL COMMISSIONS IN DATABASE ──────────────────
+        if (product === "advisor") {
+          // A) Agency Referral Commission (30%) if client was referred by an agency
+          if (agencyRefId) {
+            try {
+              const agencyRate = sysConfig.agencyReferralRate; // Centralized rate (30%)
+              const agencyCommissionAmount = (amountToPay * agencyRate) / 100;
+              const todovisaShare = amountToPay - agencyCommissionAmount;
 
-            if (agencyRef) {
-              commissionRate = 0.30;
-              commissionType = "agency_referral";
-            } else if (agent.title?.toLowerCase().includes("experto") || agent.title?.toLowerCase().includes("master")) {
-              commissionRate = 0.60;
-              commissionType = "expert_advisor";
+              await AgentClientService.createCommission({
+                agent_id: agencyRefId,
+                client_folio: clientFolio,
+                client_name: clientName,
+                service_type: "full_service",
+                sale_amount: amountToPay,
+                commission_rate: agencyRate,
+                status: "pending",
+                notes: {
+                  paypal_transaction_id: txId,
+                  client_id: user.id,
+                  client_email: clientEmail,
+                  product: "advisor",
+                  commission_type: "agency_referral",
+                  agency_name: agencyRefName,
+                  agent_hired_id: agent?.userId || agent?.id || null,
+                  agent_hired_name: agent?.name || null,
+                  todovisa_share: todovisaShare,
+                  commission_amount: agencyCommissionAmount,
+                  mode: isSandbox ? "sandbox" : "live",
+                  created_at: new Date().toISOString()
+                }
+              });
+            } catch (agencyCommErr) {
+              console.warn("Notice: agency commission creation error:", agencyCommErr);
             }
+          }
 
-            const agentCommissionAmount = amountToPay * commissionRate;
-            const todovisaShareAmount = amountToPay - agentCommissionAmount;
+          // B) Advisor Commission (60% for ALL advisors regardless of rank/title)
+          if (agent?.id && (agent.userId || agent.id) !== agencyRefId) {
+            try {
+              const advisorRate = sysConfig.agentCommissionRate; // Centralized rate (60% for all advisors)
+              const commType = "standard_advisor";
+
+              const advisorCommissionAmount = (amountToPay * advisorRate) / 100;
+              const todovisaShare = amountToPay - advisorCommissionAmount;
+
+              await AgentClientService.createCommission({
+                agent_id: agent.userId || agent.id,
+                client_folio: clientFolio,
+                client_name: clientName,
+                service_type: "full_service",
+                sale_amount: amountToPay,
+                commission_rate: advisorRate,
+                status: "pending",
+                notes: {
+                  paypal_transaction_id: txId,
+                  client_id: user.id,
+                  client_email: clientEmail,
+                  product: "advisor",
+                  commission_type: commType,
+                  agent_name: agent.name,
+                  agent_title: agent.title,
+                  agency_ref_id: agencyRefId || null,
+                  todovisa_share: todovisaShare,
+                  commission_amount: advisorCommissionAmount,
+                  mode: isSandbox ? "sandbox" : "live",
+                  created_at: new Date().toISOString()
+                }
+              });
+            } catch (advCommErr) {
+              console.warn("Notice: advisor commission creation error:", advCommErr);
+            }
+          }
+        } else if (product === "vipro") {
+          // C) VIPRO Purchase ($19.99): Record transaction & commission if referred by agency or assigned agent
+          const targetAgentId = agencyRefId || agent?.userId || agent?.id || (user as any).assigned_agent_id || user.id;
+          try {
+            const viproRate = agencyRefId ? sysConfig.agencyReferralRate : 0; // 30% for agency referral or 0% logging
+            const commAmount = (amountToPay * viproRate) / 100;
+            const todovisaShare = amountToPay - commAmount;
 
             await AgentClientService.createCommission({
-              // Use real Supabase UUID for agent commission tracking
-              agent_id: agencyRef || agent.userId || agent.id,
-              client_id: user.id,
-              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-              service_type: commissionType,
+              agent_id: targetAgentId,
+              client_folio: clientFolio,
+              client_name: clientName,
+              service_type: "vipro",
               sale_amount: amountToPay,
-              commission_rate: commissionRate,
-              commission_amount: agentCommissionAmount,
-              todovisa_share: todovisaShareAmount,
+              commission_rate: viproRate,
               status: "pending",
-              created_at: new Date().toISOString()
-            });
-          } catch (commErr) {
-            console.warn("Notice: agent_commissions API error:", commErr);
+              notes: {
+                paypal_transaction_id: txId,
+                client_id: user.id,
+                client_email: clientEmail,
+                product: "vipro",
+                commission_type: agencyRefId ? "agency_referral_vipro" : "vipro_diagnostic",
+                agency_name: agencyRefName || null,
+                todovisa_share: todovisaShare,
+                commission_amount: commAmount,
+                mode: isSandbox ? "sandbox" : "live",
+                created_at: new Date().toISOString()
+              }
+            } as any);
+          } catch (viproCommErr) {
+            console.warn("Notice: VIPRO commission logging error:", viproCommErr);
           }
         }
 
@@ -244,9 +351,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         } else {
           updatedStoreUser.hasPaidAdvisor = true;
           if (agent) {
-            // Store the real UUID so messages and agent portal can find the client
             updatedStoreUser.assignedAgentId = agent.userId || agent.id;
-            updatedStoreUser.assignedAgencyName = agent.agencyName || null;
+            updatedStoreUser.assignedAgencyName = agent.agencyName || agencyRefName || null;
           }
         }
         setUser(updatedStoreUser);
@@ -254,7 +360,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
 
       setTimeout(() => {
         setStep("success");
-      }, 1500);
+      }, 1200);
     } catch (e) {
       console.error("Error finalizing payment:", e);
       setStep("success");

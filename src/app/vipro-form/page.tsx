@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import { AuthService } from "../service/AuthService";
+import { getSystemConfig } from "../constants/config";
 
 function ViproFormContent() {
     const headerRef = useRef(null);
@@ -15,13 +16,13 @@ function ViproFormContent() {
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const router = useRouter();
     const user = useAuthStore((state) => state.user);
-    const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+    const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
     useEffect(() => {
-        const savedPrice = localStorage.getItem("viproPrice");
-        if (savedPrice) {
-            setViproPrice(Number(savedPrice));
-        }
+        setViproPrice(getSystemConfig().viproPrice);
+        const handleStorage = () => setViproPrice(getSystemConfig().viproPrice);
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
     }, []);
 
     // Check if there is an in-progress evaluation
