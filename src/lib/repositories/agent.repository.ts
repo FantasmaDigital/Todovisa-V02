@@ -1,15 +1,18 @@
 import supabase from "@/app/lib/supabase";
+import { UserRole } from "@/app/constants/roles";
 
 export class AgentRepository {
   static async createApplication(applicationData: Record<string, any>) {
-    return await supabase.from("agent_applications").insert(applicationData);
+    return await supabase
+      .from("agent_applications")
+      .upsert(applicationData, { onConflict: "email" });
   }
 
   static async getAgenciesWithApplications() {
     const { data: agencyProfiles, error: profileErr } = await supabase
       .from("profiles")
       .select("id, first_name, last_name, email, photo_url, phone, bio, location")
-      .eq("role", "agency");
+      .eq("role", UserRole.AGENCY);
 
     if (profileErr) throw new Error(profileErr.message);
 
@@ -202,10 +205,11 @@ export class AgentRepository {
       return await supabase.from("agency_client_requests").insert({
         agency_id: targetAgencyId,
         client_id: requestData.client_id,
-        client_name: requestData.client_name,
-        client_email: requestData.client_email,
+        client_name: requestData.client_name || "Cliente TodoVisa",
+        client_email: requestData.client_email || "",
         status: "pending",
-        service_type: requestData.service_type || "Full Advisor Concierge",
+        agency_name: requestData.agencyName || null,
+        agent_hired_id: requestData.agent_hired_id || null,
         created_at: new Date().toISOString(),
       });
     }
@@ -213,7 +217,39 @@ export class AgentRepository {
   }
 
   static async createAgentCommission(commissionData: Record<string, any>) {
-    return await supabase.from("agent_commissions").insert(commissionData);
+    // Map service_type to allowed constraint values ('vipro' or 'full_service')
+    let serviceType = commissionData.service_type || "full_service";
+    if (serviceType !== "vipro" && serviceType !== "full_service") {
+      serviceType = "full_service";
+    }
+
+    // Standardize folio number
+    const folio = commissionData.client_folio || `TDA-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    // Standardize rate percentage (e.g., 0.40 -> 40, 0.30 -> 30, 0.60 -> 60)
+    let rate = Number(commissionData.commission_rate || 0);
+    if (rate > 0 && rate <= 1) {
+      rate = rate * 100;
+    }
+
+    const payload: Record<string, any> = {
+      agent_id: commissionData.agent_id,
+      client_folio: folio,
+      client_name: commissionData.client_name || "Cliente TodoVisa",
+      service_type: serviceType,
+      gross_amount: Number(commissionData.sale_amount || commissionData.gross_amount || 0),
+      commission_rate: rate,
+      status: commissionData.status || "pending",
+      created_at: new Date().toISOString()
+    };
+
+    // Store rich metadata in notes column (PayPal Tx ID, Client Email, Rates breakdown, etc.)
+    if (commissionData.notes) {
+      payload.notes = typeof commissionData.notes === "object" ? JSON.stringify(commissionData.notes) : String(commissionData.notes);
+    }
+
+    const { data, error } = await supabase.from("agent_commissions").insert(payload).select();
+    return { data, error };
   }
 
   static async getAllApplications() {

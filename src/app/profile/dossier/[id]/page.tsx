@@ -173,6 +173,29 @@ export default function ExpedienteDetailPage() {
           }
         }
 
+        const clientDocsObj = itemToLoad.fullUser?.client_docs || itemToLoad.raw?.client_docs || itemToLoad.answers?.client_docs;
+        if (clientDocsObj && typeof clientDocsObj === "object") {
+          const docLabels: Record<string, string> = {
+            passport: "Pasaporte Vigente",
+            dui: "DUI / Identificación",
+            workCert: "Arraigo Laboral / Académico",
+            bankStatements: "Solvencia Económica"
+          };
+          for (const [key, label] of Object.entries(docLabels)) {
+            const fileName = clientDocsObj[key];
+            const fileUrl = clientDocsObj[`${key}_url`];
+            if (fileUrl && typeof fileUrl === "string") {
+              if (!docsList.some((d) => d.url === fileUrl)) {
+                docsList.push({
+                  name: `${label} (${fileName || key})`,
+                  url: fileUrl,
+                  path: fileUrl,
+                });
+              }
+            }
+          }
+        }
+
         setAuditDocs(docsList);
       } catch (err) {
         console.error("Error loading audit docs:", err);

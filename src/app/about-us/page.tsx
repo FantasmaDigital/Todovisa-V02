@@ -5,17 +5,24 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import Link from "next/link";
 import Image from "next/image";
-import { visaDestinations } from "../constants/visas/destinations";
+import { getCentralizedDestinations } from "../constants/visas/destinations";
+import { getSystemConfig } from "../constants/config";
 
 export default function AboutUsPage() {
   const headerRef = useRef(null);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
+  const [activeDestinations, setActiveDestinations] = useState(() => getCentralizedDestinations());
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("viproPrice");
-    if (savedPrice) {
-      setViproPrice(Number(savedPrice));
-    }
+    setViproPrice(getSystemConfig().viproPrice);
+    setActiveDestinations(getCentralizedDestinations());
+
+    const handleStorage = () => {
+      setViproPrice(getSystemConfig().viproPrice);
+      setActiveDestinations(getCentralizedDestinations());
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   const stats = [
@@ -39,7 +46,7 @@ export default function AboutUsPage() {
     {
       icon: "⚡",
       title: "Optimización de Renovaciones",
-      description: "Identificamos elegibilidad inmediata para programas de Exención de Entrevista (Drop Box Waiver en EE.UU.) y tramitación ágil de bajo riesgo migratorio para Canadá, Australia, México y el Reino Unido."
+      description: "Identificamos elegibilidad inmediata para programas de Exención de Entrevista (Drop Box Waiver en EE.UU.) y gestión y acompañamiento ágil de bajo riesgo migratorio para Canadá, Australia, México y el Reino Unido."
     },
     {
       icon: "🔒",
@@ -48,7 +55,7 @@ export default function AboutUsPage() {
     }
   ];
 
-  const destinations = visaDestinations.map(d => ({
+  const destinations = activeDestinations.map(d => ({
     name: d.name,
     flag: d.flag,
     desc: d.aboutDesc || d.description
@@ -60,8 +67,8 @@ export default function AboutUsPage() {
 
       <main className="flex-1 w-full">
         {/* HERO SECTION */}
-        <section className="w-full bg-brand-primary text-white py-16 md:py-24 px-6 relative overflow-hidden">
-          <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
+        <section className="w-full text-white py-16 md:py-24 px-6 relative overflow-hidden bg-cover bg-center" style={{ backgroundImage: "url('/images/about_hero_bg.png')" }}>
+          <div className="absolute inset-0 bg-gradient-to-r from-brand-primary/95 via-brand-primary/90 to-brand-primary/95"></div>
           <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10 space-y-6">
             <span className="bg-white/10 text-white font-bold text-xs uppercase tracking-widest px-4 py-1.5 rounded-full border border-white/20">
               Acerca de TodoVisa
@@ -114,7 +121,7 @@ export default function AboutUsPage() {
                 TodoVisa surgió al identificar que miles de solicitudes de visa son rechazadas no por falta de solvencia o lazos de arraigo, sino por errores en el llenado de formularios, expedientes incompletos o falta de preparación previa para la entrevista consular.
               </p>
               <p className="text-sm md:text-base text-text-secondary leading-relaxed">
-                Nuestra misión es brindar claridad absoluta a cada viajero mediante diagnósticos oportunos y acompañamiento profesional 1-a-1 de principio a fin.
+                Nuestra misión es brindar claridad absoluta a cada viajero mediante diagnósticos oportunos y acompañamiento profesional con Asesores Expertos de principio a fin.
               </p>
             </div>
 
@@ -173,7 +180,7 @@ export default function AboutUsPage() {
           <div className="space-y-3">
             <span className="text-xs font-bold uppercase tracking-widest text-brand-primary">COBERURA GLOBAL</span>
             <h2 className="text-3xl md:text-4xl font-bold text-text-primary font-serif italic">
-              Especialistas en 5 Destinos Internacionales
+              Especialistas en {destinations.length} Destinos Internacionales
             </h2>
             <p className="text-sm text-text-secondary max-w-2xl mx-auto">
               Gestionamos trámites de primera vez y programas de renovación agilizada para los principales destinos del mundo.
@@ -203,7 +210,7 @@ export default function AboutUsPage() {
               ¿Listo para asegurar la aprobación de tu visa?
             </h2>
             <p className="text-sm md:text-base text-white/90 max-w-2xl mx-auto leading-relaxed">
-              Inicia tu evaluación diagnóstica con VIPRO o solicita el acompañamiento 1-a-1 de uno de nuestros asesores certificados.
+              Inicia tu evaluación diagnóstica con VIPRO o solicita el acompañamiento con Asesores Expertos de principio a fin.
             </p>
             <div className="flex flex-wrap justify-center gap-4 pt-2">
               <Link

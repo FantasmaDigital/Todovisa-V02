@@ -26,6 +26,30 @@ export function SettingsInitializer() {
               hasChanges = true;
             }
           }
+
+          if (settings.agency_referral_rate) {
+            const currentAgency = localStorage.getItem("agencyReferralRate");
+            if (currentAgency !== settings.agency_referral_rate) {
+              localStorage.setItem("agencyReferralRate", settings.agency_referral_rate);
+              hasChanges = true;
+            }
+          }
+
+          if (settings.agent_commission_rate) {
+            const currentAgent = localStorage.getItem("agentCommissionRate");
+            if (currentAgent !== settings.agent_commission_rate) {
+              localStorage.setItem("agentCommissionRate", settings.agent_commission_rate);
+              hasChanges = true;
+            }
+          }
+
+          if (settings.visa_destinations) {
+            const currentDest = localStorage.getItem("visa_destinations");
+            if (currentDest !== settings.visa_destinations) {
+              localStorage.setItem("visa_destinations", settings.visa_destinations);
+              hasChanges = true;
+            }
+          }
           
           if (hasChanges) {
             // Trigger storage event to notify other components on the same page

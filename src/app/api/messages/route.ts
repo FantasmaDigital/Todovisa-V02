@@ -28,15 +28,15 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { sender, text, user_id, agent_id } = body;
 
-    if (!sender || !text || !user_id || !agent_id) {
-      return NextResponse.json({ error: { message: "Missing required fields" } }, { status: 400 });
+    if (!sender || !text || !user_id) {
+      return NextResponse.json({ error: { message: "Missing required fields (sender, text, user_id)" } }, { status: 400 });
     }
 
     const newMessage = await MessageRepository.createMessage({
       sender,
       text,
       user_id,
-      agent_id,
+      agent_id: agent_id || "default-agent",
     });
 
     return NextResponse.json({ data: newMessage }, { status: 200 });

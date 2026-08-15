@@ -11,6 +11,7 @@ import { Header } from "./components/shared/Header";
 import { Hero } from "./components/home/Hero";
 import { Testimoniasl } from "./components/home/Testimonials";
 import { AnimatedSection } from "./components/home/AnimatedSection";
+import { AgencyPromoBanner } from "./components/home/AgencyPromoBanner";
 
 export default function Home() {
   const headerRef = useRef(null);
@@ -59,7 +60,7 @@ export default function Home() {
             <AnimatedSection className="h-full" delay={300}>
               <HeroCard
                 eyebrow="RED DE ASESORES CERTIFICADOS"
-                title="Acompañamiento 1-a-1 Experto"
+                title="Acompañamiento con Asesores Expertos"
                 description="Selecciona a tu agente especializado para la elaboración de tu DS-160, auditoría de expediente y simulacros intensivos de entrevista presencial por Zoom."
                 imageSrc="/images/virtual-agent.webp"
                 linkUrl="/agents"
@@ -68,6 +69,11 @@ export default function Home() {
             </AnimatedSection>
           </div>
         </section>
+
+        {/* Agency Promo Banner B2B */}
+        <AnimatedSection>
+          <AgencyPromoBanner />
+        </AnimatedSection>
 
         {/* split image */}
         <AnimatedSection>
@@ -107,10 +113,10 @@ export default function Home() {
               </p>
               <div className="pt-2">
                 <a
-                  href="/citas"
+                  href="/sobre-todovisa"
                   className="inline-flex items-center gap-3 bg-brand-primary hover:bg-brand-hover text-white font-bold px-8 py-3.5 rounded-lg transition-all duration-300 text-sm shadow-md cursor-pointer border-none"
                 >
-                  <span>Agenda una Cita Consular</span>
+                  <span>Conoce sobre TodoVisa</span>
                   <span className="text-base">→</span>
                 </a>
               </div>

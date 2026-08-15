@@ -4,6 +4,10 @@ import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/authStore";
 import { AuthService } from "../../service/AuthService";
 import { AgentClientService } from "@/services/client/AgentClientService";
+import { AgencyClientService } from "@/services/client/AgencyClientService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { getSystemConfig } from "@/app/constants/config";
+import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 interface Agent {
   id: string;
@@ -41,22 +45,120 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     }
   }, []);
 
-  const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
-  const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || "sandbox";
-  const isSandbox = paypalMode !== "live" || paypalClientId === "test";
+  const [referralCodeInput, setReferralCodeInput] = useState("");
+  const [agencyReferralInfo, setAgencyReferralInfo] = useState<{ agencyId: string; agencyName: string } | null>(null);
+  const [referralError, setReferralError] = useState<string | null>(null);
+  const [isValidatingCode, setIsValidatingCode] = useState(false);
 
-  const [basePrice, setBasePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  // Auto-complete referral code from user metadata (Supabase) or localStorage
+  useEffect(() => {
+    const initReferral = async () => {
+      let codeToUse = "";
+      let infoObj: { agencyId: string; agencyName: string } | null = null;
+
+      // 1. Check Supabase user metadata first
+      if (user) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const metadata = (user as any).user_metadata || {};
+        if (metadata.referred_by_agency_code) {
+          codeToUse = metadata.referred_by_agency_code;
+          if (metadata.referred_by_agency_id) {
+            infoObj = {
+              agencyId: metadata.referred_by_agency_id,
+              agencyName: metadata.referred_by_agency_name || "Agencia Aliada"
+            };
+          }
+        }
+      }
+
+      // 2. Fallback to localStorage if not found in user metadata
+      if (!codeToUse && typeof window !== "undefined") {
+        const localCode = localStorage.getItem("todovisa_agency_ref");
+        if (localCode) {
+          codeToUse = localCode;
+          const infoStr = localStorage.getItem("todovisa_agency_info");
+          if (infoStr) {
+            try {
+              const parsed = JSON.parse(infoStr);
+              infoObj = { agencyId: parsed.agencyId, agencyName: parsed.agencyName };
+            } catch (e) {}
+          }
+        }
+      }
+
+      if (codeToUse) {
+        setReferralCodeInput(codeToUse);
+        if (infoObj) {
+          setAgencyReferralInfo(infoObj);
+        } else {
+          // Validate code with API if info object wasn't stored yet
+          setIsValidatingCode(true);
+          const validation = await AgencyClientService.validateAgencyCode(codeToUse);
+          setIsValidatingCode(false);
+          if (validation.valid && validation.agencyId) {
+            setAgencyReferralInfo({
+              agencyId: validation.agencyId,
+              agencyName: validation.agencyName || "Agencia Aliada"
+            });
+          } else {
+            setReferralError(validation.error || "Código de referido inválido");
+          }
+        }
+      }
+    };
+
+    initReferral();
+  }, [user]);
+
+  const handleApplyReferralCode = async (codeToValidate: string) => {
+    if (!codeToValidate.trim()) {
+      setAgencyReferralInfo(null);
+      setReferralError(null);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("todovisa_agency_ref");
+        localStorage.removeItem("todovisa_agency_info");
+      }
+      return;
+    }
+
+    setIsValidatingCode(true);
+    setReferralError(null);
+
+    const validation = await AgencyClientService.processAndStoreAgencyCode(codeToValidate, user?.id);
+    setIsValidatingCode(false);
+
+    if (validation && validation.valid && validation.agencyId) {
+      setAgencyReferralInfo({
+        agencyId: validation.agencyId,
+        agencyName: validation.agencyName || "Agencia Aliada"
+      });
+      setReferralError(null);
+    } else {
+      setAgencyReferralInfo(null);
+      setReferralError(validation?.error || "Código inválido o no corresponde a una Agencia");
+    }
+  };
+
+  const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test";
+  const paypalMode = process.env.NEXT_PUBLIC_PAYPAL_MODE || (process.env.NODE_ENV === "production" ? "live" : "sandbox");
+  const isSandbox = paypalMode === "sandbox" || paypalClientId === "test";
+
+  const [basePrice, setBasePrice] = useState(() => getSystemConfig().fullServicePrice);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("fullServicePrice");
-    if (savedPrice) {
-      setBasePrice(Number(savedPrice));
-    }
-    const savedViproPrice = localStorage.getItem("viproPrice");
-    if (savedViproPrice) {
-      setViproPrice(Number(savedViproPrice));
-    }
+    const config = getSystemConfig();
+    setBasePrice(config.fullServicePrice);
+    setViproPrice(config.viproPrice);
+
+    const handleStorageChange = () => {
+      const updated = getSystemConfig();
+      setBasePrice(updated.fullServicePrice);
+      setViproPrice(updated.viproPrice);
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const amountToPay = product === "vipro" ? viproPrice : basePrice;
@@ -65,78 +167,179 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     setStep("processing");
     try {
       if (user) {
+        const txId = paypalTransactionId || `PAYPAL_SIM_${Date.now()}`;
+        const sysConfig = getSystemConfig();
+        
+        // ── 1. FETCH FULL CLIENT DATA FROM DATABASE ───────────────────────────
+        let dbProfile: any = null;
+        try {
+          const profRes = await ProfileClientService.getProfile(user.id);
+          dbProfile = profRes?.profile || null;
+        } catch (dbErr) {
+          console.warn("Notice: could not fetch profile from DB, using auth store fallback:", dbErr);
+        }
+
+        const clientName = `${user.firstName || dbProfile?.first_name || ""} ${user.lastName || dbProfile?.last_name || ""}`.trim() || user.email;
+        const clientEmail = user.email || dbProfile?.email || "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const userMeta = (user as any).user_metadata || {};
+        const clientFolio = dbProfile?.folio_number || dbProfile?.client_folio || userMeta.folio_number || `TDA-${Math.floor(100000 + Math.random() * 900000)}`;
+
+        // Resolve Agency Referral Info
+        const agencyRefId = agencyReferralInfo?.agencyId || 
+                            (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null) || 
+                            userMeta.referred_by_agency_id || null;
+        const agencyRefName = agencyReferralInfo?.agencyName || 
+                              userMeta.referred_by_agency_name || 
+                              (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_info") : null) || null;
+
+        // ── 2. PREPARE & SAVE PROFILE / AUTH UPDATE ───────────────────────────
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updateData: any = {
-          last_paypal_tx: paypalTransactionId || `PAYPAL_SIM_${Date.now()}`
+          last_paypal_tx: txId
         };
         if (product === "vipro") {
           updateData.has_paid_vipro = true;
         } else {
           updateData.has_paid_advisor = true;
           if (agent) {
-            // Store the real Supabase user UUID (agent.userId), NOT the computed "agent-{id}" string
             updateData.assigned_agent_id = agent.userId || agent.id;
-            updateData.assigned_agency_name = agent.agencyName || null;
+            updateData.assigned_agency_name = agent.agencyName || agencyRefName || null;
           }
         }
 
-        // Persist to Supabase Auth metadata via API
+        // Persist to Supabase Auth metadata & profiles table
         try {
           await AuthService.updateUser(updateData);
-          console.log("Status successfully saved to Supabase user metadata.");
+          await ProfileClientService.updateProfile(user.id, {
+            ...updateData,
+            updated_at: new Date().toISOString()
+          });
+          console.log("Purchase & status successfully saved to Supabase database & user metadata.");
         } catch (err) {
-          console.error("Failed to save status to Supabase:", err);
+          console.error("Failed to save status to Supabase profile:", err);
         }
 
-        // ── ALWAYS LINK CLIENT TO AGENT/AGENCY UPON ADVISOR HIRE ──────────────────
-        if (product === "advisor" && agent) {
+        // ── 3. STORE CLIENT REQUEST IN AGENCY_CLIENT_REQUESTS TABLE ───────────
+        if (product === "advisor" && (agent || agencyRefId)) {
           try {
             await AgentClientService.createClientRequest({
-              agency_id: agent.userId || agent.id,
-              agencyName: agent.agencyName || null,
+              agency_id: agencyRefId || agent?.userId || agent?.id,
+              agencyName: agent?.agencyName || agencyRefName || null,
+              agent_hired_id: agent?.userId || agent?.id || null,
               client_id: user.id,
-              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-              client_email: user.email,
-              service_type: "Full Advisor Concierge",
+              client_name: clientName,
+              client_email: clientEmail,
             });
           } catch (agencyErr) {
             console.warn("Notice: agency_client_requests API error:", agencyErr);
           }
         }
 
-        // ── COMMISSION LOGGING ───────────────────────────────────────
-        if (product === "advisor" && agent?.id) {
-          try {
-            const agencyRef = typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null;
-            let commissionRate = 0.40;
-            let commissionType = "standard_advisor";
+        // ── 4. CALCULATE & STORE ALL COMMISSIONS IN DATABASE ──────────────────
+        if (product === "advisor") {
+          // A) Agency Referral Commission (30%) if client was referred by an agency
+          if (agencyRefId) {
+            try {
+              const agencyRate = sysConfig.agencyReferralRate; // Centralized rate (30%)
+              const agencyCommissionAmount = (amountToPay * agencyRate) / 100;
+              const todovisaShare = amountToPay - agencyCommissionAmount;
 
-            if (agencyRef) {
-              commissionRate = 0.30;
-              commissionType = "agency_referral";
-            } else if (agent.title?.toLowerCase().includes("experto") || agent.title?.toLowerCase().includes("master")) {
-              commissionRate = 0.60;
-              commissionType = "expert_advisor";
+              await AgentClientService.createCommission({
+                agent_id: agencyRefId,
+                client_folio: clientFolio,
+                client_name: clientName,
+                service_type: "full_service",
+                sale_amount: amountToPay,
+                commission_rate: agencyRate,
+                status: "pending",
+                notes: {
+                  paypal_transaction_id: txId,
+                  client_id: user.id,
+                  client_email: clientEmail,
+                  product: "advisor",
+                  commission_type: "agency_referral",
+                  agency_name: agencyRefName,
+                  agent_hired_id: agent?.userId || agent?.id || null,
+                  agent_hired_name: agent?.name || null,
+                  todovisa_share: todovisaShare,
+                  commission_amount: agencyCommissionAmount,
+                  mode: isSandbox ? "sandbox" : "live",
+                  created_at: new Date().toISOString()
+                }
+              });
+            } catch (agencyCommErr) {
+              console.warn("Notice: agency commission creation error:", agencyCommErr);
             }
+          }
 
-            const agentCommissionAmount = amountToPay * commissionRate;
-            const todovisaShareAmount = amountToPay - agentCommissionAmount;
+          // B) Advisor Commission (60% for ALL advisors regardless of rank/title)
+          if (agent?.id && (agent.userId || agent.id) !== agencyRefId) {
+            try {
+              const advisorRate = sysConfig.agentCommissionRate; // Centralized rate (60% for all advisors)
+              const commType = "standard_advisor";
+
+              const advisorCommissionAmount = (amountToPay * advisorRate) / 100;
+              const todovisaShare = amountToPay - advisorCommissionAmount;
+
+              await AgentClientService.createCommission({
+                agent_id: agent.userId || agent.id,
+                client_folio: clientFolio,
+                client_name: clientName,
+                service_type: "full_service",
+                sale_amount: amountToPay,
+                commission_rate: advisorRate,
+                status: "pending",
+                notes: {
+                  paypal_transaction_id: txId,
+                  client_id: user.id,
+                  client_email: clientEmail,
+                  product: "advisor",
+                  commission_type: commType,
+                  agent_name: agent.name,
+                  agent_title: agent.title,
+                  agency_ref_id: agencyRefId || null,
+                  todovisa_share: todovisaShare,
+                  commission_amount: advisorCommissionAmount,
+                  mode: isSandbox ? "sandbox" : "live",
+                  created_at: new Date().toISOString()
+                }
+              });
+            } catch (advCommErr) {
+              console.warn("Notice: advisor commission creation error:", advCommErr);
+            }
+          }
+        } else if (product === "vipro") {
+          // C) VIPRO Purchase ($19.99): Record transaction & commission if referred by agency or assigned agent
+          const targetAgentId = agencyRefId || agent?.userId || agent?.id || (user as any).assigned_agent_id || user.id;
+          try {
+            const viproRate = agencyRefId ? sysConfig.agencyReferralRate : 0; // 30% for agency referral or 0% logging
+            const commAmount = (amountToPay * viproRate) / 100;
+            const todovisaShare = amountToPay - commAmount;
 
             await AgentClientService.createCommission({
-              // Use real Supabase UUID for agent commission tracking
-              agent_id: agencyRef || agent.userId || agent.id,
-              client_id: user.id,
-              client_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
-              service_type: commissionType,
+              agent_id: targetAgentId,
+              client_folio: clientFolio,
+              client_name: clientName,
+              service_type: "vipro",
               sale_amount: amountToPay,
-              commission_rate: commissionRate,
-              commission_amount: agentCommissionAmount,
-              todovisa_share: todovisaShareAmount,
+              commission_rate: viproRate,
               status: "pending",
-              created_at: new Date().toISOString()
-            });
-          } catch (commErr) {
-            console.warn("Notice: agent_commissions API error:", commErr);
+              notes: {
+                paypal_transaction_id: txId,
+                client_id: user.id,
+                client_email: clientEmail,
+                product: "vipro",
+                commission_type: agencyRefId ? "agency_referral_vipro" : "vipro_diagnostic",
+                agency_name: agencyRefName || null,
+                todovisa_share: todovisaShare,
+                commission_amount: commAmount,
+                mode: isSandbox ? "sandbox" : "live",
+                created_at: new Date().toISOString()
+              }
+            } as any);
+          } catch (viproCommErr) {
+            console.warn("Notice: VIPRO commission logging error:", viproCommErr);
           }
         }
 
@@ -148,9 +351,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         } else {
           updatedStoreUser.hasPaidAdvisor = true;
           if (agent) {
-            // Store the real UUID so messages and agent portal can find the client
             updatedStoreUser.assignedAgentId = agent.userId || agent.id;
-            updatedStoreUser.assignedAgencyName = agent.agencyName || null;
+            updatedStoreUser.assignedAgencyName = agent.agencyName || agencyRefName || null;
           }
         }
         setUser(updatedStoreUser);
@@ -158,7 +360,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
 
       setTimeout(() => {
         setStep("success");
-      }, 1500);
+      }, 1200);
     } catch (e) {
       console.error("Error finalizing payment:", e);
       setStep("success");
@@ -223,6 +425,45 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               </div>
             )}
 
+            {/* Agency Referral Code Section */}
+            <div className="px-6 py-4 bg-slate-50 border-b border-border-light space-y-2">
+              <label className="block text-xs font-bold text-text-primary uppercase tracking-wide">
+                🏢 Código de Referido de Agencia (Opcional)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Ej. AGENCIA-SAN-SALVADOR"
+                  className="flex-1 px-3 py-2 text-xs border border-border-light rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleApplyReferralCode(referralCodeInput)}
+                  disabled={isValidatingCode}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isValidatingCode ? "Validando..." : "Aplicar"}
+                </button>
+              </div>
+
+              {agencyReferralInfo && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium">
+                  <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>Agencia Vinculada: <strong>{agencyReferralInfo.agencyName}</strong></span>
+                </div>
+              )}
+
+              {referralError && (
+                <p className="text-xs text-red-600 font-medium flex items-center gap-1">
+                  <span>⚠️ {referralError}</span>
+                </p>
+              )}
+            </div>
+
             {/* Price Details */}
             <div className="px-6 py-4 border-b border-border-light space-y-2">
               {product === "vipro" ? (
@@ -239,7 +480,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               ) : (
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
-                    <span>Asesoría Consular Completa (Plan Concierge)</span>
+                    <span>Asesoría Consular Completa</span>
                     <span>${basePrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
@@ -252,7 +493,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
 
             {/* PayPal Action Box */}
             <div className="p-6 space-y-4 text-center">
-              {isSandbox ? (
+              {paypalClientId === "test" ? (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
                   <div className="flex items-center justify-center gap-2 text-amber-900 text-xs font-bold uppercase tracking-wide">
                     <span>🧪 Entorno de Pruebas Activo (PayPal Sandbox)</span>
@@ -269,18 +510,43 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                   </button>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-text-secondary">
-                    Haz clic en el botón oficial para autenticarte y confirmar tu pago de manera 100% segura con PayPal:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => processSuccessfulPayment(`PAYPAL_LIVE_${Date.now()}`)}
-                    className="w-full py-3.5 bg-[#0070BA] hover:bg-[#005EA6] text-white font-extrabold text-sm rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <span>Completa tu pago seguro de ${amountToPay.toFixed(2)} USD con PayPal</span>
-                  </button>
-                </div>
+                <PayPalScriptProvider options={{ clientId: paypalClientId, currency: "USD" }}>
+                  <div className="space-y-3 text-left">
+                    <p className="text-xs text-text-secondary text-center mb-4">
+                      Completa tu transacción de manera 100% segura usando tu saldo PayPal o tu tarjeta de débito/crédito:
+                    </p>
+                    <div className="relative z-10">
+                      <PayPalButtons
+                        style={{ layout: "vertical", label: "pay" }}
+                        createOrder={(data, actions) => {
+                          return actions.order.create({
+                            intent: "CAPTURE",
+                            purchase_units: [
+                              {
+                                description: product === "vipro" ? "Evaluación Diagnóstica VIPRO" : "Asesoría Consular Completa",
+                                amount: {
+                                  currency_code: "USD",
+                                  value: amountToPay.toFixed(2),
+                                },
+                              },
+                            ],
+                          });
+                        }}
+                        onApprove={async (data, actions) => {
+                          if (actions.order) {
+                            const details = await actions.order.capture();
+                            const txId = details.id || `PAYPAL_${Date.now()}`;
+                            await processSuccessfulPayment(txId);
+                          }
+                        }}
+                        onError={(err) => {
+                          console.error("PayPal checkout error:", err);
+                          alert("Ocurrió un error con el pago de PayPal. Por favor, intenta de nuevo.");
+                        }}
+                      />
+                    </div>
+                  </div>
+                </PayPalScriptProvider>
               )}
 
               <div className="flex items-center justify-center gap-4 text-[10px] text-text-muted pt-2 border-t border-border-light">
@@ -352,8 +618,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none cursor-pointer"
             >
               {product === "vipro"
-                ? "Ir a mi Formulario VIPRO &rarr;"
-                : `Comenzar Chat con ${(agent?.name || "").split(" ")[1] || agent?.name || "Asesor"} &rarr;`}
+                ? "Ir a mi Formulario VIPRO"
+                : `Comenzar Chat con ${(agent?.name || "").split(" ")[1] || agent?.name || "Asesor"}`}
             </button>
           </div>
         )}

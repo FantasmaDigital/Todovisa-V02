@@ -2,22 +2,17 @@
 
 import { faqs } from "@/app/constants/faqs";
 import { useState, useEffect } from "react";
+import { getSystemConfig } from "@/app/constants/config";
 
 export const FAQs = () => {
     const [openFaq, setOpenFaq] = useState<number | null>(null);
-    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
+    const [price, setPrice] = useState(() => getSystemConfig().fullServicePrice);
 
     useEffect(() => {
-        const savedPrice = localStorage.getItem("fullServicePrice");
-        if (savedPrice) {
-            setPrice(Number(savedPrice));
-        }
+        setPrice(getSystemConfig().fullServicePrice);
 
         const handleStorage = () => {
-            const saved = localStorage.getItem("fullServicePrice");
-            if (saved) {
-                setPrice(Number(saved));
-            }
+            setPrice(getSystemConfig().fullServicePrice);
         };
         window.addEventListener("storage", handleStorage);
         return () => window.removeEventListener("storage", handleStorage);
@@ -28,7 +23,7 @@ export const FAQs = () => {
     const formattedDiscount = discountPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
     return (
-        <section className="py-24 w-[90%] max-w-4xl m-auto flex flex-col items-center text-center">
+        <section className="py-16 md:py-24 w-full max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center text-center">
             <div className="border border-brand-primary/40 text-brand-primary font-semibold text-[11px] px-4 py-1 rounded-full tracking-wider uppercase mb-8 bg-brand-light/30">
                 Preguntas Frecuentes
             </div>

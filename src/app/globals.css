@@ -65,3 +65,45 @@
     box-shadow: none !important;
   }
 }
+
+/* =========================================
+   UTILIDADES RESPONSIVAS Y TÁCTILES
+   ========================================= */
+.responsive-container {
+  width: 100%;
+  max-width: 80rem; /* 1280px */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .responsive-container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .responsive-container {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+/* Scrollbar suave horizontal para tablas responsivas */
+.table-scroll-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll-container::-webkit-scrollbar {
+  height: 6px;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 9999px;
+}

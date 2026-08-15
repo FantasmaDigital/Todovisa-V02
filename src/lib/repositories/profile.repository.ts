@@ -36,17 +36,65 @@ export class ProfileRepository {
 
   static async updateProfile(userId: string, updates: Record<string, any>) {
     const adminClient = getAdminClient();
-    const { data, error } = await adminClient
-      .from("profiles")
-      .update(updates)
-      .eq("id", userId)
-      .select();
 
-    if (error) {
-      console.error("[ProfileRepository.updateProfile Error]", error);
-      throw new Error(error.message);
+    const PHYSICAL_COLUMNS = new Set([
+      'id', 'email', 'first_name', 'last_name', 'role', 'updated_at',
+      'photo_url', 'phone', 'bio', 'location', 'staff_size',
+      'expediente_status', 'client_docs', 'document_reviews',
+      'ds160_full_name', 'ds160_passport_num', 'ds160_birth_date',
+      'ds160_purpose_of_trip', 'ds160_has_assets', 'ds160_confirmed'
+    ]);
+
+    try {
+      const directUpdates: Record<string, any> = {};
+      const customMetadata: Record<string, any> = {};
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (PHYSICAL_COLUMNS.has(key)) {
+          directUpdates[key] = val;
+        } else {
+          customMetadata[key] = val;
+        }
+      }
+
+      if (Object.keys(customMetadata).length > 0) {
+        const { data: currentProf } = await adminClient
+          .from("profiles")
+          .select("document_reviews")
+          .eq("id", userId)
+          .maybeSingle();
+
+        const currentReviews = (currentProf?.document_reviews && typeof currentProf.document_reviews === 'object')
+          ? { ...currentProf.document_reviews }
+          : {};
+
+        const existingDocReviews = directUpdates.document_reviews || {};
+        directUpdates.document_reviews = {
+          ...currentReviews,
+          ...existingDocReviews,
+          ...customMetadata
+        };
+      }
+
+      if (!directUpdates.updated_at) {
+        directUpdates.updated_at = new Date().toISOString();
+      }
+
+      const { data, error } = await adminClient
+        .from("profiles")
+        .update(directUpdates)
+        .eq("id", userId)
+        .select();
+
+      if (error) {
+        console.error("[ProfileRepository.updateProfile Error]", error);
+        throw new Error(error.message);
+      }
+      return data;
+    } catch (err: any) {
+      console.error("[ProfileRepository.updateProfile Catch]", err);
+      throw err;
     }
-    return data;
   }
 
   static async getCommissionsByAgentId(agentId: string) {

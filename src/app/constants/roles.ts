@@ -1,12 +1,20 @@
 /**
- * Centralized User Roles constants
+ * Centralized User Roles enum and constants
  */
+export enum UserRole {
+  USER = 'user',
+  MODERATOR = 'moderator',
+  ADMIN = 'admin',
+  AGENT = 'agent',
+  AGENCY = 'agency',
+}
+
 export const ROLES = {
-  USER: 'user' as const,
-  MODERATOR: 'moderator' as const,
-  ADMIN: 'admin' as const,
-  AGENT: 'agent' as const,
-  AGENCY: 'agency' as const,
+  USER: UserRole.USER,
+  MODERATOR: UserRole.MODERATOR,
+  ADMIN: UserRole.ADMIN,
+  AGENT: UserRole.AGENT,
+  AGENCY: UserRole.AGENCY,
 } as const;
 
 export const COMMISSION_RATES = {
@@ -15,4 +23,3 @@ export const COMMISSION_RATES = {
   STANDARD_AGENT: 40,  // 40% for standard advisor (60% TodoVisa)
 } as const;
 
-export type UserRole = typeof ROLES[keyof typeof ROLES];

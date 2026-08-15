@@ -17,6 +17,7 @@ import { FormClientService } from "@/services/client/FormClientService";
 import { SettingsClientService } from "@/services/client/SettingsClientService";
 import { MessageClientService, ClientMessageData } from "../service/MessageClientService";
 import { ROLES } from "../constants/roles";
+import { getSystemConfig } from "../constants/config";
 import supabase from "@/app/lib/supabase";
 
 // Convert countries list to sorted array
@@ -113,18 +114,13 @@ export default function PerfilUsuarioPage() {
   const router = useRouter();
   const { user, setUser, clearUser } = useAuthStore();
   const [isMounted, setIsMounted] = useState(false);
-  const [fullServicePrice, setFullServicePrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  const [fullServicePrice, setFullServicePrice] = useState(() => getSystemConfig().fullServicePrice);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("fullServicePrice");
-    if (savedPrice) {
-      setFullServicePrice(Number(savedPrice));
-    }
-    const savedViproPrice = localStorage.getItem("viproPrice");
-    if (savedViproPrice) {
-      setViproPrice(Number(savedViproPrice));
-    }
+    const sysConfig = getSystemConfig();
+    setFullServicePrice(sysConfig.fullServicePrice);
+    setViproPrice(sysConfig.viproPrice);
 
     async function fetchDBPrices() {
       try {
@@ -173,6 +169,7 @@ export default function PerfilUsuarioPage() {
   };
 
   // Partner / Agent application states
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [partnerApp, setPartnerApp] = useState<AgentApplicationData | null>(null);
   const [allApplications, setAllApplications] = useState<AgentApplicationData[]>([]);
   const [selectedApp, setSelectedApp] = useState<AgentApplicationData | null>(null);
@@ -204,6 +201,10 @@ export default function PerfilUsuarioPage() {
   const [isLoadingPayout, setIsLoadingPayout] = useState(false);
   const [copiedReferral, setCopiedReferral] = useState(false);
 
+  // User's own application state (for B2B agency or independent agent application tracking)
+  const [userApplication, setUserApplication] = useState<AgentApplicationData | null>(null);
+  const [isLoadingUserApp, setIsLoadingUserApp] = useState(true);
+
   // Inline Accreditation states (for mi_acreditacion tab)
   const [agentApp, setAgentApp] = useState<AgentApplicationData | null>(null);
   const [isLoadingAgentApp, setIsLoadingAgentApp] = useState(false);
@@ -223,6 +224,247 @@ export default function PerfilUsuarioPage() {
   const [docReviews, setDocReviews] = useState<Record<string, { status: 'approved' | 'observed' | 'rejected' | 'pending'; comment: string }>>({});
   const [auditExpedienteStatus, setAuditExpedienteStatus] = useState<'draft' | 'submitted' | 'approved'>('submitted');
   const [isSavingAudit, setIsSavingAudit] = useState(false);
+  const [isAgentProposingCita, setIsAgentProposingCita] = useState(false);
+  const [agentCitaProposal, setAgentCitaProposal] = useState({
+    proposedDate: "",
+    proposedTime: "10:00",
+    agentNotes: "",
+    meetingLink: "",
+  });
+  const [userAppointmentRequest, setUserAppointmentRequest] = useState<any>(user?.appointmentRequest || null);
+  const [userRating, setUserRating] = useState<number>(0);
+  const [userReviewComment, setUserReviewComment] = useState<string>("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
+  const [agentReviewSubmitted, setAgentReviewSubmitted] = useState<boolean>(false);
+
+  const handleSaveAgentReview = async () => {
+    if (!user?.id) return;
+    if (userRating === 0) {
+      showToast("Selecciona una calificación de 1 a 5 estrellas para continuar.", "error");
+      return;
+    }
+    try {
+      setIsSubmittingReview(true);
+      const reviewData = {
+        rating: userRating,
+        comment: userReviewComment,
+        created_at: new Date().toISOString(),
+        user_id: user.id,
+        user_name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+        agent_id: assignedAgentProfile?.id || null,
+      };
+
+      await ProfileClientService.updateProfile(user.id, {
+        agent_review: reviewData,
+      });
+
+      setAgentReviewSubmitted(true);
+      showToast("¡Muchas gracias por calificar el servicio de tu asesor!", "success");
+    } catch (err: any) {
+      console.error("Error al guardar calificación:", err);
+      showToast("Error al guardar reseña: " + (err.message || String(err)), "error");
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.appointmentRequest) {
+      setUserAppointmentRequest(user.appointmentRequest);
+    }
+  }, [user?.appointmentRequest]);
+
+  useEffect(() => {
+    if (!selectedClientProfile) return;
+    const keys = ["passport", "dui", "workCert", "bankStatements", "ds160"];
+    const allApproved = keys.every(key => docReviews[key]?.status === "approved");
+    const anyObservedOrRejected = keys.some(key => docReviews[key]?.status === "observed" || docReviews[key]?.status === "rejected");
+
+    if (allApproved) {
+      setAuditExpedienteStatus("approved");
+    } else if (anyObservedOrRejected) {
+      setAuditExpedienteStatus("draft");
+    }
+
+    const appt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+    if (appt) {
+      setAgentCitaProposal(prev => ({
+        ...prev,
+        proposedDate: appt.agent_proposed_date || appt.requested_date || appt.confirmed_date || "",
+        proposedTime: appt.agent_proposed_time || appt.requested_time || appt.confirmed_time || "10:00",
+        agentNotes: appt.agent_notes || "",
+        meetingLink: appt.meeting_link || "",
+      }));
+    }
+  }, [docReviews, selectedClientProfile]);
+
+  const handleAgentAcceptCita = async (agentNotes?: string, meetingLink?: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const linkToUse = meetingLink !== undefined ? meetingLink : (agentCitaProposal.meetingLink || currentAppt?.meeting_link || "");
+
+      if (!linkToUse || !linkToUse.trim()) {
+        showToast("⚠️ Para confirmar la cita es OBLIGATORIO ingresar el enlace a la reunión virtual (Zoom / Google Meet).", "error");
+        return;
+      }
+
+      const notesToUse = agentNotes !== undefined ? agentNotes : (agentCitaProposal.agentNotes || "Cita admitida y confirmada por el asesor.");
+
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "confirmed" as const,
+        confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
+        confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
+        agent_notes: notesToUse,
+        meeting_link: linkToUse,
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+
+      const msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.${linkToUse ? `\n\n🎥 Enlace de Videollamada (Zoom / Meet):\n${linkToUse}` : ""}${notesToUse ? `\n\n💬 Nota del Asesor: "${notesToUse}"` : ""}`;
+      
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Cita confirmada exitosamente con enlace de videollamada.", "success");
+    } catch (err: any) {
+      console.error("Error al admitir cita:", err);
+      showToast("Error al admitir cita: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleAgentRejectCita = async (agentNotes?: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "rejected" as const,
+        agent_notes: agentNotes || "La cita ha sido rechazada por el asesor.",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+
+      const msgText = `❌ Tu solicitud de cita ha sido rechazada por el asesor. ${agentNotes ? `\n\n💬 Motivo/Observación: "${agentNotes}"` : ""}\n\nPuedes ingresar al apartado de Citas y reagendar en un nuevo horario.`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Cita rechazada. Se notificó al cliente.", "info");
+    } catch (err: any) {
+      console.error("Error al rechazar cita:", err);
+      showToast("Error al rechazar cita: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleCitaStatusChange = async (newStatus: string) => {
+    if (!selectedClientProfile) return;
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const linkToUse = agentCitaProposal.meetingLink || currentAppt?.meeting_link || "";
+
+      if (newStatus === "confirmed" && (!linkToUse || !linkToUse.trim())) {
+        showToast("⚠️ Para confirmar la cita es OBLIGATORIO ingresar el enlace a la reunión virtual (Zoom / Google Meet).", "error");
+        return;
+      }
+
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: newStatus as any,
+        confirmed_date: currentAppt?.requested_date || currentAppt?.confirmed_date || new Date().toISOString().split("T")[0],
+        confirmed_time: currentAppt?.requested_time || currentAppt?.confirmed_time || "10:00",
+        meeting_link: linkToUse,
+      };
+
+      const updates: any = {
+        appointment_request: updatedAppt,
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, updates);
+
+      setSelectedClientProfile((prev: any) => ({
+        ...prev,
+        appointment_request: updatedAppt,
+      }));
+
+      let msgText = "";
+      if (newStatus === "confirmed") {
+        msgText = `🎉 ¡Buenas noticias! Tu asesor ha ADMITIDO y CONFIRMADO tu cita para el ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.${updatedAppt.meeting_link ? `\n\n🎥 Enlace Zoom/Meet: ${updatedAppt.meeting_link}` : ""}`;
+      } else if (newStatus === "rejected") {
+        msgText = `❌ Tu solicitud de cita ha sido rechazada por el asesor. Puedes ingresar al apartado de Citas y reagendar en un nuevo horario.`;
+      } else if (newStatus === "proposed") {
+        msgText = `⚡ Tu asesor ha propuesto un nuevo horario para tu cita/simulacro: ${updatedAppt.confirmed_date} a las ${updatedAppt.confirmed_time} hrs.`;
+      } else {
+        msgText = `⏳ El estado de tu cita/simulacro ha sido cambiado a pendiente de revisión.`;
+      }
+
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast(`Estado de cita actualizado a: ${newStatus}`, "success");
+    } catch (err: any) {
+      console.error("Error al actualizar estado de cita:", err);
+      showToast("Error al cambiar estado: " + (err.message || String(err)), "error");
+    }
+  };
+
+  const handleAgentProposeCita = async () => {
+    if (!selectedClientProfile || !agentCitaProposal.proposedDate) {
+      showToast("Selecciona una fecha válida para proponer al cliente.", "error");
+      return;
+    }
+    try {
+      const currentAppt = selectedClientProfile.appointment_request || selectedClientProfile.cita_details || selectedClientProfile.document_reviews?.appointment_request;
+      const updatedAppt = {
+        ...(currentAppt || {}),
+        status: "proposed" as const,
+        agent_proposed_date: agentCitaProposal.proposedDate,
+        agent_proposed_time: agentCitaProposal.proposedTime,
+        agent_notes: agentCitaProposal.agentNotes || "El asesor propone este nuevo horario.",
+        meeting_link: agentCitaProposal.meetingLink || currentAppt?.meeting_link || "",
+      };
+
+      await ProfileClientService.updateProfile(selectedClientProfile.id, {
+        appointment_request: updatedAppt,
+      });
+
+      setSelectedClientProfile((prev: any) => ({ ...prev, appointment_request: updatedAppt }));
+      setIsAgentProposingCita(false);
+
+      const msgText = `📅 El asesor ha propuesto un NUEVO HORARIO para la cita:\n- Fecha propuesta: ${agentCitaProposal.proposedDate}\n- Hora propuesta: ${agentCitaProposal.proposedTime} hrs${agentCitaProposal.meetingLink ? `\n- Enlace de reunión: ${agentCitaProposal.meetingLink}` : ""}${agentCitaProposal.agentNotes ? `\n- Nota: ${agentCitaProposal.agentNotes}` : ""}\n\nIngresa al apartado de Citas para Aceptar la propuesta.`;
+      await MessageClientService.createMessage({
+        sender: "agent",
+        text: msgText,
+        user_id: selectedClientProfile.id,
+        agent_id: user?.id || "",
+      });
+
+      showToast("Propuesta de cita enviada al cliente.", "success");
+    } catch (err: any) {
+      console.error("Error al proponer cita:", err);
+      showToast("Error al proponer cita: " + (err.message || String(err)), "error");
+    }
+  };
   const [assignedAgencyProfile, setAssignedAgencyProfile] = useState<any | null>(null);
   const [assignedAgentProfile, setAssignedAgentProfile] = useState<any | null>(null);
   const [realAgentsData, setRealAgentsData] = useState<any[]>([]);
@@ -257,6 +499,26 @@ export default function PerfilUsuarioPage() {
       }
     }
   }, [user?.role]);
+
+  useEffect(() => {
+    async function loadAdminApplications() {
+      if (!user || (user.role !== ROLES.ADMIN && user.role !== ROLES.MODERATOR)) return;
+      try {
+        const { data } = await supabase
+          .from("agent_applications")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (data) {
+          setAllApplications(data as AgentApplicationData[]);
+        }
+      } catch (err) {
+        console.error("Error fetching all agent applications for admin:", err);
+      }
+    }
+
+    loadAdminApplications();
+  }, [user?.role, activeTab]);
 
 
 
@@ -377,6 +639,80 @@ export default function PerfilUsuarioPage() {
     fetchRealInvitation();
   }, [user?.id, user?.role]);  // Only re-run on identity/role changes
 
+  useEffect(() => {
+    async function fetchUserApplication() {
+      if (!user?.email && !user?.id) {
+        setIsLoadingUserApp(false);
+        return;
+      }
+      setIsLoadingUserApp(true);
+      try {
+        let foundData: AgentApplicationData | null = null;
+
+        // 1. Try querying Supabase by user_id or email
+        if (user.id) {
+          const { data: byUserId } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .eq("user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (byUserId) foundData = byUserId as AgentApplicationData;
+        }
+
+        if (!foundData && user.email) {
+          const cleanEmail = user.email.trim().toLowerCase();
+          const { data: byEmail } = await supabase
+            .from("agent_applications")
+            .select("*")
+            .ilike("email", cleanEmail)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (byEmail) foundData = byEmail as AgentApplicationData;
+        }
+
+        // 2. Fallback to localStorage if no DB record found
+        if (!foundData && typeof window !== "undefined") {
+          const cachedUserApp = localStorage.getItem("user_agent_application");
+          if (cachedUserApp) {
+            try {
+              foundData = JSON.parse(cachedUserApp);
+            } catch (e) {}
+          } else {
+            // Find any agent_app_ key in localStorage
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith("agent_app_")) {
+                try {
+                  const val = localStorage.getItem(key);
+                  if (val) {
+                    foundData = JSON.parse(val);
+                    break;
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+        }
+
+        if (foundData) {
+          setUserApplication(foundData);
+          setPartnerApp(foundData);
+        }
+      } catch (err) {
+        console.error("Error loading user application:", err);
+      } finally {
+        setIsLoadingUserApp(false);
+      }
+    }
+
+    fetchUserApplication();
+  }, [user?.id, user?.email]);
+
   // Checkout modal state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -462,10 +798,15 @@ export default function PerfilUsuarioPage() {
         const dest = user?.viproDestination || "US";
         const data = await FormClientService.getPreformulario(user.id);
 
-        if (data) {
+        if (data && Object.keys(data).length > 0) {
           setPreformMetadata(data);
+          setIsPreformularioCompleted(true);
         } else {
           // Check if there is anything in localstorage as fallback
+          const completed = localStorage.getItem(`preformulario_completed_user_id_${user.id}`);
+          if (completed === "true") {
+            setIsPreformularioCompleted(true);
+          }
           const localIntakeType = localStorage.getItem(`preform_progress_intake_type_${dest}_${user.id}`);
           const localWaiverEligible = localStorage.getItem(`preform_progress_waiver_eligible_${dest}_${user.id}`);
           if (localIntakeType || localWaiverEligible) {
@@ -480,7 +821,7 @@ export default function PerfilUsuarioPage() {
       }
     };
     fetchPreformMetadata();
-  }, [user?.id, user?.viproDestination, isPreformularioCompleted]);
+  }, [user?.id, user?.viproDestination]);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setToast({ message, type });
@@ -625,7 +966,7 @@ export default function PerfilUsuarioPage() {
 
           setUser(updatedUser);
 
-           await AuthService.updateUser({
+          await AuthService.updateUser({
             photo_url: publicUrl,
             avatar_changes_this_month: changesThisMonth,
             last_avatar_change_month: currentMonthStr,
@@ -750,10 +1091,10 @@ export default function PerfilUsuarioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const assignedAgent = user?.assignedAgentId && realAgentsData.length > 0
     ? realAgentsData.find((a: any) =>
-        a.userId === user.assignedAgentId ||
-        a.id === user.assignedAgentId ||
-        a.id === `agent-${user.assignedAgentId}`
-      ) || null
+      a.userId === user.assignedAgentId ||
+      a.id === user.assignedAgentId ||
+      a.id === `agent-${user.assignedAgentId}`
+    ) || null
     : null;
 
   // Sync user profile state with API on page load
@@ -822,7 +1163,7 @@ export default function PerfilUsuarioPage() {
             hasPaidAdvisor: metadata.has_paid_advisor || dbProfile?.has_paid_advisor || (fallbackAgentId ? true : false),
             assignedAgentId: metadata.assigned_agent_id || dbProfile?.assigned_agent_id || fallbackAgentId || null,
             assignedAgencyName: metadata.assigned_agency_name || dbProfile?.assigned_agency_name || null,
-            photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
+            photoUrl: dbProfile?.photo_url || metadata.photo_url || metadata.avatar_url || metadata.picture || null,
             avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
             lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
             ds160FullName: metadata.ds160_full_name || null,
@@ -831,7 +1172,7 @@ export default function PerfilUsuarioPage() {
             ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
             ds160HasAssets: metadata.ds160_has_assets ?? true,
             ds160Confirmed: metadata.ds160_confirmed || false,
-            expedienteStatus: metadata.expediente_status || dbProfile?.expediente_status || 'draft',
+            expedienteStatus: dbProfile?.expediente_status || metadata.expediente_status || 'draft',
             role: finalRole,
             clientDocs: metadata.client_docs || {},
             documentReviews: dbProfile?.document_reviews || metadata.document_reviews || {},
@@ -913,7 +1254,7 @@ export default function PerfilUsuarioPage() {
         const targetUserId = agencyId || user.id;
 
         const portalRes = await AgentClientService.getPortalData(targetUserId);
-        if (portalRes && portalRes.application) {
+        if (portalRes?.application) {
           setPartnerApp(portalRes.application);
           setAgentApp(portalRes.application);
           if (portalRes.application.signature_name) {
@@ -1032,7 +1373,7 @@ export default function PerfilUsuarioPage() {
         setPartnerApp((prev: AgentApplicationData | null) => (prev && prev.id === appId) ? ({
           ...prev,
           ...updatePayload,
-         }) : null);
+        }) : null);
       }
 
       setIsEditingStatus(false);
@@ -1193,7 +1534,7 @@ export default function PerfilUsuarioPage() {
         }
       }
       const portalRes = await AgentClientService.getPortalData(targetUserId);
-      const data = portalRes.application;
+      const data = portalRes?.application;
       setAgentApp(data || null);
       if (data?.signature_name) setSignatureName(data.signature_name);
     } catch (err) {
@@ -1303,6 +1644,7 @@ export default function PerfilUsuarioPage() {
     const timer = setTimeout(() => {
       if (activeTab === "comisiones") {
         loadCommissions();
+        loadAssignedClients();
       }
       if (activeTab === "invitar_agentes" && user.role === ROLES.AGENCY) {
         loadAgencyMembers();
@@ -1409,6 +1751,19 @@ export default function PerfilUsuarioPage() {
             if (profData.document_reviews) {
               setClientDocReviews(profData.document_reviews);
             }
+            const apptData = profData.appointment_request || profData.cita_details || profData.document_reviews?.appointment_request;
+            if (apptData) {
+              setUserAppointmentRequest(apptData);
+              if (user) {
+                setUser({ ...user, appointmentRequest: apptData });
+              }
+            }
+            const revData = profData.agent_review || profData.document_reviews?.agent_review;
+            if (revData) {
+              setUserRating(revData.rating || 0);
+              setUserReviewComment(revData.comment || "");
+              setAgentReviewSubmitted(true);
+            }
             if (profData.ds160_confirmed !== undefined) {
               setDs160Confirmed(!!profData.ds160_confirmed);
             }
@@ -1499,18 +1854,114 @@ export default function PerfilUsuarioPage() {
           if (preforms && Array.isArray(preforms)) {
             setAllPreformulariosList(preforms);
           }
-        })
-        .catch((err) => console.error("Error fetching all preformularios:", err));
+        });
+      // Fetch VIPRO evaluations, commissions, and profiles in parallel to compute real stats
+      Promise.all([
+        FormClientService.getAllViproEvaluations().catch(() => []),
+        Promise.resolve(supabase.from("agent_commissions").select("*")).catch(() => ({ data: [] })),
+        ProfileClientService.getAllProfiles().catch(() => [])
+      ]).then(([evals, commsResult, profiles]) => {
+        const validEvals = Array.isArray(evals) ? evals : [];
+        const commissions = Array.isArray(commsResult?.data) ? commsResult.data : [];
+        const allProfs = Array.isArray(profiles) ? profiles : [];
 
-      FormClientService.getAllViproEvaluations()
-        .then((evals) => {
-          if (evals && Array.isArray(evals)) {
-            setViproEvaluations(evals);
+        // Build a profile map by ID & email for quick lookup
+        const pMap: Record<string, { email: string; name: string }> = {};
+        allProfs.forEach((p: any) => {
+          const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+          const entry = { email: p.email || "", name: full || p.email || "Cliente" };
+          if (p.id) {
+            pMap[p.id] = entry;
+            pMap[p.id.toLowerCase()] = entry;
           }
-        })
-        .catch((err) => console.error("Error fetching all vipro evals:", err));
+          if (p.email) pMap[p.email.toLowerCase()] = entry;
+        });
+        setDbProfilesMap((prev) => ({ ...prev, ...pMap }));
+
+        setViproEvaluations(validEvals);
+
+        // Build purchases array from real DB records (vipro_evaluations)
+        const viproPurchases = validEvals.map((ev: any) => {
+          const prof = ev.user_id ? pMap[ev.user_id] : (ev.user_email ? pMap[ev.user_email.toLowerCase()] : null);
+          return {
+            id: ev.id,
+            user_id: ev.user_id,
+            user_name: prof?.name || ev.full_name || ev.user_name || null,
+            user_email: ev.user_email || prof?.email || "",
+            product_type: "vipro",
+            amount: Number(ev.amount || ev.price || viproPrice) || 19.99,
+            paypal_tx_id: ev.paypal_tx_id || ev.transaction_id || null,
+            created_at: ev.created_at || new Date().toISOString()
+          };
+        });
+
+        // Build purchases array from real DB records (agent_commissions)
+        const advisorPurchases = commissions.map((c: any) => {
+          let notesObj: any = {};
+          if (c.notes) {
+            try {
+              notesObj = typeof c.notes === "string" ? JSON.parse(c.notes) : c.notes;
+            } catch (e) {}
+          }
+
+          const clientId = c.client_id || c.user_id || notesObj.client_id;
+          const clientEmail = c.client_email || notesObj.client_email || "";
+          const prof = clientId ? pMap[clientId] : (clientEmail ? pMap[clientEmail.toLowerCase()] : null);
+
+          return {
+            id: c.id,
+            user_id: clientId,
+            user_name: c.client_name || prof?.name || notesObj.client_name || null,
+            user_email: clientEmail || prof?.email || "",
+            product_type: c.service_type === "vipro" ? "vipro" : "advisor",
+            amount: Number(c.gross_amount) || Number(c.sale_amount) || (c.service_type === "vipro" ? 19.99 : 150),
+            paypal_tx_id: c.paypal_tx_id || c.transaction_id || notesObj.paypal_transaction_id || null,
+            created_at: c.created_at || new Date().toISOString()
+          };
+        });
+
+        // Also check profiles table for users who have paid vipro or advisor
+        const profilePurchases: any[] = [];
+        allProfs.forEach((p: any) => {
+          const full = `${p.first_name || ""} ${p.last_name || ""}`.trim() || p.email;
+          if (p.has_paid_vipro) {
+            const exists = viproPurchases.some(vp => vp.user_id === p.id);
+            if (!exists) {
+              profilePurchases.push({
+                id: `prof-vipro-${p.id}`,
+                user_id: p.id,
+                user_name: full,
+                user_email: p.email || "",
+                product_type: "vipro",
+                amount: Number(viproPrice) || 19.99,
+                paypal_tx_id: p.last_paypal_tx || null,
+                created_at: p.updated_at || new Date().toISOString()
+              });
+            }
+          }
+          if (p.has_paid_advisor) {
+            const exists = advisorPurchases.some(ap => ap.user_id === p.id);
+            if (!exists) {
+              profilePurchases.push({
+                id: `prof-advisor-${p.id}`,
+                user_id: p.id,
+                user_name: full,
+                user_email: p.email || "",
+                product_type: "advisor",
+                amount: Number(fullServicePrice) || 150,
+                paypal_tx_id: p.last_paypal_tx || null,
+                created_at: p.updated_at || new Date().toISOString()
+              });
+            }
+          }
+        });
+
+        setDbPurchases([...viproPurchases, ...advisorPurchases, ...profilePurchases]);
+      }).catch(err => {
+        console.error("Error loading admin stats:", err);
+      });
     }
-  }, [user, activeTab]);
+  }, [user, activeTab, viproPrice]);
 
   // Load messages from API Service
   const [isSupabaseDbAvailable, setIsSupabaseDbAvailable] = useState<boolean | null>(null);
@@ -1592,7 +2043,7 @@ export default function PerfilUsuarioPage() {
           partnerType: "outsourced_agent",
         }));
         setRealAgentsData(mapped);
-      }).catch(() => {});
+      }).catch(() => { });
     });
   }, [user?.hasPaidAdvisor]);
 
@@ -1931,13 +2382,12 @@ export default function PerfilUsuarioPage() {
     if (review.status === 'pending' || !review.status) return null;
 
     return (
-      <div className={`mt-2.5 p-2.5 rounded border text-left text-[10px] leading-relaxed ${
-        review.status === 'approved'
+      <div className={`mt-2.5 p-2.5 rounded border text-left text-[10px] leading-relaxed ${review.status === 'approved'
           ? "bg-emerald-50/70 border-emerald-100 text-emerald-800"
           : review.status === 'observed'
-          ? "bg-amber-50/70 border-amber-200 text-amber-800"
-          : "bg-red-50/70 border-red-200 text-red-800"
-      }`}>
+            ? "bg-amber-50/70 border-amber-200 text-amber-800"
+            : "bg-red-50/70 border-red-200 text-red-800"
+        }`}>
         <div className="flex items-center gap-1 font-bold">
           {review.status === 'approved' ? (
             <span>✅ Aprobado por Asesor</span>
@@ -1955,6 +2405,11 @@ export default function PerfilUsuarioPage() {
       </div>
     );
   };
+
+  const agentsCount = allProfilesList.filter((p: any) => p.role === ROLES.AGENT).length;
+  const agenciesCount = allProfilesList.filter((p: any) => p.role === ROLES.AGENCY).length;
+  const clientsCount = allProfilesList.filter((p: any) => p.role === ROLES.USER || !p.role).length;
+  const pendingAppsCount = allApplications.filter((a: any) => a.status === "pending").length;
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-background-main">
@@ -1984,7 +2439,7 @@ export default function PerfilUsuarioPage() {
             </label>
           </div>
 
-          <div className="text-center md:text-left text-white">
+          <div className="text-center md:text-left text-white flex flex-col items-center md:items-start">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75 mb-1.5 flex items-center justify-center md:justify-start gap-2 min-h-[16px]">
               {isLoadingPartnerApp ? (
                 <span className="inline-block w-24 h-3 bg-white/20 rounded animate-pulse"></span>
@@ -1995,10 +2450,10 @@ export default function PerfilUsuarioPage() {
                   : "Panel del Aplicante"}
             </p>
 
-            <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1">
+            <h1 className="text-3xl font-bold leading-tight font-serif italic mb-1 text-center md:text-left">
               Hola, {firstName} {lastName}
             </h1>
-            <p className="text-xs text-white/90 font-medium flex flex-wrap items-center gap-x-2 gap-y-1">
+            <div className="text-xs text-white/90 font-medium flex flex-col sm:flex-row items-center justify-center md:justify-start gap-x-2 gap-y-1.5 text-center md:text-left">
               <span>ID de Usuario: <span className="font-mono text-white/70">{user.id.substring(0, 8)}...</span></span>
               <span className="text-white/40 hidden sm:inline">•</span>
               <span>Registrado desde El Salvador</span>
@@ -2006,7 +2461,7 @@ export default function PerfilUsuarioPage() {
               <span className="bg-white/10 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center">
                 Cambios de foto: <span className="font-semibold ml-1">{user?.avatarChangesThisMonth || 0}/3 este mes</span>
               </span>
-            </p>
+            </div>
           </div>
 
           <button
@@ -2024,11 +2479,27 @@ export default function PerfilUsuarioPage() {
 
 
       {/* Grid Principal */}
-      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8">
+      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8 transition-all duration-300">
 
         {/* Columna Izquierda: Tarjeta de Resumen y Menú */}
-        <aside className="w-full lg:w-1/4 flex-shrink-0">
+        <aside className={`w-full ${isSidebarCollapsed ? 'lg:w-[70px]' : 'lg:w-1/4'} flex-shrink-0 transition-all duration-300`}>
           <div className="bg-white rounded-lg border border-border-light overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
+
+            {/* Sidebar Header with collapse toggle */}
+            <div className="p-3 border-b border-border-light flex items-center justify-between">
+              {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Menú</span>}
+              <button
+                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                className={`p-1.5 hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-500 cursor-pointer focus:outline-none transition-colors ${isSidebarCollapsed ? 'mx-auto' : ''}`}
+                title={isSidebarCollapsed ? "Expandir menú" : "Contraer menú"}
+              >
+                {isSidebarCollapsed ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" /></svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" /></svg>
+                )}
+              </button>
+            </div>
 
             {/* Navegación Vertical */}
             <nav className="p-2 flex flex-col gap-1">
@@ -2131,7 +2602,7 @@ export default function PerfilUsuarioPage() {
 
                     if (isAccredited) {
                       agentTabs.push(
-                        { id: "chat_agente", label: "Chat con Clientes" },
+                        { id: "chat_agente", label: "Gestión de Casos" },
                         { id: "comisiones", label: "Comisiones Realizadas" },
                         { id: "metodos_cobro", label: "Métodos de Cobro" }
                       );
@@ -2146,7 +2617,7 @@ export default function PerfilUsuarioPage() {
                   // --- Default tabs for regular users ---
                   return [
                     ...baseUserTabs,
-                    ...(partnerApp ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
+                    ...((userApplication || partnerApp) ? [{ id: "solicitud", label: "Mi Solicitud de Socio" }] : []),
                   ].map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                 })().map((tab: { id: string; label: string; svgIcon?: React.ReactNode; isLink?: boolean; url?: string }) => (
                   <button
@@ -2158,15 +2629,17 @@ export default function PerfilUsuarioPage() {
                         handleTabChange(tab.id);
                       }
                     }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${activeTab === tab.id
+                    title={isSidebarCollapsed ? tab.label : undefined}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-sm text-left transition-colors focus:outline-none ${isSidebarCollapsed ? "lg:justify-center lg:px-0" : ""} ${activeTab === tab.id
                       ? "bg-brand-light text-brand-primary font-semibold"
                       : "text-text-secondary hover:bg-background-hover hover:text-text-primary"
                       }`}
                   >
-                    <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"}`}>
+                    <span className={`flex-shrink-0 ${activeTab === tab.id ? "text-brand-primary" : "text-text-muted"} ${isSidebarCollapsed ? "lg:mx-auto" : ""}`}>
                       {tab.svgIcon || <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg>}
                     </span>
-                    <span>{tab.label}</span>
+                    {!isSidebarCollapsed && <span>{tab.label}</span>}
+                    {isSidebarCollapsed && <span className="lg:hidden">{tab.label}</span>}
                   </button>
                 ))
               )}
@@ -2175,7 +2648,7 @@ export default function PerfilUsuarioPage() {
         </aside>
 
         {/* Columna Derecha: Contenido del Tab Activo */}
-        <section className="w-full lg:w-3/4">
+        <section className={`w-full ${isSidebarCollapsed ? 'lg:flex-grow lg:w-[calc(100%-90px)]' : 'lg:w-3/4'} transition-all duration-300`}>
           <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
             {isLoadingPartnerApp ? (
               <div className="space-y-6 text-left animate-pulse">
@@ -2212,6 +2685,242 @@ export default function PerfilUsuarioPage() {
                     >
                       Firmar Acuerdo Ahora &rarr;
                     </button>
+                  </div>
+                )}
+
+                {/* TAB: ESTADO DE SOLICITUD B2B / ASESOR */}
+                {activeTab === "solicitud" && (
+                  <div className="space-y-8 animate-fadeIn text-left">
+                    <div className="border-b border-border-light pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-xl font-extrabold text-text-primary font-serif">
+                          Estatus de Solicitud B2B / Asesor
+                        </h2>
+                        <p className="text-xs text-text-secondary mt-1">
+                          Seguimiento en tiempo real del proceso de evaluación de tu postulación como Agencia o Asesor Especializado.
+                        </p>
+                      </div>
+                      {userApplication && (
+                        <div className="flex items-center gap-2 bg-brand-light px-3 py-1.5 rounded-full border border-brand-primary/20 text-xs font-semibold text-brand-primary">
+                          <span>Folio:</span>
+                          <span className="font-mono">{userApplication.application_id || userApplication.id?.substring(0, 8)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {isLoadingUserApp ? (
+                      <div className="p-8 text-center text-text-muted animate-pulse">
+                        Cargando estado de tu solicitud...
+                      </div>
+                    ) : !userApplication ? (
+                      <div className="bg-background-main border border-border-light rounded-xl p-8 text-center space-y-4">
+                        <div className="text-4xl">🏢</div>
+                        <h3 className="text-lg font-bold text-text-primary">No tienes ninguna solicitud activa en este momento</h3>
+                        <p className="text-xs text-text-secondary max-w-md mx-auto leading-relaxed">
+                          Si eres una Agencia de Viajes o deseas integrarte a nuestra Red de Asesores Especializados, puedes enviar tu solicitud ahora.
+                        </p>
+                        <button
+                          onClick={() => router.push("/agents/apply")}
+                          className="inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-hover text-white font-bold text-xs px-5 py-2.5 rounded-sm transition-all shadow-sm cursor-pointer"
+                        >
+                          Enviar Solicitud B2B / Asesor &rarr;
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Status Card Banner */}
+                        <div className={`p-6 rounded-xl border transition-all shadow-sm ${
+                          userApplication.status === "approved" || userApplication.status === "active"
+                            ? "bg-emerald-50/90 border-emerald-200 text-emerald-950"
+                            : userApplication.status === "rejected"
+                            ? "bg-rose-50/90 border-rose-200 text-rose-950"
+                            : "bg-amber-50/90 border-amber-200/80 text-amber-950"
+                        }`}>
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div className="flex items-start gap-4">
+                              <div className="text-3xl flex-shrink-0 mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "🎉" : userApplication.status === "rejected" ? "⚠️" : "⏳"}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-3">
+                                  <h3 className="text-lg font-extrabold">
+                                    {userApplication.status === "approved" || userApplication.status === "active"
+                                      ? "¡Solicitud Aprobada!"
+                                      : userApplication.status === "rejected"
+                                      ? "Solicitud No Aprobada"
+                                      : "En Proceso de Evaluación"}
+                                  </h3>
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                    userApplication.status === "approved" || userApplication.status === "active"
+                                      ? "bg-emerald-600 text-white"
+                                      : userApplication.status === "rejected"
+                                      ? "bg-rose-600 text-white"
+                                      : "bg-amber-500 text-white"
+                                  }`}>
+                                    {userApplication.status === "approved" || userApplication.status === "active"
+                                      ? "Aprobado"
+                                      : userApplication.status === "rejected"
+                                      ? "Rechazado"
+                                      : "Pendiente de Revisión"}
+                                  </span>
+                                </div>
+                                <p className="text-xs mt-2 leading-relaxed">
+                                  {userApplication.status === "approved" || userApplication.status === "active"
+                                    ? "Tu expediente ha sido verificado satisfactoriamente por el equipo directivo de TodoVisa. Ya dispones de acreditación comercial."
+                                    : userApplication.status === "rejected"
+                                    ? "Tu solicitud fue evaluada por nuestro equipo administrativo pero no cumple con los criterios de admisión requeridos en este momento."
+                                    : "Tu postulación ha sido recibida y se encuentra actualmente bajo auditoría por parte del comité de admisiones de TodoVisa."}
+                                </p>
+                              </div>
+                            </div>
+
+                            {(userApplication.status === "approved" || userApplication.status === "active") && (
+                              <button
+                                onClick={() => router.push(`/agents/portal?id=${userApplication.application_id || userApplication.id}`)}
+                                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-md shadow-sm transition-all flex-shrink-0 cursor-pointer"
+                              >
+                                Acceder al Portal B2B &rarr;
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Stepper Progress */}
+                        <div className="bg-white border border-border-light rounded-xl p-6 shadow-xs">
+                          <h4 className="text-xs font-extrabold uppercase tracking-wider text-text-secondary mb-6 text-left">
+                            Línea de Proceso de Admisión
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 relative">
+                            {/* Step 1 */}
+                            <div className="flex flex-col items-start p-4 rounded-lg bg-emerald-50/60 border border-emerald-200">
+                              <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center mb-2">✓</span>
+                              <span className="text-xs font-bold text-emerald-950">1. Envió de Solicitud</span>
+                              <span className="text-[10px] text-emerald-700 mt-1">
+                                {userApplication.created_at ? new Date(userApplication.created_at).toLocaleDateString("es-ES") : "Completado"}
+                              </span>
+                            </div>
+
+                            {/* Step 2 */}
+                            <div className={`flex flex-col items-start p-4 rounded-lg border ${
+                              userApplication.status === "approved" || userApplication.status === "active"
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : userApplication.status === "rejected"
+                                ? "bg-rose-50/60 border-rose-200"
+                                : "bg-amber-50/80 border-amber-300 animate-pulse"
+                            }`}>
+                              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center mb-2 ${
+                                userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "bg-emerald-600 text-white"
+                                  : userApplication.status === "rejected"
+                                  ? "bg-rose-600 text-white"
+                                  : "bg-amber-500 text-white"
+                              }`}>
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "✓" : userApplication.status === "rejected" ? "✕" : "2"}
+                              </span>
+                              <span className="text-xs font-bold text-text-primary">2. Revisión de Documentos</span>
+                              <span className="text-[10px] text-text-secondary mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "Verificado"
+                                  : userApplication.status === "rejected"
+                                  ? "No aprobado"
+                                  : "En auditoría presencial"}
+                              </span>
+                            </div>
+
+                            {/* Step 3 */}
+                            <div className={`flex flex-col items-start p-4 rounded-lg border ${
+                              userApplication.status === "approved" || userApplication.status === "active"
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : "bg-gray-50 border-gray-200 opacity-60"
+                            }`}>
+                              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center mb-2 ${
+                                userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-gray-300 text-gray-600"
+                              }`}>
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "✓" : "3"}
+                              </span>
+                              <span className="text-xs font-bold text-text-primary">3. Aprobación y Convenio</span>
+                              <span className="text-[10px] text-text-secondary mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "Acreditado" : "Pendiente"}
+                              </span>
+                            </div>
+
+                            {/* Step 4 */}
+                            <div className={`flex flex-col items-start p-4 rounded-lg border ${
+                              userApplication.status === "approved" || userApplication.status === "active"
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : "bg-gray-50 border-gray-200 opacity-60"
+                            }`}>
+                              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center mb-2 ${
+                                userApplication.status === "approved" || userApplication.status === "active"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-gray-300 text-gray-600"
+                              }`}>
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "✓" : "4"}
+                              </span>
+                              <span className="text-xs font-bold text-text-primary">4. Activación de Portal</span>
+                              <span className="text-[10px] text-text-secondary mt-1">
+                                {userApplication.status === "approved" || userApplication.status === "active" ? "Habilitado" : "Pendiente"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Details Card */}
+                        <div className="bg-white border border-border-light rounded-xl p-6 shadow-xs space-y-4">
+                          <h4 className="text-xs font-extrabold uppercase tracking-wider text-text-secondary border-b border-border-light pb-3 text-left">
+                            Resumen del Expediente Registrado
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-left">
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Nombre / Empresa</span>
+                              <span className="text-text-primary font-bold text-sm">{userApplication.full_name || user.email}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Correo Electrónico</span>
+                              <span className="text-text-primary font-bold text-sm">{userApplication.email}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Teléfono de Contacto</span>
+                              <span className="text-text-primary font-bold">{userApplication.phone || "No especificado"}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">País de Residencia</span>
+                              <span className="text-text-primary font-bold">{userApplication.country_residence || "No especificado"}</span>
+                            </div>
+                            <div>
+                              <span className="text-text-muted block font-semibold uppercase text-[10px]">Años de Experiencia</span>
+                              <span className="text-text-primary font-bold">{userApplication.experience_years ? `${userApplication.experience_years} años` : "No especificado"}</span>
+                            </div>
+                            {userApplication.specialties && userApplication.specialties.length > 0 && (
+                              <div className="col-span-2">
+                                <span className="text-text-muted block font-semibold uppercase text-[10px] mb-1">Especialidades</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {userApplication.specialties.map((spec: string, idx: number) => (
+                                    <span key={idx} className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-brand-primary/20">
+                                      {spec}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {userApplication.target_countries && userApplication.target_countries.length > 0 && (
+                              <div className="col-span-2">
+                                <span className="text-text-muted block font-semibold uppercase text-[10px] mb-1">Países Destino que Domina</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {userApplication.target_countries.map((c: string, idx: number) => (
+                                    <span key={idx} className="bg-slate-100 text-slate-800 text-[10px] font-bold px-2 py-0.5 rounded border border-slate-200">
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -2458,7 +3167,7 @@ export default function PerfilUsuarioPage() {
                           </div>
                           <h4 className="text-sm font-bold text-text-primary mb-1">Preformulario + Llenado DS-160 + Acompañamiento (${fullServicePrice.toFixed(2)} USD)</h4>
                           <p className="text-xs text-text-secondary leading-relaxed mb-4">
-                            Asesoría 1-a-1, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
+                            Asesoría con Asesores Expertos, llenado oficial de formulario consular, auditoría de expediente y simulacros Zoom.
                           </p>
                           {user.hasPaidAdvisor ? (
                             <div className="flex items-center justify-between pt-1">
@@ -2469,7 +3178,7 @@ export default function PerfilUsuarioPage() {
                                 onClick={() => setActiveTab("asesor")}
                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 transition-colors cursor-pointer"
                               >
-                                Chat 1-a-1 &rarr;
+                                Chat con Asesor
                               </button>
                             </div>
                           ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
@@ -2586,7 +3295,7 @@ export default function PerfilUsuarioPage() {
                           <div className="mt-8 p-6 bg-gradient-to-r from-brand-light/60 to-white border border-brand-primary/20 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 text-left shadow-sm">
                             <div className="space-y-1">
                               <span className="text-[10px] font-extrabold text-brand-primary uppercase tracking-widest bg-white border border-brand-primary/20 px-2.5 py-0.5 rounded-full">
-                                Paso Opcional: Asesoría Personalizada 1-a-1
+                                Paso Opcional: Asesoría Personalizada
                               </span>
                               <h4 className="text-base font-bold text-text-primary">
                                 ¿Deseas que un asesor experto llene tu DS-160 y audite tu expediente?
@@ -2604,8 +3313,44 @@ export default function PerfilUsuarioPage() {
                           </div>
                         </div>
                       ) : (
-                        /* TIMELINE COMPLETO DE 7 PASOS (CON ASESOR) */
+                        /* TIMELINE COMPLETO DE 6 PASOS (CON ASESOR) */
                         <div className="space-y-8 relative before:absolute before:inset-0 before:left-3.5 before:right-auto before:w-0.5 before:bg-gray-200 mt-4 text-left">
+
+                          {/* BANNER DE SERVICIO COMPLETADO AL 100% */}
+                          {(() => {
+                            const activeCita = userAppointmentRequest || user?.appointmentRequest;
+                            const isCitaConfirmed = activeCita?.status === 'confirmed';
+                            const isStep1Done = true;
+                            const isStep2Done = isPreformularioCompleted;
+                            const isStep3Done = !!user?.hasPaidAdvisor || !!assignedAgentProfile || !!user?.assignedAgencyName;
+                            const isStep4Done = expedienteStatus === 'approved';
+                            const isStep5Done = isCitaConfirmed;
+                            const isStep6Done = agentReviewSubmitted;
+
+                            const isAllComplete = isStep1Done && isStep2Done && isStep3Done && isStep4Done && isStep5Done && isStep6Done;
+
+                            if (!isAllComplete) return null;
+
+                            return (
+                              <div className="p-5 bg-emerald-50 border border-emerald-300 rounded-md text-left space-y-2 mb-6 shadow-2xs">
+                                <div className="flex items-center justify-between gap-2 border-b border-emerald-200/80 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base">🎉</span>
+                                    <h3 className="text-sm font-extrabold text-emerald-950 uppercase tracking-wider">
+                                      ¡Servicio Consular TodoVisa Completado al 100%!
+                                    </h3>
+                                  </div>
+                                  <span className="bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-sm uppercase tracking-wider">
+                                    6 / 6 PASOS COMPLETADOS
+                                  </span>
+                                </div>
+                                <p className="text-xs text-emerald-900 leading-relaxed">
+                                  Has completado exitosamente todos los 6 Pasos del proceso de acompañamiento consular. Tu expediente ha sido auditado por tu asesor, tu cita presencial / simulacro consular ha sido confirmada y has dejado tu reseña oficial. ¡Éxitos en tu trámite consular!
+                                </p>
+                              </div>
+                            );
+                          })()}
+
                           {/* Paso 1 */}
                           <div className="flex gap-4 relative">
                             <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 shadow-xs">
@@ -2669,7 +3414,7 @@ export default function PerfilUsuarioPage() {
                             </div>
                             <div className={`flex-1 rounded-md p-4 border ${user.hasPaidAdvisor ? "bg-background-main/30 border-border-light" : "bg-white border-amber-200 shadow-sm"}`}>
                               <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                                <h4 className="text-sm font-bold text-text-primary">Paso 3: Conexión con Asesor Experto y Chat 1-a-1</h4>
+                                <h4 className="text-sm font-bold text-text-primary">Paso 3: Conexión con Asesor Experto y Chat</h4>
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${user.hasPaidAdvisor ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-800 border-amber-200"}`}>
                                   {user.hasPaidAdvisor ? "COMPLETADO" : "ACCIÓN REQUERIDA"}
                                 </span>
@@ -2684,19 +3429,19 @@ export default function PerfilUsuarioPage() {
                                     onClick={() => setActiveTab("asesor")}
                                     className="mt-3 text-xs text-brand-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
                                   >
-                                    💬 Ir a mi Chat de Soporte 1-a-1 &rarr;
+                                    💬 Ir a mi Chat con Asesor
                                   </button>
                                 </div>
                               ) : (
-                                <div>
-                                  <p className="text-xs text-text-secondary mb-3">
-                                    Selecciona un asesor consular de nuestra red certificada para guiar el armado de tu expediente y resolver dudas por chat.
+                                <div className="flex items-center justify-between flex-wrap gap-3">
+                                  <p className="text-xs text-text-secondary leading-relaxed">
+                                    Selecciona tu asesor certificado preferido para iniciar la atención 1-a-1.
                                   </p>
                                   <button
                                     onClick={() => router.push("/agents")}
                                     className="bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold px-4 py-2 rounded-sm transition-colors shadow-sm cursor-pointer"
                                   >
-                                    Elegir Asesor Consular &rarr;
+                                    Elegir Asesor Consular
                                   </button>
                                 </div>
                               )}
@@ -2704,56 +3449,74 @@ export default function PerfilUsuarioPage() {
                           </div>
 
                           {/* Paso 4 */}
-                          <div className={`flex gap-4 relative transition-all ${user.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-emerald-500 text-white" : user.hasPaidAdvisor ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
+                          <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-brand-primary text-white shadow-xs" : expedienteStatus === 'submitted' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
                               {expedienteStatus === 'approved' ? "✓" : "4"}
                             </div>
-                            <div className={`flex-1 border rounded-md p-4 ${expedienteStatus === 'approved' ? "bg-white border-emerald-200 shadow-sm" : user.hasPaidAdvisor ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                            <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-emerald-200 shadow-sm" : expedienteStatus === 'submitted' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
                               <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                                <h4 className={`text-sm font-bold ${user.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
-                                  Paso 4: Auditoría de Expediente y Formulario Consular
+                                <h4 className={`text-sm font-bold ${user?.hasPaidAdvisor ? "text-text-primary" : "text-text-secondary"}`}>
+                                  Paso 4: Expediente Probatorio (4 Requisitos) y Formulario Oficial DS-160
                                 </h4>
-                                {user.hasPaidAdvisor && (
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${expedienteStatus === 'approved' ? "bg-emerald-50 text-emerald-800 border-emerald-200" : expedienteStatus === 'submitted' ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse" : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"}`}>
-                                    {expedienteStatus === 'approved' ? "COMPLETADO" : expedienteStatus === 'submitted' ? "EN AUDITORÍA" : "EN PROGRESO"}
-                                  </span>
-                                )}
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider ${
+                                  expedienteStatus === 'approved'
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold"
+                                    : expedienteStatus === 'submitted'
+                                      ? "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
+                                      : "bg-slate-100 text-slate-600 border-slate-200"
+                                }`}>
+                                  {expedienteStatus === 'approved' ? "✅ EXPEDIENTE APROBADO" : expedienteStatus === 'submitted' ? "⏳ EN AUDITORÍA" : "PENDIENTE DE ENVIAR"}
+                                </span>
                               </div>
-                              <p className={`text-xs ${user.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"}`}>
-                                Carga digital de soporte probatorio (pasaporte, arraigos, solvencia) y auditoría previa del formulario DS-160 por parte de tu asesor.
+                              <p className={`text-xs ${user?.hasPaidAdvisor ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
+                                Sube la documentación probatoria requerida y revisa los datos de tu formulario consular oficial antes de enviarlo a dictamen del asesor.
                               </p>
-
-                              {user.hasPaidAdvisor && (
-                                <div className="mt-4 pt-4 border-t border-border-light space-y-4">
+                              {user?.hasPaidAdvisor && (
+                                <div className="mt-4 pt-3 border-t border-border-light space-y-4">
+                                  {/* Grid 4 Requisitos */}
                                   <div>
-                                    <span className="text-xs font-bold text-text-primary uppercase tracking-wider block mb-1">
-                                      📂 Expediente Digital Consular
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                                      📁 Documentos de Arraigo Probatorio:
                                     </span>
                                     {(() => {
-                                      const renderDocReviewBadge = (docKey: string) => {
-                                        const rev = clientDocReviews[docKey];
-                                        if (!rev || !rev.status || rev.status === 'pending') return null;
-
-                                        const bgMap = {
-                                          approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                                          observed: 'bg-amber-50 text-amber-800 border-amber-200',
-                                          rejected: 'bg-red-50 text-red-700 border-red-200'
-                                        };
-
-                                        const labelMap = {
-                                          approved: '✅ Aprobado por Asesor',
-                                          observed: '⚠️ Observado por Asesor',
-                                          rejected: '❌ Rechazado por Asesor'
-                                        };
-
+                                      const renderDocReviewBadge = (docType: string) => {
+                                        const rev = clientDocReviews[docType];
+                                        if (!rev || rev.status === 'pending') {
+                                          return (
+                                            <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                              Pendiente de Revisión
+                                            </span>
+                                          );
+                                        }
+                                        if (rev.status === 'approved') {
+                                          return (
+                                            <span className="text-[9px] font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300">
+                                              ✅ Aprobado
+                                            </span>
+                                          );
+                                        }
+                                        if (rev.status === 'observed') {
+                                          return (
+                                            <div className="space-y-1">
+                                              <span className="text-[9px] font-extrabold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                                ⚠️ Observado por Asesor
+                                              </span>
+                                              {rev.comment && (
+                                                <p className="text-[10px] text-amber-950 italic bg-amber-50 p-1.5 rounded border border-amber-200">
+                                                  💬 &quot;{rev.comment}&quot;
+                                                </p>
+                                              )}
+                                            </div>
+                                          );
+                                        }
                                         return (
-                                          <div className="mt-2 pt-2 border-t border-border-light text-left">
-                                            <span className={`inline-block text-[9px] font-extrabold px-2 py-0.5 rounded border ${bgMap[rev.status as keyof typeof bgMap] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                                              {labelMap[rev.status as keyof typeof labelMap] || rev.status}
+                                          <div className="space-y-1">
+                                            <span className="text-[9px] font-extrabold text-red-900 bg-red-100 px-1.5 py-0.5 rounded border border-red-300">
+                                              ❌ Rechazado
                                             </span>
                                             {rev.comment && (
-                                              <p className="text-[10px] text-text-secondary mt-1 bg-white p-2 rounded border border-slate-100 italic">
-                                                💬 Asesor: &quot;{rev.comment}&quot;
+                                              <p className="text-[10px] text-red-950 italic bg-red-50 p-1.5 rounded border border-red-200">
+                                                💬 &quot;{rev.comment}&quot;
                                               </p>
                                             )}
                                           </div>
@@ -2761,44 +3524,44 @@ export default function PerfilUsuarioPage() {
                                       };
 
                                       return (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                           {/* Pasaporte */}
                                           <div className="bg-background-main/30 border border-border-light rounded-sm p-3 flex flex-col justify-between gap-2.5">
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">1. Pasaporte Vigente</span>
                                               <span className="text-[9px] text-text-muted">Primera página con datos de identidad.</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.passport || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.passport_url && (
-                                                  <a
-                                                    href={clientDocs.passport_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.passport || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.passport_url && (
+                                                    <a
+                                                      href={clientDocs.passport_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('passport', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('passport', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('passport')}
                                             </div>
-                                            {renderDocReviewBadge('passport')}
                                           </div>
 
                                           {/* DUI */}
@@ -2806,38 +3569,38 @@ export default function PerfilUsuarioPage() {
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">2. DUI / Identificación</span>
                                               <span className="text-[9px] text-text-muted">Copia legible por ambos lados.</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.dui || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.dui_url && (
-                                                  <a
-                                                    href={clientDocs.dui_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.dui || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.dui_url && (
+                                                    <a
+                                                      href={clientDocs.dui_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('dui', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('dui', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('dui')}
                                             </div>
-                                            {renderDocReviewBadge('dui')}
                                           </div>
 
                                           {/* Constancia Laboral */}
@@ -2845,38 +3608,38 @@ export default function PerfilUsuarioPage() {
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">3. Arraigo Laboral / Académico</span>
                                               <span className="text-[9px] text-text-muted">Constancia laboral firmada o matrícula de estudios.</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.workCert || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.workCert_url && (
-                                                  <a
-                                                    href={clientDocs.workCert_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.workCert || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.workCert_url && (
+                                                    <a
+                                                      href={clientDocs.workCert_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('workCert', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('workCert', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('workCert')}
                                             </div>
-                                            {renderDocReviewBadge('workCert')}
                                           </div>
 
                                           {/* Solvencia Bancaria */}
@@ -2884,45 +3647,42 @@ export default function PerfilUsuarioPage() {
                                             <div>
                                               <span className="text-xs font-bold text-text-primary block">4. Solvencia Económica</span>
                                               <span className="text-[9px] text-text-muted">Estados de cuenta bancarios (últimos 3 meses).</span>
-                                            </div>
-                                            <div className="flex items-center justify-between gap-2 mt-1">
-                                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
-                                                  {clientDocs.bankStatements || "❌ No subido"}
-                                                </span>
-                                                {clientDocs.bankStatements_url && (
-                                                  <a
-                                                    href={clientDocs.bankStatements_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
-                                                  >
-                                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Ver
-                                                  </a>
-                                                )}
+                                              <div className="flex items-center justify-between gap-2 mt-1">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="text-[10px] truncate max-w-[120px] font-mono text-text-secondary">
+                                                    {clientDocs.bankStatements || "❌ No subido"}
+                                                  </span>
+                                                  {clientDocs.bankStatements_url && (
+                                                    <a
+                                                      href={clientDocs.bankStatements_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex-shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-brand-primary hover:text-brand-hover border border-brand-primary/30 hover:border-brand-primary px-1.5 py-0.5 rounded transition-colors no-underline"
+                                                    >
+                                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                      Ver
+                                                    </a>
+                                                  )}
+                                                </div>
+                                                <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
+                                                  Subir
+                                                  <input
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                      const file = e.target.files?.[0];
+                                                      if (file) handleFileUpload('bankStatements', file);
+                                                    }}
+                                                  />
+                                                </label>
                                               </div>
-                                              <label className="cursor-pointer bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold px-2.5 py-1.5 rounded-sm transition-colors shrink-0">
-                                                Subir
-                                                <input
-                                                  type="file"
-                                                  accept="image/*,application/pdf"
-                                                  className="hidden"
-                                                  onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) handleFileUpload('bankStatements', file);
-                                                  }}
-                                                />
-                                              </label>
+                                              {renderDocReviewBadge('bankStatements')}
                                             </div>
-                                            {renderDocReviewBadge('bankStatements')}
                                           </div>
                                         </div>
                                       );
                                     })()}
-                                    <span className="text-[11px] text-text-secondary block mt-3 leading-relaxed">
-                                      Carga los archivos requeridos para que tu asesor {assignedAgent?.name || "asignado"} los audite antes de programar tu cita:
-                                    </span>
                                   </div>
 
                                   {/* DS-160 Form Review Section */}
@@ -2964,69 +3724,262 @@ export default function PerfilUsuarioPage() {
                           </div>
 
                           {/* Paso 5 */}
-                          <div className={`flex gap-4 relative transition-all ${expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${expedienteStatus === 'approved' ? "bg-amber-500 text-white animate-pulse" : "bg-gray-200 text-text-muted"}`}>
-                              5
-                            </div>
-                            <div className={`flex-1 rounded-md p-4 border ${expedienteStatus === 'approved' ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
-                              <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
-                                <h4 className={`text-sm font-bold ${expedienteStatus === 'approved' ? "text-text-primary" : "text-text-secondary"}`}>
-                                  Paso 5: Programación de Cita / Entrega Drop Box y Simulacro Consular por Zoom
-                                </h4>
-                                {expedienteStatus === 'approved' && (
-                                  <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 animate-pulse">
-                                    LISTO PARA AGENDAR
-                                  </span>
-                                )}
-                              </div>
-                              <p className={`text-xs ${expedienteStatus === 'approved' ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
+                          {(() => {
+                            const activeCita = userAppointmentRequest || user?.appointmentRequest;
+                            const isConfirmed = activeCita?.status === 'confirmed';
+                            const isPaso5Enabled = expedienteStatus === 'approved' && isPreformularioCompleted;
+                            return (
+                              <div className={`flex gap-4 relative transition-all ${isPaso5Enabled ? "" : "opacity-60"}`}>
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${
+                                  isConfirmed
+                                    ? "bg-emerald-600 text-white shadow-xs"
+                                    : isPaso5Enabled
+                                      ? "bg-amber-500 text-white animate-pulse"
+                                      : "bg-gray-200 text-text-muted"
+                                }`}>
+                                  {isConfirmed ? "✓" : "5"}
+                                </div>
+                                <div className={`flex-1 rounded-md p-4 border ${isPaso5Enabled ? "bg-white border-amber-200 shadow-sm" : "bg-background-main/50 border-border-light"}`}>
+                                  <div className="flex justify-between items-start mb-1 flex-wrap gap-2">
+                                    <h4 className={`text-sm font-bold ${isPaso5Enabled ? "text-text-primary" : "text-text-secondary"}`}>
+                                      Paso 5: Programación de Cita / Entrega Drop Box y Simulacro Consular por Zoom
+                                    </h4>
+                                    {isPaso5Enabled ? (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border uppercase tracking-wider ${
+                                        isConfirmed
+                                          ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-extrabold"
+                                          : "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
+                                      }`}>
+                                        {isConfirmed ? "✓ CITA CONFIRMADA" : "LISTO PARA AGENDAR"}
+                                      </span>
+                                    ) : (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border uppercase tracking-wider ${!isPreformularioCompleted ? "bg-red-50 text-red-800 border-red-200 font-bold" : "bg-amber-50 text-amber-800 border-amber-200 font-bold"}`}>
+                                        {!isPreformularioCompleted ? "REQUIERE PREFORMULARIO (PASO 2)" : "REQUIERE AUDITORÍA (PASO 4)"}
+                                      </span>
+                                    )}
+                                  </div>
+                              <p className={`text-xs ${isPaso5Enabled ? "text-text-secondary" : "text-text-muted"} leading-relaxed`}>
                                 <strong>Primera Vez:</strong> Agendamiento de cita en CAS y Embajada con entrenamiento de simulacro por Zoom.<br />
                                 <strong>Renovación EE.UU. (Interview Waiver):</strong> Depósito de paquete en buzón CAS sin cita presencial ante cónsul (si vence &lt;48 meses).<br />
                                 <strong>Renovación México / Canadá / Australia / China:</strong> Flujo de cita regular o biométricos asistidos con alta seguridad de aprobación por historial positivo.
                               </p>
-                              {expedienteStatus === 'approved' && (
-                                <div className="mt-3 pt-3 border-t border-border-light flex flex-wrap gap-3 items-center">
+                              {!isPaso5Enabled && (
+                                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-sm text-xs text-amber-950 flex items-center gap-2 font-semibold">
+                                  <span>⚠️</span>
+                                  <span>
+                                    {!isPreformularioCompleted
+                                      ? "Debes completar tu Preformulario Consular (Paso 2) antes de agendar tu cita."
+                                      : "Tu expediente (Paso 4) debe ser aprobado por tu asesor antes de agendar tu cita."}
+                                  </span>
+                                </div>
+                              )}
+                              {isPaso5Enabled && (() => {
+                                const activeCita = userAppointmentRequest || user?.appointmentRequest;
+                                const isConfirmed = activeCita?.status === 'confirmed';
+                                return (
+                                  <div className="mt-3 pt-3 border-t border-border-light space-y-3">
+                                    {/* Muestra corporativa limpia de los detalles de la cita confirmada */}
+                                    {isConfirmed && activeCita && (
+                                      <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-md space-y-3">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs text-brand-primary">📅</span>
+                                            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                                              Detalles de tu Cita Confirmada
+                                            </span>
+                                          </div>
+                                          <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider">
+                                            CONFIRMADA
+                                          </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-sm border border-slate-200">
+                                          <div>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Trámite</span>
+                                            <span className="font-semibold text-slate-900 block mt-0.5">{activeCita.appointment_type || "Simulacro / Cita Consular"}</span>
+                                          </div>
+                                          <div>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Fecha Confirmada</span>
+                                            <span className="font-bold text-brand-primary text-xs block mt-0.5">{activeCita.confirmed_date || activeCita.requested_date || "Por definir"}</span>
+                                          </div>
+                                          <div>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Hora Confirmada</span>
+                                            <span className="font-bold text-brand-primary text-xs block mt-0.5">{activeCita.confirmed_time || activeCita.requested_time || "10:00"} hrs</span>
+                                          </div>
+                                        </div>
+
+                                        {activeCita.meeting_link ? (
+                                          <div className="bg-white p-3 rounded-sm border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                            <div className="min-w-0 flex-1">
+                                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Enlace Virtual (Zoom / Meet):</span>
+                                              <span className="text-xs font-mono font-medium text-slate-800 block truncate mt-0.5">
+                                                {activeCita.meeting_link}
+                                              </span>
+                                            </div>
+                                            <a
+                                              href={activeCita.meeting_link}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all flex items-center gap-1.5 no-underline shrink-0"
+                                            >
+                                              <span>🎥 Unirse a la Reunión →</span>
+                                            </a>
+                                          </div>
+                                        ) : activeCita.agent_notes && (
+                                          <p className="text-xs text-slate-700 italic bg-white p-3 rounded-sm border border-slate-200">
+                                            💬 Nota del Asesor: &quot;{activeCita.agent_notes}&quot;
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {!isConfirmed && activeCita?.meeting_link && (
+                                      <div className="p-3 bg-white border border-slate-200 rounded-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                        <div>
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                            🎥 Enlace de Reunión (Zoom / Meet)
+                                          </span>
+                                          <span className="text-xs text-slate-800 font-mono font-medium block truncate max-w-sm mt-0.5">
+                                            {activeCita.meeting_link}
+                                          </span>
+                                        </div>
+                                        <a
+                                          href={activeCita.meeting_link}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all flex items-center gap-1.5 no-underline shrink-0"
+                                        >
+                                          <span>🎥 Unirse a la Reunión →</span>
+                                        </a>
+                                      </div>
+                                    )}
+
+                                    <div className="flex flex-wrap gap-3 items-center">
+                                      <button
+                                        onClick={() => {
+                                          if (!isConfirmed) {
+                                            router.push(`/citas?processId=${user.id}`);
+                                          }
+                                        }}
+                                        disabled={isConfirmed}
+                                        className={`px-4 py-2 text-xs font-bold rounded-sm transition-colors ${
+                                          isConfirmed
+                                            ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                                            : "bg-brand-primary text-white hover:bg-brand-hover cursor-pointer"
+                                        }`}
+                                      >
+                                        {isConfirmed ? "🔒 Cita Confirmada (No Modificable)" : "🎥 Coordinar Fechas / Citas →"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                        {/* Paso 6: Calificación y Reseña del Servicio del Asesor */}
+                          <div className={`flex gap-4 relative transition-all ${user?.appointmentRequest?.status === 'confirmed' || userAppointmentRequest?.status === 'confirmed' || expedienteStatus === 'approved' ? "" : "opacity-60"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 flex-shrink-0 ${agentReviewSubmitted ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>
+                              6
+                            </div>
+                            <div className="flex-1 bg-white border border-border-light rounded-md p-4 space-y-3 shadow-2xs">
+                              <div className="flex justify-between items-start flex-wrap gap-2">
+                                <div>
+                                  <h4 className="text-sm font-bold text-text-primary">
+                                    Paso 6: Calificación y Reseña del Servicio de tu Asesor
+                                  </h4>
+                                  <p className="text-xs text-text-muted mt-0.5">
+                                    Califica la atención brindada por tu asesor para finalizar el proceso de acompañamiento.
+                                  </p>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm border uppercase tracking-wider ${
+                                  agentReviewSubmitted
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                                    : "bg-amber-50 text-amber-800 border-amber-200"
+                                }`}>
+                                  {agentReviewSubmitted ? "✓ RESEÑA COMPLETADA" : "PENDIENTE DE CALIFICAR"}
+                                </span>
+                              </div>
+
+                              {agentReviewSubmitted ? (
+                                <div className="p-3 bg-slate-50 border border-slate-200 rounded-sm space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-700">Tu Calificación:</span>
+                                    <div className="flex items-center gap-1 text-amber-500">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <span key={star} className="text-sm">
+                                          {star <= userRating ? "★" : "☆"}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-900">({userRating}/5 estrellas)</span>
+                                  </div>
+                                  {userReviewComment && (
+                                    <p className="text-xs text-slate-700 italic bg-white p-2.5 rounded-sm border border-slate-200">
+                                      💬 Comentario enviado: &quot;{userReviewComment}&quot;
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-3 pt-1">
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                      Selecciona tu Calificación (Estrellas):
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <button
+                                          key={star}
+                                          type="button"
+                                          onClick={() => setUserRating(star)}
+                                          className={`text-2xl transition-transform cursor-pointer hover:scale-125 focus:outline-none ${
+                                            star <= userRating ? "text-amber-400" : "text-slate-300 hover:text-amber-200"
+                                          }`}
+                                        >
+                                          ★
+                                        </button>
+                                      ))}
+                                      {userRating > 0 && (
+                                        <span className="text-xs font-bold text-slate-700 ml-2">
+                                          {userRating === 5 ? "Excelente" : userRating === 4 ? "Muy Bueno" : userRating === 3 ? "Bueno" : userRating === 2 ? "Regular" : "Malo"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label htmlFor="userReviewComment" className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                                      Comentario o Reseña sobre tu Asesor:
+                                    </label>
+                                    <textarea
+                                      id="userReviewComment"
+                                      rows={3}
+                                      value={userReviewComment}
+                                      onChange={(e) => setUserReviewComment(e.target.value)}
+                                      placeholder="Escribe tu reseña sobre la atención, puntualidad y asesoría recibida..."
+                                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-sm text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium"
+                                    />
+                                  </div>
+
                                   <button
-                                    onClick={() => setActiveTab("asesor")}
-                                    className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded hover:bg-brand-hover transition-colors cursor-pointer"
+                                    type="button"
+                                    onClick={handleSaveAgentReview}
+                                    disabled={isSubmittingReview || userRating === 0}
+                                    className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all shadow-xs cursor-pointer disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed border-none flex items-center gap-2"
                                   >
-                                    🎥 Coordinar Fechas / Buzón por Chat &rarr;
+                                    {isSubmittingReview ? (
+                                      <span>Guardando reseña...</span>
+                                    ) : (
+                                      <>
+                                        <span>⭐</span>
+                                        <span>Enviar Calificación y Reseña</span>
+                                      </>
+                                    )}
                                   </button>
                                 </div>
                               )}
-                            </div>
-                          </div>
-
-                          {/* Paso 6 */}
-                          <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                            <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                              6
-                            </div>
-                            <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4">
-                              <h4 className="text-sm font-bold text-text-secondary mb-1">Paso 6: Asistencia a Cita Consular / Exención de Entrevista (Drop Box)</h4>
-                              <p className="text-xs text-text-muted leading-relaxed">
-                                Presentación formal a tu cita consular oficial (biométricos y entrevista) o entrega del sobre cerrado en buzón de courier para renovaciones sin entrevista de EE.UU.
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Paso 7 */}
-                          <div className={`flex gap-4 relative transition-all ${user?.hasPaidAdvisor ? "" : "opacity-60"}`}>
-                            <div className="w-8 h-8 rounded-full bg-gray-200 text-text-muted flex items-center justify-center font-bold text-sm z-10 flex-shrink-0">
-                              7
-                            </div>
-                            <div className="flex-1 bg-background-main/50 border border-border-light rounded-md p-4 space-y-2">
-                              <div className="flex justify-between items-start flex-wrap gap-2">
-                                <h4 className="text-sm font-bold text-text-secondary">Paso 7: Retorno de Pasaporte y Monitoreo de Visa</h4>
-                                {user?.hasPaidAdvisor && (
-                                  <span className="bg-brand-light text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200">
-                                    MONITOREO ACTIVO
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-text-muted leading-relaxed">
-                                Rastreo de la estampación de visa y entrega del pasaporte en la sucursal de Courier autorizada (DHL / Cargo Express).
-                              </p>
                             </div>
                           </div>
                         </div>
@@ -3254,141 +4207,141 @@ export default function PerfilUsuarioPage() {
 
                     {user.hasPaidAdvisor ? (
                       <div className="space-y-6 animate-fade-in">
-                          {/* Advisor Info Bar (Company / Agency Details) */}
-                          <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
-                            <div className="relative">
-                              <img
-                                src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
-                                alt={assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}` : "Asesor"}
-                                className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
-                              />
-                              <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
-                            </div>
-                            <div className="text-center sm:text-left flex-1 space-y-1">
-                              <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                                <h5 className="font-bold text-text-primary text-base tracking-tight">
-                                  {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
-                                </h5>
-                                <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200">
-                                  👤 ASESOR ASIGNADO
-                                </span>
-                              </div>
-                              <p className="text-xs text-brand-primary font-bold">
-                                {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa")}
-                              </p>
-                              <p className="text-xs text-text-secondary leading-relaxed">
-                                {assignedAgentProfile?.bio || assignedAgencyProfile?.bio || "Asesor consular certificado. Tu expediente cuenta con auditoría y respaldo institucional."}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary mt-2 pt-1.5 border-t border-dashed border-border-light">
-                                {assignedAgencyProfile && (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] bg-brand-light text-brand-primary font-semibold px-2 py-0.5 rounded-sm">
-                                      Empresa: {assignedAgencyProfile.first_name} {assignedAgencyProfile.last_name}
-                                    </span>
-                                  </div>
-                                )}
-                                {assignedAgentProfile?.phone && (
-                                  <span>• Tel: {assignedAgentProfile.phone}</span>
-                                )}
-                              </div>
-                            </div>
+                        {/* Advisor Info Bar (Company / Agency Details) */}
+                        <div className="bg-gradient-to-r from-white to-[#FAF9F6] rounded-2xl border border-border-light p-5 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:border-brand-primary/20 transition-all duration-300 flex flex-col sm:flex-row items-center gap-5">
+                          <div className="relative">
+                            <img
+                              src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
+                              alt={assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}` : "Asesor"}
+                              className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md flex-shrink-0"
+                            />
+                            <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
                           </div>
- 
-                          {/* Chat Window */}
-                          <div className="border border-border-light rounded-2xl overflow-hidden flex flex-col h-[550px] bg-[#FAF9F6] shadow-sm relative">
-                            {/* Chat Header */}
-                            <div className="bg-white px-6 py-4 border-b border-border-light flex items-center justify-between shadow-sm z-10">
-                              <div className="flex items-center gap-3">
-                                <div className="relative">
-                                  <img
-                                    src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
-                                    alt="Asesor"
-                                    className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
-                                  />
-                                  <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                          <div className="text-center sm:text-left flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                              <h5 className="font-bold text-text-primary text-base tracking-tight">
+                                {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
+                              </h5>
+                              <span className="bg-blue-50 text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-md border border-blue-200">
+                                👤 ASESOR ASIGNADO
+                              </span>
+                            </div>
+                            <p className="text-xs text-brand-primary font-bold">
+                              {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa")}
+                            </p>
+                            <p className="text-xs text-text-secondary leading-relaxed">
+                              {assignedAgentProfile?.bio || assignedAgencyProfile?.bio || "Asesor consular certificado. Tu expediente cuenta con auditoría y respaldo institucional."}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3 justify-center sm:justify-start text-xs text-text-secondary mt-2 pt-1.5 border-t border-dashed border-border-light">
+                              {assignedAgencyProfile && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] bg-brand-light text-brand-primary font-semibold px-2 py-0.5 rounded-sm">
+                                    Empresa: {assignedAgencyProfile.first_name} {assignedAgencyProfile.last_name}
                                   </span>
                                 </div>
-                                <div>
-                                  <h4 className="font-bold text-text-primary text-sm leading-tight">
-                                    {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
-                                  </h4>
-                                  <p className="text-[9px] text-text-muted mt-0.5">
-                                    {assignedAgentProfile ? "Asesor Consular Acreditado" : "Soporte Técnico Especializado"}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="text-right hidden sm:flex flex-col items-end gap-1">
-                                <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
-                                  Soporte Activo
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Messages Box */}
-                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
-                              {messages.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-center p-8 gap-2">
-                                  <span className="text-3xl">💬</span>
-                                  <p className="text-xs font-semibold text-text-primary">Chat seguro habilitado</p>
-                                  <p className="text-[11px] text-text-muted max-w-xs">Escribe tu primer mensaje abajo para iniciar la conversación directa con tu asesoría.</p>
-                                </div>
-                              ) : (
-                                messages.map((msg) => {
-                                  const isSelf = msg.sender === "user";
-                                  return (
-                                    <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
-                                      <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
-                                        {!isSelf && (
-                                          <img
-                                            src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
-                                            alt="Asesor"
-                                            className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
-                                          />
-                                        )}
-                                        <div className="flex flex-col">
-                                          <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
-                                            ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
-                                            : "bg-white border border-border-light text-text-primary rounded-tl-none"
-                                            }`}>
-                                            <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
-                                          </div>
-                                          <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
-                                            {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })
+                              )}
+                              {assignedAgentProfile?.phone && (
+                                <span>• Tel: {assignedAgentProfile.phone}</span>
                               )}
                             </div>
-
-                            {/* Input Form */}
-                            <form onSubmit={handleSendMessage} className="bg-white p-4 border-t border-border-light flex gap-3 items-center z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.01)]">
-                              <div className="relative flex-1">
-                                <input
-                                  type="text"
-                                  value={inputValue}
-                                  onChange={(e) => setInputValue(e.target.value)}
-                                  placeholder="Escribe tu mensaje aquí..."
-                                  className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted transition-all shadow-inner"
-                                />
-                              </div>
-                              <button
-                                type="submit"
-                                disabled={!inputValue.trim()}
-                                className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
-                                title="Enviar mensaje"
-                              >
-                                <svg className="w-4 h-4 transform rotate-45 translate-x-[-1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                </svg>
-                              </button>
-                            </form>
                           </div>
                         </div>
+
+                        {/* Chat Window */}
+                        <div className="border border-border-light rounded-2xl overflow-hidden flex flex-col h-[550px] bg-[#FAF9F6] shadow-sm relative">
+                          {/* Chat Header */}
+                          <div className="bg-white px-6 py-4 border-b border-border-light flex items-center justify-between shadow-sm z-10">
+                            <div className="flex items-center gap-3">
+                              <div className="relative">
+                                <img
+                                  src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200"}
+                                  alt="Asesor"
+                                  className="w-10 h-10 rounded-full object-cover border border-border-light shadow-sm"
+                                />
+                                <span className="absolute bottom-0 right-0 flex h-2.5 w-2.5">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                </span>
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-text-primary text-sm leading-tight">
+                                  {assignedAgentProfile ? `${assignedAgentProfile.first_name} ${assignedAgentProfile.last_name || ""}`.trim() : (assignedAgencyProfile ? `${assignedAgencyProfile.first_name} ${assignedAgencyProfile.last_name || ""}`.trim() : (user?.assignedAgencyName || "Asesor TodoVisa"))}
+                                </h4>
+                                <p className="text-[9px] text-text-muted mt-0.5">
+                                  {assignedAgentProfile ? "Asesor Consular Acreditado" : "Soporte Técnico Especializado"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right hidden sm:flex flex-col items-end gap-1">
+                              <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                                Soporte Activo
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Messages Box */}
+                          <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar bg-gradient-to-b from-[#FAF9F6]/60 to-white/40">
+                            {messages.length === 0 ? (
+                              <div className="h-full flex flex-col items-center justify-center text-center p-8 gap-2">
+                                <span className="text-3xl">💬</span>
+                                <p className="text-xs font-semibold text-text-primary">Chat seguro habilitado</p>
+                                <p className="text-[11px] text-text-muted max-w-xs">Escribe tu primer mensaje abajo para iniciar la conversación directa con tu asesoría.</p>
+                              </div>
+                            ) : (
+                              messages.map((msg) => {
+                                const isSelf = msg.sender === "user";
+                                return (
+                                  <div key={msg.id} className={`flex ${isSelf ? "justify-end" : "justify-start"} animate-fade-in`}>
+                                    <div className={`flex gap-3 max-w-[75%] ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                                      {!isSelf && (
+                                        <img
+                                          src={assignedAgentProfile?.photo_url || assignedAgencyProfile?.photo_url || "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=200"}
+                                          alt="Asesor"
+                                          className="w-9 h-9 rounded-full object-cover border border-border-light flex-shrink-0 shadow-sm"
+                                        />
+                                      )}
+                                      <div className="flex flex-col">
+                                        <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${isSelf
+                                          ? "bg-gradient-to-br from-brand-primary to-[#2C4A75] text-white rounded-tr-none"
+                                          : "bg-white border border-border-light text-text-primary rounded-tl-none"
+                                          }`}>
+                                          <p className="leading-relaxed whitespace-pre-line font-medium">{msg.text}</p>
+                                        </div>
+                                        <span className={`text-[10px] text-text-muted mt-1 px-1 font-semibold ${isSelf ? "text-right" : "text-left"}`}>
+                                          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+
+                          {/* Input Form */}
+                          <form onSubmit={handleSendMessage} className="bg-white p-4 border-t border-border-light flex gap-3 items-center z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.01)]">
+                            <div className="relative flex-1">
+                              <input
+                                type="text"
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                placeholder="Escribe tu mensaje aquí..."
+                                className="w-full bg-[#FAF9F6] border border-border-light rounded-full pl-5 pr-12 py-3 text-sm focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary text-text-primary placeholder:text-text-muted transition-all shadow-inner"
+                              />
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={!inputValue.trim()}
+                              className="bg-brand-primary text-white font-bold h-11 w-11 rounded-full hover:bg-brand-hover transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:scale-105 active:scale-95 flex-shrink-0"
+                              title="Enviar mensaje"
+                            >
+                              <svg className="w-4 h-4 transform rotate-45 translate-x-[-1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                              </svg>
+                            </button>
+                          </form>
+                        </div>
+                      </div>
                     ) : (
                       // UNPAID STATE: Prompt to pay, no WhatsApp link
                       <div>
@@ -3703,30 +4656,30 @@ export default function PerfilUsuarioPage() {
                       </div>
 
                       <div className="space-y-6">
-                         {/* Status Banner */}
-                         <div className={`p-4 rounded-md border text-left ${partnerApp.status === "approved" || partnerApp.status === "active"
-                           ? (partnerApp.signed_at ? "bg-emerald-50/50 border-emerald-200 text-emerald-800" : "bg-amber-50/50 border-amber-200 text-amber-800")
-                           : partnerApp.status === "rejected"
-                             ? "bg-red-50/50 border-red-200 text-red-800"
-                             : "bg-amber-50/50 border-amber-200 text-amber-800"
-                           }`}>
-                           <h4 className="font-bold text-sm mb-1">
-                             {partnerApp.status === "approved" || partnerApp.status === "active"
-                               ? (partnerApp.signed_at ? "¡Tu solicitud ha sido aprobada!" : "⚠️ Firma de Acuerdo Comercial Requerida")
-                               : partnerApp.status === "rejected"
-                                 ? "Tu solicitud requiere cambios"
-                                 : "Postulación recibida"}
-                           </h4>
-                           <p className="text-xs leading-relaxed opacity-90">
-                             {partnerApp.status === "approved" || partnerApp.status === "active"
-                               ? (partnerApp.signed_at
-                                 ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
-                                 : "Tu postulación ha sido aprobada por la administración. Para comenzar a operar y recibir clientes, por favor firma digitalmente el acuerdo comercial desde tu portal de socio.")
-                               : partnerApp.status === "rejected"
-                                 ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
-                                 : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
-                           </p>
-                         </div>
+                        {/* Status Banner */}
+                        <div className={`p-4 rounded-md border text-left ${partnerApp.status === "approved" || partnerApp.status === "active"
+                          ? (partnerApp.signed_at ? "bg-emerald-50/50 border-emerald-200 text-emerald-800" : "bg-amber-50/50 border-amber-200 text-amber-800")
+                          : partnerApp.status === "rejected"
+                            ? "bg-red-50/50 border-red-200 text-red-800"
+                            : "bg-amber-50/50 border-amber-200 text-amber-800"
+                          }`}>
+                          <h4 className="font-bold text-sm mb-1">
+                            {partnerApp.status === "approved" || partnerApp.status === "active"
+                              ? (partnerApp.signed_at ? "¡Tu solicitud ha sido aprobada!" : "⚠️ Firma de Acuerdo Comercial Requerida")
+                              : partnerApp.status === "rejected"
+                                ? "Tu solicitud requiere cambios"
+                                : "Postulación recibida"}
+                          </h4>
+                          <p className="text-xs leading-relaxed opacity-90">
+                            {partnerApp.status === "approved" || partnerApp.status === "active"
+                              ? (partnerApp.signed_at
+                                ? "Tu cuenta de agente consultor se encuentra activa. Ya puedes acceder al panel de administración de casos de TodoVisa para recibir clientes."
+                                : "Tu postulación ha sido aprobada por la administración. Para comenzar a operar y recibir clientes, por favor firma digitalmente el acuerdo comercial desde tu portal de socio.")
+                              : partnerApp.status === "rejected"
+                                ? "Por favor, revisa las observaciones del administrador más abajo para saber qué información o documentos debes modificar."
+                                : "Estamos evaluando tu perfil y los documentos presentados en un plazo máximo de 48 horas laborables. Te notificaremos vía email."}
+                          </p>
+                        </div>
 
                         {/* Admin Notes */}
                         {partnerApp.admin_notes && (
@@ -3790,7 +4743,14 @@ export default function PerfilUsuarioPage() {
                         {/* Actions for editing application & viewing full portal */}
                         <div className="flex flex-wrap justify-between items-center gap-3 pt-4 border-t border-border-light">
                           <button
-                            onClick={() => router.push(`/agents/portal?id=${partnerApp.application_id}`)}
+                            onClick={() => {
+                              const targetId = partnerApp.application_id || partnerApp.id;
+                              if (targetId) {
+                                router.push(`/agents/portal?id=${encodeURIComponent(targetId)}`);
+                              } else {
+                                router.push("/agents/portal");
+                              }
+                            }}
                             className="px-5 py-2.5 bg-white border border-border-light text-text-primary text-xs font-bold rounded-sm hover:bg-background-hover transition-colors cursor-pointer shadow-2xs"
                           >
                             👁 Ver Solicitud Completa →
@@ -3973,11 +4933,10 @@ export default function PerfilUsuarioPage() {
                             </div>
                           ) : (
                             <div className="flex items-center gap-3">
-                              <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${
-                                selectedApp.status === "approved" || selectedApp.status === "active"
+                              <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${selectedApp.status === "approved" || selectedApp.status === "active"
                                   ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                                   : "bg-red-50 text-red-700 border-red-100"
-                              }`}>
+                                }`}>
                                 {selectedApp.status === "approved" || selectedApp.status === "active" ? "✓ APROBADO" : "✕ RECHAZADO / DEVUELTO"}
                               </span>
                               <button
@@ -4190,72 +5149,70 @@ export default function PerfilUsuarioPage() {
                         <h2 className="text-xl font-bold text-text-primary">Panel de Control General del Sistema</h2>
                         <p className="text-xs text-text-secondary mt-1">Supervisión en tiempo real de operaciones, usuarios, expedientes e ingresos de TodoVisa.</p>
                       </div>
-
                     </div>
 
-                    {/* KPI Metrics Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Usuarios</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                            </svg>
+                        {/* KPI Metrics Cards */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Usuarios</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              {allProfilesList.length.toLocaleString()}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Total de usuarios registrados</p>
                           </div>
-                        </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          {(allProfilesList.length + 1).toLocaleString()}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">Clientes y Agentes Registrados</p>
-                      </div>
 
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">VIPRO</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                            </svg>
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">VIPRO C</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              {viproEvaluations.length.toLocaleString()}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Evaluaciones VIPRO adquiridas</p>
                           </div>
-                        </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          {viproEvaluations.length.toLocaleString()}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">Evaluaciones expres completadas</p>
-                      </div>
 
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Socios</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                            </svg>
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Agentes</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              {agentsCount.toLocaleString()}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Agentes registrados ({agenciesCount} agencias, {pendingAppsCount} pend.)</p>
                           </div>
-                        </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          {allApplications.filter((a: any) => a.status === "pending").length}
-                          <span className="text-base font-semibold text-text-muted ml-1">pendientes</span>
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">Solicitudes de agentes a evaluar</p>
-                      </div>
 
-                      <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Ingresos</span>
-                          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
+                          <div className="bg-white p-5 border border-border-light rounded-2xl shadow-xs hover:border-[#113E5F]/30 transition-colors">
+                            <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#113E5F] bg-[#EFF6FF] px-2 py-0.5 rounded border border-[#113E5F]/10">Ingreso Total</span>
+                              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5 text-[#113E5F]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </div>
+                            </div>
+                            <div className="text-3xl font-black text-[#113E5F] font-mono">
+                              ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-[11px] text-text-muted mt-1 font-medium">Total procesado</p>
                           </div>
                         </div>
-                        <div className="text-3xl font-black text-[#113E5F] font-mono">
-                          ${dbPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1 font-medium">USD procesados</p>
-                      </div>
-                    </div>
 
                     {/* Direct Action Hub */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -4544,20 +5501,18 @@ export default function PerfilUsuarioPage() {
                             // Add Agent/Partner Applications (solicitudes de asesoría/socio)
                             if (allApplications && Array.isArray(allApplications)) {
                               allApplications.forEach((app: any) => {
-                                const uid = app.user_id || app.id;
-                                if (uid && !solicitudesMap.has(uid)) {
-                                  solicitudesMap.set(uid, {
-                                    id: app.id,
-                                    user_id: uid,
-                                    type: app.application_type === "agency" ? "Acreditación de Agencia" : "Solicitud de Asesor",
-                                    status: app.status,
-                                    is_completed: true,
-                                    answers: app,
-                                    documents: app.documents,
-                                    updated_at: app.updated_at || app.created_at,
-                                    raw: app,
-                                  });
-                                }
+                                const key = `app_${app.id || app.application_id || app.email}`;
+                                solicitudesMap.set(key, {
+                                  id: app.id || app.application_id,
+                                  user_id: app.user_id || app.id,
+                                  type: app.documents?.partner_type === "b2b_agency" || app.application_type === "agency" ? "🏢 Acreditación de Agencia B2B" : "👤 Solicitud de Asesor",
+                                  status: app.status,
+                                  is_completed: true,
+                                  answers: app,
+                                  documents: app.documents,
+                                  updated_at: app.updated_at || app.created_at,
+                                  raw: app,
+                                });
                               });
                             }
 
@@ -4731,24 +5686,40 @@ export default function PerfilUsuarioPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
-                          <tr className="hover:bg-gray-50/80 transition-colors">
-                            <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-948271</td>
-                            <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
-                            <td className="py-3.5 px-4">Evaluación Diagnóstica VIPRO</td>
-                            <td className="py-3.5 px-4 font-extrabold text-emerald-700">${viproPrice.toFixed(2)} USD</td>
-                            <td className="py-3.5 px-4">
-                              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
-                            </td>
-                          </tr>
-                          <tr className="hover:bg-gray-50/80 transition-colors">
-                            <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">PAYPAL-827410</td>
-                            <td className="py-3.5 px-4 font-semibold">{firstName} {lastName}</td>
-                            <td className="py-3.5 px-4">Servicio Completo con Asesor Acreditado</td>
-                            <td className="py-3.5 px-4 font-extrabold text-emerald-700">${(fullServicePrice * 0.75).toFixed(2)} USD</td>
-                            <td className="py-3.5 px-4">
-                              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
-                            </td>
-                          </tr>
+                          {dbPurchases && dbPurchases.length > 0 ? (
+                            [...dbPurchases]
+                              .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                              .map((item: any, idx: number) => {
+                                const userProf = item.user_id ? dbProfilesMap[item.user_id] : (item.user_email ? dbProfilesMap[item.user_email.toLowerCase()] : null);
+                                const clientName = item.user_name || userProf?.name || (item.user_id === user.id ? `${firstName} ${lastName}`.trim() : null) || item.user_email || "Cliente Registrado";
+                                const clientEmail = item.user_email || userProf?.email || "";
+                                const conceptName = item.product_type === "vipro" ? "Evaluación Diagnóstica VIPRO" : "Servicio Completo con Asesor Acreditado";
+                                const rawTxId = item.paypal_tx_id || item.last_paypal_tx;
+                                const transactionId = rawTxId 
+                                  ? (rawTxId.startsWith("PAYPAL") ? rawTxId : `PAYPAL-${rawTxId}`)
+                                  : (item.id && !item.id.startsWith("prof-") ? `PAYPAL-${item.id.substring(0, 8).toUpperCase()}` : `PAYPAL-TX-${idx + 101}`);
+                                return (
+                                  <tr key={item.id || idx} className="hover:bg-gray-50/80 transition-colors">
+                                    <td className="py-3.5 px-4 font-mono font-bold text-text-secondary">{transactionId}</td>
+                                    <td className="py-3.5 px-4 font-semibold">
+                                      <div>{clientName}</div>
+                                      {clientEmail && clientEmail !== clientName && <div className="text-[10px] text-text-muted font-normal">{clientEmail}</div>}
+                                    </td>
+                                    <td className="py-3.5 px-4">{conceptName}</td>
+                                    <td className="py-3.5 px-4 font-extrabold text-emerald-700">${Number(item.amount).toFixed(2)} USD</td>
+                                    <td className="py-3.5 px-4">
+                                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                          ) : (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-text-muted">
+                                No se encontraron transacciones registradas en la base de datos Supabase.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -4760,8 +5731,8 @@ export default function PerfilUsuarioPage() {
                 {activeTab === "chat_agente" && user && user.role === ROLES.AGENT && (
                   <div className="animate-fadeIn h-full">
                     <div className="mb-4 pb-4 border-b border-border-light">
-                      <h2 className="text-lg font-bold text-text-primary">Chat con Clientes</h2>
-                      <p className="text-xs text-text-secondary mt-1">Clientes asignados por tu empresa. El chat se habilita automáticamente cuando la agencia te asigna un caso.</p>
+                      <h2 className="text-lg font-bold text-text-primary">Gestión de Casos y Clientes</h2>
+                      <p className="text-xs text-text-secondary mt-1">Casos y clientes asignados por tu empresa. Aquí podrás auditar documentos, gestionar citas y chatear directamente.</p>
                     </div>
 
                     {isLoadingClients ? (
@@ -4777,7 +5748,7 @@ export default function PerfilUsuarioPage() {
                         </div>
                       </div>
                     ) : !selectedClient ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-300">
+                      <div className="flex flex-col gap-3 animate-in fade-in duration-300">
                         {assignedClients.map((client) => (
                           <div
                             key={client.id}
@@ -4805,22 +5776,22 @@ export default function PerfilUsuarioPage() {
                               };
                               fetchLatestClientProfile();
                             }}
-                            className="bg-gradient-to-br from-white to-[#FAF9F6] border border-slate-100 rounded-3xl p-6 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:border-brand-primary/20 transition-all duration-300 cursor-pointer flex flex-col justify-between"
+                            className="bg-gradient-to-br from-white to-[#FAF9F6] border border-slate-200 rounded-lg p-4 hover:border-brand-primary hover:shadow-xs transition-all duration-200 cursor-pointer flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
                           >
-                            <div className="flex items-center gap-4 mb-5 text-left">
+                            <div className="flex items-center gap-4 text-left">
                               <div className="relative flex-shrink-0">
                                 {client.photo_url ? (
                                   <img
                                     src={client.photo_url}
                                     alt="Avatar"
-                                    className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-md"
+                                    className="w-12 h-12 rounded-full object-cover border border-slate-200 shadow-sm"
                                   />
                                 ) : (
-                                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-brand-primary/20 to-brand-primary/40 flex items-center justify-center text-brand-primary font-bold text-lg border-2 border-white shadow-md">
+                                  <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-500 font-bold text-base border border-slate-200 shadow-sm">
                                     {(client.first_name || client.client_name || "?").charAt(0).toUpperCase()}
                                   </div>
                                 )}
-                                <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full ring-2 ring-white bg-emerald-400"></span>
+                                <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white bg-emerald-500"></span>
                               </div>
                               <div className="min-w-0">
                                 <h4 className="font-bold text-text-primary text-sm tracking-tight truncate">
@@ -4829,15 +5800,16 @@ export default function PerfilUsuarioPage() {
                                 <p className="text-[11px] text-text-secondary mt-0.5 truncate">{client.client_email || ""}</p>
                               </div>
                             </div>
-                            
-                            <div className="border-t border-slate-100/60 pt-4 flex justify-between items-center mt-auto">
-                              <span className="inline-flex items-center gap-1.5 text-[9px] text-emerald-700 font-extrabold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+
+                            <div className="flex items-center gap-4 flex-shrink-0 justify-between sm:justify-end">
+                              <span className="inline-flex items-center gap-1.5 text-[9px] text-emerald-700 font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                 Asignado
                               </span>
-                              
-                              <span className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-[11px] font-extrabold rounded-xl transition-all shadow-sm flex items-center gap-1">
-                                Abrir Chat &rarr;
+
+                              <span className="text-[11px] font-bold text-brand-primary hover:text-brand-hover transition-all flex items-center gap-1">
+                                Abrir Chat
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                               </span>
                             </div>
                           </div>
@@ -4883,22 +5855,20 @@ export default function PerfilUsuarioPage() {
                                 <button
                                   type="button"
                                   onClick={() => setAdvisorSubTab('chat')}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                                    advisorSubTab === 'chat'
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${advisorSubTab === 'chat'
                                       ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                                       : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200"
-                                  }`}
+                                    }`}
                                 >
                                   💬 Chat
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setAdvisorSubTab('audit')}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                                    advisorSubTab === 'audit'
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${advisorSubTab === 'audit'
                                       ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                                       : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200"
-                                  }`}
+                                    }`}
                                 >
                                   📂 Expediente
                                 </button>
@@ -4921,7 +5891,7 @@ export default function PerfilUsuarioPage() {
                                         key={msg.id}
                                         className={`flex ${msg.sender === "agent" ? "justify-end" : "justify-start"}`}
                                       >
-                                        <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${msg.sender === "agent"
+                                        <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.sender === "agent"
                                           ? "bg-brand-primary text-white rounded-br-sm"
                                           : "bg-white border border-border-light text-text-primary rounded-bl-sm"
                                           }`}>
@@ -4964,220 +5934,455 @@ export default function PerfilUsuarioPage() {
                                 {/* Header strip */}
                                 <div className="px-5 py-4 bg-white border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                   <div>
-                                    <h3 className="font-extrabold text-slate-800 text-[13px] tracking-tight">📂 Expediente Consular</h3>
+                                    <h3 className="font-extrabold text-slate-800 text-[13px] tracking-tight">📋 Expediente y Auditoría Consular</h3>
                                     <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
                                       {selectedClientProfile?.first_name} {selectedClientProfile?.last_name} — Revisa y dictamina cada documento
                                     </p>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold text-slate-500">Estado:</span>
-                                    <select
-                                      value={auditExpedienteStatus}
-                                      onChange={(e: any) => setAuditExpedienteStatus(e.target.value)}
-                                      className="text-[11px] bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-primary font-bold cursor-pointer shadow-sm"
-                                    >
-                                      <option value="submitted">⏳ En Auditoría</option>
-                                      <option value="approved">✅ Aprobado</option>
-                                      <option value="draft">✍️ Requiere Correcciones</option>
-                                    </select>
+                                  <div className="flex flex-wrap items-center gap-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-slate-500">Auditoría:</span>
+                                      <select
+                                        value={auditExpedienteStatus}
+                                        onChange={(e: any) => setAuditExpedienteStatus(e.target.value)}
+                                        disabled={true}
+                                        className="text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-primary font-bold cursor-not-allowed text-slate-500 shadow-sm opacity-80"
+                                      >
+                                        <option value="submitted">⏳ En Auditoría</option>
+                                        <option value="approved">✅ Aprobado</option>
+                                        <option value="draft">✍️ Requiere Correcciones</option>
+                                      </select>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-slate-500">Simulacro:</span>
+                                      <select
+                                        value={selectedClientProfile?.appointment_request?.status || selectedClientProfile?.cita_details?.status || selectedClientProfile?.document_reviews?.appointment_request?.status || 'pending'}
+                                        onChange={(e: any) => handleCitaStatusChange(e.target.value)}
+                                        disabled={true}
+                                        className="text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-primary font-bold cursor-not-allowed text-slate-500 shadow-sm opacity-80"
+                                      >
+                                        <option value="pending">⏳ Cita Pendiente</option>
+                                        <option value="confirmed">✅ Cita Confirmada</option>
+                                        <option value="proposed">⚡ Propuesta Enviada</option>
+                                        <option value="rejected">❌ Cita Rechazada</option>
+                                      </select>
+                                    </div>
                                   </div>
                                 </div>
 
-                                <div className="p-4 space-y-3">
-                                  {/* Documents grid */}
-                                  {[
-                                    { key: "passport", label: "Pasaporte Vigente", desc: "Primera página con datos de identidad", icon: "🛂", color: "blue" },
-                                    { key: "dui", label: "DUI / Identificación", desc: "Copia legible por ambos lados", icon: "🪪", color: "indigo" },
-                                    { key: "workCert", label: "Arraigo Laboral / Académico", desc: "Constancia laboral o matrícula firmada", icon: "💼", color: "violet" },
-                                    { key: "bankStatements", label: "Solvencia Económica", desc: "Estados de cuenta (últimos 3 meses)", icon: "🏦", color: "purple" },
-                                  ].map((doc) => {
-                                    const clientDocsMap = selectedClientProfile?.client_docs || {};
-                                    const fileName = clientDocsMap[doc.key];
-                                    const fileUrl = clientDocsMap[`${doc.key}_url`];
-                                    const review = docReviews[doc.key] || { status: 'pending', comment: '' };
-                                    const statusColor = review.status === 'approved' ? 'emerald' : review.status === 'rejected' ? 'red' : review.status === 'observed' ? 'amber' : 'slate';
-                                    const statusLabel = review.status === 'approved' ? '✅ Aprobado' : review.status === 'rejected' ? '❌ Rechazado' : review.status === 'observed' ? '⚠️ Observado' : '— Pendiente';
-
+                                <div className="p-5 space-y-6">
+                                  {/* BLOQUE 1: GESTIÓN Y APROBACIÓN DE CITAS CONSULARES */}
+                                  {(() => {
+                                    const clientAppt = selectedClientProfile?.appointment_request || selectedClientProfile?.cita_details || selectedClientProfile?.document_reviews?.appointment_request || selectedClientProfile?.document_reviews?.cita_details;
                                     return (
-                                      <div key={doc.key} className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 ${
-                                        review.status === 'approved' ? 'border-emerald-200' :
-                                        review.status === 'rejected' ? 'border-red-200' :
-                                        review.status === 'observed' ? 'border-amber-200' :
-                                        'border-slate-100 hover:border-slate-200'
-                                      }`}>
-                                        {/* Card top row */}
-                                        <div className="flex items-start gap-3 p-4">
-                                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 ${
-                                            review.status === 'approved' ? 'bg-emerald-50' :
-                                            review.status === 'rejected' ? 'bg-red-50' :
-                                            review.status === 'observed' ? 'bg-amber-50' :
-                                            'bg-slate-50'
-                                          }`}>
-                                            {doc.icon}
+                                      <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                          <div>
+                                            <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                                              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                              <span>Aprobación y Agendamiento de Cita / Simulacro</span>
+                                            </h4>
+                                            <p className="text-[11px] text-slate-500 mt-0.5">Admite, propone o rechaza los horarios para la cita del cliente.</p>
                                           </div>
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between gap-2">
-                                              <span className="text-[12px] font-bold text-slate-800 block">{doc.label}</span>
-                                              <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${
-                                                review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
-                                                review.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                                                review.status === 'observed' ? 'bg-amber-100 text-amber-700' :
-                                                'bg-slate-100 text-slate-500'
-                                              }`}>{statusLabel}</span>
-                                            </div>
-                                            <span className="text-[10px] text-slate-400 block mt-0.5">{doc.desc}</span>
-                                            {/* File status */}
-                                            <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                              {fileName ? (
-                                                <>
-                                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 max-w-[160px] truncate">
-                                                    📄 {fileName}
-                                                  </span>
-                                                  {fileUrl && (
-                                                    <a
-                                                      href={fileUrl}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      className="inline-flex items-center gap-1 px-3 py-1 bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold rounded-lg shadow-sm transition-all no-underline"
-                                                    >
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                      Ver documento
-                                                    </a>
-                                                  )}
-                                                </>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
-                                                  ⬜ Aún no subido por el cliente
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Review controls */}
-                                        <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                                          <div className="flex gap-1.5 flex-shrink-0">
-                                            <button
-                                              type="button"
-                                              onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'approved' } }))}
-                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
-                                                review.status === 'approved'
-                                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                                                  : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'
-                                              }`}
-                                            >✓ Aprobar</button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'observed' } }))}
-                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
-                                                review.status === 'observed'
-                                                  ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
-                                                  : 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600'
-                                              }`}
-                                            >⚠ Observar</button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'rejected' } }))}
-                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
-                                                review.status === 'rejected'
-                                                  ? 'bg-red-600 text-white border-red-600 shadow-sm'
-                                                  : 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600'
-                                              }`}
-                                            >✗ Rechazar</button>
-                                          </div>
-                                          <input
-                                            type="text"
-                                            value={review.comment || ""}
-                                            onChange={(e) => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, comment: e.target.value } }))}
-                                            placeholder="Comentario al cliente (opcional)..."
-                                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
-                                          />
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* DS-160 Block */}
-                                  <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 ${
-                                    (docReviews.ds160?.status || 'pending') === 'approved' ? 'border-emerald-200' :
-                                    (docReviews.ds160?.status || 'pending') === 'rejected' ? 'border-red-200' :
-                                    (docReviews.ds160?.status || 'pending') === 'observed' ? 'border-amber-200' :
-                                    'border-amber-100'
-                                  }`}>
-                                    <div className="flex items-start gap-3 p-4">
-                                      <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center text-base flex-shrink-0">📝</div>
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <span className="text-[12px] font-bold text-slate-800">Formulario DS-160 / UKVI</span>
-                                          <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
-                                            (docReviews.ds160?.status || 'pending') === 'approved' ? 'bg-emerald-100 text-emerald-700' :
-                                            (docReviews.ds160?.status || 'pending') === 'rejected' ? 'bg-red-100 text-red-700' :
-                                            (docReviews.ds160?.status || 'pending') === 'observed' ? 'bg-amber-100 text-amber-700' :
-                                            'bg-amber-50 text-amber-600'
-                                          }`}>
-                                            {(docReviews.ds160?.status || 'pending') === 'approved' ? '✅ Aprobado' :
-                                             (docReviews.ds160?.status || 'pending') === 'rejected' ? '❌ Rechazado' :
-                                             (docReviews.ds160?.status || 'pending') === 'observed' ? '⚠️ Observado' : '⏳ Pendiente'}
+                                          <span className={`text-[10px] font-extrabold px-3 py-1 rounded-full ${clientAppt?.status === 'confirmed'
+                                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                              : clientAppt?.status === 'rejected'
+                                                ? 'bg-red-100 text-red-800 border border-red-300'
+                                                : clientAppt?.status === 'proposed'
+                                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
+                                            }`}>
+                                            {clientAppt?.status === 'confirmed' ? 'Cita Confirmada' :
+                                              clientAppt?.status === 'rejected' ? 'Rechazada' :
+                                                clientAppt?.status === 'proposed' ? 'Propuesta Enviada' : 'Pendiente de Revisión'}
                                           </span>
                                         </div>
-                                        <span className="text-[10px] text-slate-400 block mt-0.5">Datos consulates llenados y confirmados por el cliente</span>
-                                        {(selectedClientProfile?.ds160_confirmed || selectedClientProfile?.ds160_full_name) ? (
-                                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                            {[
-                                              { label: "Nombre completo", value: selectedClientProfile.ds160_full_name },
-                                              { label: "N° Pasaporte", value: selectedClientProfile.ds160_passport_num },
-                                              { label: "Fecha de nacimiento", value: selectedClientProfile.ds160_birth_date },
-                                              { label: "Propósito del viaje", value: selectedClientProfile.ds160_purpose_of_trip },
-                                              { label: "¿Posee arraigos/bienes?", value: selectedClientProfile.ds160_has_assets ? "Sí" : "No" },
-                                            ].map(f => (
-                                              <div key={f.label} className="bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-100 text-left">
-                                                <span className="text-[9px] text-slate-400 uppercase font-bold tracking-wider block">{f.label}</span>
-                                                <span className="text-[11px] font-semibold text-slate-700 mt-0.5 block">{f.value || "—"}</span>
+
+                                        {auditExpedienteStatus !== 'approved' ? (
+                                          <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-xl text-center">
+                                            <p className="text-xs text-amber-800 font-bold flex items-center justify-center gap-1.5">
+                                              <span>⚠️</span>
+                                              <span>La auditoría debe estar aprobada para habilitar las citas y simulacros.</span>
+                                            </p>
+                                          </div>
+                                        ) : clientAppt ? (
+                                          <div className="space-y-4">
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-50/50 p-3 rounded-lg border border-slate-100">
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Trámite</span>
+                                                <span className="font-semibold text-slate-800 block mt-0.5">{clientAppt.appointment_type}</span>
                                               </div>
-                                            ))}
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Fecha Solicitada</span>
+                                                <span className="font-bold text-slate-800 block mt-0.5">{clientAppt.requested_date || clientAppt.confirmed_date}</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Hora Solicitada</span>
+                                                <span className="font-bold text-slate-800 block mt-0.5">{clientAppt.requested_time || clientAppt.confirmed_time} hrs</span>
+                                              </div>
+                                            </div>
+
+                                            {clientAppt.client_notes && (
+                                              <p className="text-xs text-slate-700 italic bg-slate-100/70 p-3 rounded-xl border border-slate-200">
+                                                💬 Comentario del Cliente: &quot;{clientAppt.client_notes}&quot;
+                                              </p>
+                                            )}
+
+                                            {/* Enlace a Videollamada (Zoom / Google Meet) */}
+                                            <div>
+                                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                                                <span>🎥 Enlace a Reunión Virtual (Zoom / Google Meet)</span>
+                                                <span className="text-brand-primary font-bold text-[10px] normal-case">El cliente podrá unirse haciendo clic</span>
+                                              </label>
+                                              <div className="relative">
+                                                <input
+                                                  type="url"
+                                                  value={agentCitaProposal.meetingLink}
+                                                  onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, meetingLink: e.target.value }))}
+                                                  placeholder="Ej. https://zoom.us/j/123456789 o https://meet.google.com/abc-defg-hij"
+                                                  className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-mono shadow-2xs font-medium"
+                                                />
+                                                <span className="absolute left-2.5 top-2 text-slate-400 text-xs">🔗</span>
+                                              </div>
+                                            </div>
+
+                                            {/* Input para Comentario / Respuesta del Asesor */}
+                                            <div>
+                                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                                                💬 Respuesta / Instrucciones del Asesor para el Cliente
+                                              </label>
+                                              <input
+                                                type="text"
+                                                value={agentCitaProposal.agentNotes}
+                                                onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
+                                                placeholder="Ej. Cita aprobada exitosamente. Favor conectarse a Zoom 5 min antes..."
+                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-brand-primary font-medium shadow-2xs"
+                                              />
+                                            </div>
+
+                                            {/* Botones de Acción Directa del Asesor */}
+                                            <div className="flex flex-wrap gap-2.5 pt-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAgentAcceptCita(agentCitaProposal.agentNotes, agentCitaProposal.meetingLink)}
+                                                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5 border-none"
+                                              >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                <span>✅ Confirmar Cita y Guardar Enlace</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setIsAgentProposingCita(!isAgentProposingCita)}
+                                                className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                                              >
+                                                <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                <span>Proponer Horario Alternativo</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAgentRejectCita(agentCitaProposal.agentNotes)}
+                                                className="px-4 py-2 bg-red-50 hover:bg-red-100/80 text-red-700 border border-red-200 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+                                              >
+                                                <svg className="w-3.5 h-3.5 text-red-600" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                <span>Rechazar Cita</span>
+                                              </button>
+                                            </div>
+
+                                            {/* Formulario de Proposición de Horario Alternativo por el Asesor */}
+                                            {isAgentProposingCita && (
+                                              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 animate-in fade-in duration-200">
+                                                <span className="text-xs font-extrabold text-amber-950 block">Ingresa la nueva fecha y hora propuesta al cliente:</span>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Nueva Fecha Propuesta</span>
+                                                    <input
+                                                      type="date"
+                                                      value={agentCitaProposal.proposedDate}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedDate: e.target.value }))}
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Nueva Hora Propuesta</span>
+                                                    <input
+                                                      type="text"
+                                                      value={agentCitaProposal.proposedTime}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedTime: e.target.value }))}
+                                                      placeholder="Ej. 14:00"
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleAgentProposeCita}
+                                                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                                >
+                                                  📩 Enviar Propuesta al Cliente por Chat
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
                                         ) : (
-                                          <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                                            ⏳ Pendiente de confirmación por el cliente
+                                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-center">
+                                            <p className="text-xs text-slate-600 font-medium">El cliente aún no ha registrado una solicitud de cita en el portal.</p>
+                                            <button
+                                              type="button"
+                                              onClick={() => setIsAgentProposingCita(!isAgentProposingCita)}
+                                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                                            >
+                                              <span>📅</span>
+                                              <span>Asignar Horario de Cita al Cliente</span>
+                                            </button>
+                                            {isAgentProposingCita && (
+                                              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 text-left animate-in fade-in duration-200 mt-2">
+                                                <span className="text-xs font-extrabold text-amber-950 block">Asignar / Proponer Cita al Cliente:</span>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Fecha</span>
+                                                    <input
+                                                      type="date"
+                                                      value={agentCitaProposal.proposedDate}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedDate: e.target.value }))}
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Hora</span>
+                                                    <input
+                                                      type="text"
+                                                      value={agentCitaProposal.proposedTime}
+                                                      onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, proposedTime: e.target.value }))}
+                                                      placeholder="Ej. 10:00"
+                                                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <div>
+                                                  <span className="text-[10px] font-bold text-amber-900 uppercase block mb-1">Comentario para el cliente</span>
+                                                  <input
+                                                    type="text"
+                                                    value={agentCitaProposal.agentNotes}
+                                                    onChange={(e) => setAgentCitaProposal(prev => ({ ...prev, agentNotes: e.target.value }))}
+                                                    placeholder="Comentario sobre el horario..."
+                                                    className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold"
+                                                  />
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleAgentProposeCita}
+                                                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                                >
+                                                  📩 Notificar Cita al Cliente
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
                                         )}
                                       </div>
+                                    );
+                                  })()}
+
+                                  {/* BLOQUE 2: AUDITORÍA DE DOCUMENTACIÓN CONSULAR */}
+                                  <div className="space-y-3 pt-2">
+                                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                      <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                                        <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                        <span>Documentación Adjunta y Formulario Consular</span>
+                                      </h4>
+                                      <span className="text-[10px] text-slate-400 font-bold">4 Requisitos + DS-160</span>
                                     </div>
 
-                                    <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                                      <div className="flex gap-1.5 flex-shrink-0">
-                                        {[
-                                          { s: 'approved', label: '✓ Aprobar', active: 'bg-emerald-600 text-white border-emerald-600', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600' },
-                                          { s: 'observed', label: '⚠ Observar', active: 'bg-amber-500 text-white border-amber-500', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600' },
-                                          { s: 'rejected', label: '✗ Rechazar', active: 'bg-red-600 text-white border-red-600', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600' },
-                                        ].map(btn => (
-                                          <button
-                                            key={btn.s}
-                                            type="button"
-                                            onClick={() => setDocReviews(prev => ({
-                                              ...prev,
-                                              ds160: { ...(docReviews.ds160 || { status: 'pending' as const, comment: '' }), status: btn.s as 'pending' | 'approved' | 'rejected' | 'observed' }
-                                            }))}
-                                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border shadow-sm ${
-                                              (docReviews.ds160?.status || 'pending') === btn.s ? btn.active : btn.inactive
-                                            }`}
-                                          >{btn.label}</button>
-                                        ))}
+                                    {/* Documents grid */}
+                                    {/* Documents grid */}
+                                    {[
+                                      { key: "passport", label: "Pasaporte Vigente", desc: "Primera página con datos de identidad", icon: "", color: "blue" },
+                                      { key: "dui", label: "DUI / Identificación", desc: "Copia legible por ambos lados", icon: "", color: "indigo" },
+                                      { key: "workCert", label: "Arraigo Laboral / Académico", desc: "Constancia laboral o matrícula firmada", icon: "", color: "violet" },
+                                      { key: "bankStatements", label: "Solvencia Económica", desc: "Estados de cuenta (últimos 3 meses)", icon: "", color: "purple" },
+                                    ].map((doc) => {
+                                      const clientDocsMap = selectedClientProfile?.client_docs || {};
+                                      const fileName = clientDocsMap[doc.key];
+                                      const fileUrl = clientDocsMap[`${doc.key}_url`];
+                                      const review = docReviews[doc.key] || { status: 'pending', comment: '' };
+                                      const statusColor = review.status === 'approved' ? 'emerald' : review.status === 'rejected' ? 'red' : review.status === 'observed' ? 'amber' : 'slate';
+                                      const statusLabel = review.status === 'approved' ? 'Aprobado' : review.status === 'rejected' ? 'Rechazado' : review.status === 'observed' ? 'Observado' : 'Pendiente';
+
+                                      return (
+                                        <div key={doc.key} className={`bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 ${review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/10' :
+                                            review.status === 'rejected' ? 'border-red-200 bg-red-50/10' :
+                                              review.status === 'observed' ? 'border-amber-200 bg-amber-50/10' :
+                                                'border-slate-200 hover:border-slate-300'
+                                          }`}>
+                                          {/* Card top row */}
+                                          <div className="flex items-start gap-3 p-4">
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${review.status === 'approved' ? 'bg-emerald-50' :
+                                                review.status === 'rejected' ? 'bg-red-50' :
+                                                  review.status === 'observed' ? 'bg-amber-50' :
+                                                    'bg-slate-50'
+                                              }`}>
+                                              {doc.key === 'passport' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>}
+                                              {doc.key === 'dui' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0" /></svg>}
+                                              {doc.key === 'workCert' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>}
+                                              {doc.key === 'bankStatements' && <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[12px] font-bold text-slate-800 block">{doc.label}</span>
+                                                <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap ${review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                                                    review.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                      review.status === 'observed' ? 'bg-amber-100 text-amber-700' :
+                                                        'bg-slate-100 text-slate-500'
+                                                  }`}>{statusLabel}</span>
+                                              </div>
+                                              <span className="text-[10px] text-slate-400 block mt-0.5">{doc.desc}</span>
+                                              {/* File status */}
+                                              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                                {fileName ? (
+                                                  <>
+                                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 max-w-[160px] truncate">
+                                                      📄 {fileName}
+                                                    </span>
+                                                    {fileUrl && (
+                                                      <a
+                                                        href={fileUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold rounded-lg shadow-sm transition-all no-underline"
+                                                      >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                        Ver documento
+                                                      </a>
+                                                    )}
+                                                  </>
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
+                                                    ⬜ Aún no subido por el cliente
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+
+                                          {/* Review controls */}
+                                          <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                                            <div className="flex gap-1.5 flex-shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'approved' } }))}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${review.status === 'approved'
+                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'
+                                                  }`}
+                                              >Aprobar</button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'observed' } }))}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${review.status === 'observed'
+                                                    ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600'
+                                                  }`}
+                                              >Observar</button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, status: 'rejected' } }))}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${review.status === 'rejected'
+                                                    ? 'bg-red-50 text-red-700 border-red-200 shadow-sm'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600'
+                                                  }`}
+                                              >Rechazar</button>
+                                            </div>
+                                            <input
+                                              type="text"
+                                              value={review.comment || ""}
+                                              onChange={(e) => setDocReviews(prev => ({ ...prev, [doc.key]: { ...review, comment: e.target.value } }))}
+                                              placeholder="Comentario al cliente (opcional)..."
+                                              className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+
+                                    {/* DS-160 Block */}
+                                    <div className={`bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 ${(docReviews.ds160?.status || 'pending') === 'approved' ? 'border-emerald-200' :
+                                        (docReviews.ds160?.status || 'pending') === 'rejected' ? 'border-red-200' :
+                                          (docReviews.ds160?.status || 'pending') === 'observed' ? 'border-amber-200' :
+                                            'border-amber-100'
+                                      }`}>
+                                      <div className="flex items-start gap-3 p-4">
+                                        <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0"><svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg></div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="text-[12px] font-bold text-slate-800">Formulario DS-160 / UKVI</span>
+                                            <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${(docReviews.ds160?.status || 'pending') === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                                                (docReviews.ds160?.status || 'pending') === 'rejected' ? 'bg-red-100 text-red-700' :
+                                                  (docReviews.ds160?.status || 'pending') === 'observed' ? 'bg-amber-100 text-amber-700' :
+                                                    'bg-amber-50 text-amber-600'
+                                              }`}>
+                                              {(docReviews.ds160?.status || 'pending') === 'approved' ? 'Aprobado' :
+                                                (docReviews.ds160?.status || 'pending') === 'rejected' ? 'Rechazado' :
+                                                  (docReviews.ds160?.status || 'pending') === 'observed' ? 'Observado' : 'Pendiente'}
+                                            </span>
+                                          </div>
+                                          <span className="text-[10px] text-slate-400 block mt-0.5">Datos consulates llenados y confirmados por el cliente</span>
+                                          {(selectedClientProfile?.ds160_confirmed || selectedClientProfile?.ds160_full_name) ? (
+                                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                              {[
+                                                { label: "Nombre completo", value: selectedClientProfile.ds160_full_name },
+                                                { label: "N° Pasaporte", value: selectedClientProfile.ds160_passport_num },
+                                                { label: "Fecha de nacimiento", value: selectedClientProfile.ds160_birth_date },
+                                                { label: "Propósito del viaje", value: selectedClientProfile.ds160_purpose_of_trip },
+                                                { label: "¿Posee arraigos/bienes?", value: selectedClientProfile.ds160_has_assets ? "Sí" : "No" },
+                                              ].map(f => (
+                                                <div key={f.label} className="bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-100 text-left">
+                                                  <span className="text-[9px] text-slate-400 uppercase font-bold tracking-wider block">{f.label}</span>
+                                                  <span className="text-[11px] font-semibold text-slate-700 mt-0.5 block">{f.value || "—"}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                                              ⏳ Pendiente de confirmación por el cliente
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                      <input
-                                        type="text"
-                                        value={docReviews.ds160?.comment || ""}
-                                        onChange={(e) => setDocReviews(prev => ({
-                                          ...prev,
-                                          ds160: { ...(docReviews.ds160 || { status: 'pending', comment: '' }), comment: e.target.value }
-                                        }))}
-                                        placeholder="Comentario al cliente (opcional)..."
-                                        className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
-                                      />
+
+                                      <div className="border-t border-slate-50 bg-slate-50/70 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                                        <div className="flex gap-1.5 flex-shrink-0">
+                                          {[
+                                            { s: 'approved', label: 'Aprobar', active: 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600' },
+                                            { s: 'observed', label: 'Observar', active: 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-amber-400 hover:text-amber-600' },
+                                            { s: 'rejected', label: 'Rechazar', active: 'bg-red-50 text-red-700 border-red-200 shadow-sm', inactive: 'bg-white text-slate-500 border-slate-200 hover:border-red-400 hover:text-red-600' },
+                                          ].map(btn => (
+                                            <button
+                                              key={btn.s}
+                                              type="button"
+                                              onClick={() => setDocReviews(prev => ({
+                                                ...prev,
+                                                ds160: { ...(docReviews.ds160 || { status: 'pending' as const, comment: '' }), status: btn.s as 'pending' | 'approved' | 'rejected' | 'observed' }
+                                              }))}
+                                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border shadow-sm ${(docReviews.ds160?.status || 'pending') === btn.s ? btn.active : btn.inactive
+                                                }`}
+                                            >{btn.label}</button>
+                                          ))}
+                                        </div>
+                                        <input
+                                          type="text"
+                                          value={docReviews.ds160?.comment || ""}
+                                          onChange={(e) => setDocReviews(prev => ({
+                                            ...prev,
+                                            ds160: { ...(docReviews.ds160 || { status: 'pending', comment: '' }), comment: e.target.value }
+                                          }))}
+                                          placeholder="Comentario al cliente (opcional)..."
+                                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] focus:outline-none focus:border-brand-primary placeholder-slate-300 min-w-0"
+                                        />
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
 
+                                </div>
                                 {/* Save footer */}
                                 <div className="sticky bottom-0 bg-white border-t border-slate-100 px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
                                   <span className="text-[10px] text-slate-400">Los cambios se notificarán al cliente vía chat automáticamente.</span>
@@ -5185,7 +6390,7 @@ export default function PerfilUsuarioPage() {
                                     type="button"
                                     onClick={handleSaveAudit}
                                     disabled={isSavingAudit}
-                                    className="px-5 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+                                    className="px-5 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
                                   >
                                     {isSavingAudit ? (
                                       <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Guardando...</>
@@ -5200,9 +6405,9 @@ export default function PerfilUsuarioPage() {
                         </div>
                       </div>
                     )
-                  }
-                </div>
-              )}
+                    }
+                  </div>
+                )}
 
                 {/* TAB: MI ACREDITACIÓN */}
                 {activeTab === "mi_acreditacion" && user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY) && (
@@ -5406,90 +6611,130 @@ export default function PerfilUsuarioPage() {
                       </div>
                       {user.role === ROLES.AGENCY ? (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Agencia/Socio Comercial, recibes el <strong>30% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+                          Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
                         </p>
                       ) : (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>60%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                          Como Asesor Certificado de la red TodoVisa, recibes el <strong>{getSystemConfig().agentCommissionRate}% del importe bruto</strong> de cada trámite consular asignado. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
                         </p>
                       )}
                     </div>
 
-                    {/* Financial metrics */}
+                    {/* Financial metrics & Table */}
                     {(() => {
-                      const rateLabel = user.role === ROLES.AGENCY ? "30% (Referido)" : "60% (Asesor)";
-                      const gross = agentCommissions.reduce((sum, c) => sum + (c.gross_amount || (user.role === ROLES.AGENCY ? c.commission_amount / 0.30 : c.commission_amount / 0.60) || 0), 0);
-                      const net = agentCommissions.reduce((sum, c) => sum + (c.commission_amount || 0), 0);
-                      const platformShare = gross - net;
+                      const sysConfig = getSystemConfig();
+                      const fullServicePrice = sysConfig.fullServicePrice;
+                      const commissionRate = (user.role === ROLES.AGENCY ? sysConfig.agencyReferralRate : sysConfig.agentCommissionRate) / 100;
+                      const agentCommissionAmount = fullServicePrice * commissionRate;
+
+                      // Merge real database commissions with synthetic ones for assigned clients that don't have a commission record yet
+                      const mergedCommissions: Commission[] = [...agentCommissions];
+
+                      assignedClients.forEach(client => {
+                        const clientName = client.client_name || `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente';
+                        const hasRealComm = agentCommissions.some(c => {
+                          const cName = (c.client_name || "").toLowerCase();
+                          const clName = clientName.toLowerCase();
+                          return cName.includes(clName) || clName.includes(cName);
+                        });
+
+                        if (!hasRealComm) {
+                          // Determine status: if the appointment status is confirmed/completed, it is paid, otherwise pending/processing
+                          const isCompleted = client.appointment_request?.status === 'confirmed' || client.cita_details?.status === 'confirmed' || selectedClientProfile?.appointment_request?.status === 'confirmed';
+
+                          mergedCommissions.push({
+                            id: `synthetic-comm-${client.id}`,
+                            agent_id: user.id,
+                            client_folio: client.id.substring(0, 8).toUpperCase(),
+                            client_name: clientName,
+                            service_type: 'full_service' as any,
+                            gross_amount: fullServicePrice,
+                            commission_rate: commissionRate,
+                            commission_amount: agentCommissionAmount,
+                            status: isCompleted ? 'paid' : 'processing',
+                            paid_at: isCompleted ? new Date().toISOString() : null,
+                            notes: 'Comisión de trámite en curso',
+                            created_at: client.created_at || new Date().toISOString()
+                          });
+                        }
+                      });
+
+                      const totalClients = assignedClients.length;
+                      const pendingBalance = mergedCommissions.filter(c => c.status === 'pending' || c.status === 'processing').reduce((sum, c) => sum + c.commission_amount, 0);
+                      const availableBalance = mergedCommissions.filter(c => c.status === 'paid').reduce((sum, c) => sum + c.commission_amount, 0);
+                      const totalEarned = mergedCommissions.reduce((sum, c) => sum + c.commission_amount, 0);
+
                       return (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
-                          <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                            <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Facturación Bruta</span>
-                            <p className="text-lg font-bold text-text-primary font-mono mt-1">${gross.toFixed(2)} USD</p>
+                        <>
+                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
+                            <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Clientes Activos</span>
+                              <p className="text-lg font-bold text-text-primary font-mono mt-1">{totalClients}</p>
+                            </div>
+                            <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Saldo en Trámite</span>
+                              <p className="text-lg font-bold text-amber-600 font-mono mt-1">${pendingBalance.toFixed(2)} USD</p>
+                            </div>
+                            <div className="p-4 bg-background-main border border-border-light rounded-sm">
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Líquido por Retirar</span>
+                              <p className="text-lg font-bold text-emerald-600 font-mono mt-1">${availableBalance.toFixed(2)} USD</p>
+                            </div>
+                            <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
+                              <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Histórico Acumulado</span>
+                              <p className="text-lg font-bold text-brand-primary font-mono mt-1">${totalEarned.toFixed(2)} USD</p>
+                            </div>
                           </div>
-                          <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                            <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Esquema de Comisión</span>
-                            <p className="text-lg font-bold text-emerald-600 font-mono mt-1">{rateLabel}</p>
+
+                          {/* Table */}
+                          <div className="border border-border-light rounded-sm p-5 bg-white text-left">
+                            <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes</h3>
+                            {isLoadingCommissions ? (
+                              <div className="flex justify-center py-8">
+                                <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
+                              </div>
+                            ) : mergedCommissions.length === 0 ? (
+                              <div className="py-8 text-center text-text-muted italic text-xs border-t border-border-light">
+                                No se han encontrado registros de comisiones aprobadas para tu cuenta.
+                              </div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
+                                      <th className="py-2.5">Fecha</th>
+                                      <th className="py-2.5">Cliente</th>
+                                      <th className="py-2.5">Trámite</th>
+                                      <th className="py-2.5">Importe</th>
+                                      <th className="py-2.5">Estado</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-border-light">
+                                    {mergedCommissions.map((c) => (
+                                      <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
+                                        <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
+                                        <td className="py-3 font-semibold">{c.client_name}</td>
+                                        <td className="py-3 text-text-secondary">{c.service_type === 'full_service' ? 'Asesoría Consular Completa' : c.service_type}</td>
+                                        <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
+                                        <td className="py-3">
+                                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid"
+                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                            : c.status === "processing" || c.status === "pending"
+                                              ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                              : "bg-gray-100 text-gray-500"
+                                            }`}>
+                                            {c.status === "paid" ? "Pagado" : (c.status === "processing" || c.status === "pending") ? "En Proceso" : "Pendiente"}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
                           </div>
-                          <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                            <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Parte TodoVisa</span>
-                            <p className="text-lg font-bold text-text-secondary font-mono mt-1">${platformShare.toFixed(2)} USD</p>
-                          </div>
-                          <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
-                            <span className="text-[9px] text-brand-primary uppercase tracking-wider font-bold block">Liquidación Neta</span>
-                            <p className="text-lg font-bold text-brand-primary font-mono mt-1">${net.toFixed(2)} USD</p>
-                          </div>
-                        </div>
+                        </>
                       );
                     })()}
-
-                    {/* Table */}
-                    <div className="border border-border-light rounded-sm p-5 bg-white">
-                      <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes</h3>
-                      {isLoadingCommissions ? (
-                        <div className="flex justify-center py-8">
-                          <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
-                        </div>
-                      ) : agentCommissions.length === 0 ? (
-                        <div className="py-8 text-center text-text-muted italic text-xs border-t border-border-light">
-                          No se han encontrado registros de comisiones aprobadas para tu cuenta.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
-                                <th className="py-2.5">Fecha</th>
-                                <th className="py-2.5">Cliente</th>
-                                <th className="py-2.5">Trámite</th>
-                                <th className="py-2.5">Importe</th>
-                                <th className="py-2.5">Estado</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border-light">
-                              {agentCommissions.map((c) => (
-                                <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
-                                  <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
-                                  <td className="py-3 font-semibold">{c.client_name}</td>
-                                  <td className="py-3 text-text-secondary">{c.service_type}</td>
-                                  <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
-                                  <td className="py-3">
-                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : c.status === "processing"
-                                        ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                        : "bg-gray-100 text-gray-500"
-                                      }`}>
-                                      {c.status === "paid" ? "Pagado" : c.status === "processing" ? "En Proceso" : "Pendiente"}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
 

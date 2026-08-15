@@ -2,19 +2,38 @@
 
 import Image from "next/image"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { UserAvatar } from "./UserAvatar"
 import { useState, useEffect } from "react"
 import { useAuthStore } from "@/app/store/authStore"
 import { AuthService } from "@/app/service/AuthService"
+import { AuthClientService } from "@/services/client/AuthClientService"
 import { ProfileClientService } from "@/services/client/ProfileClientService"
+import { AgencyClientService } from "@/services/client/AgencyClientService"
 import { ROLES } from "@/app/constants/roles"
-import { visaDestinations } from "@/app/constants/visas/destinations"
+import { visaDestinations, getCentralizedDestinations } from "@/app/constants/visas/destinations"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
+    const pathname = usePathname();
     const user = useAuthStore((state) => state.user);
     const [isMounted, setIsMounted] = useState(false);
     const [showLoader, setShowLoader] = useState(true);
+    const [headerDestinations, setHeaderDestinations] = useState(visaDestinations);
+
+    useEffect(() => {
+        setHeaderDestinations(getCentralizedDestinations());
+        const handleStorage = () => setHeaderDestinations(getCentralizedDestinations());
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
+    }, []);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+    const handleLogoClick = (e: React.MouseEvent) => {
+        if (pathname === "/") {
+            e.preventDefault();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+    };
 
     useEffect(() => {
         setIsMounted(true);
@@ -76,19 +95,38 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
             const params = new URLSearchParams(window.location.search);
             const refParam = params.get("ref") || params.get("agency_ref");
             if (refParam) {
-                localStorage.setItem("todovisa_agency_ref", refParam);
+                AgencyClientService.processAndStoreAgencyCode(refParam);
             }
+
+            // Registrar escuchadores de eventos para refrescar el tiempo de actividad del usuario
+            const handleUserActivity = () => {
+                AuthClientService.updateLastActivity();
+            };
+
+            window.addEventListener("click", handleUserActivity);
+            window.addEventListener("keydown", handleUserActivity);
+
+            const timer = setTimeout(() => {
+                setShowLoader(false);
+            }, 300);
+            return () => {
+                clearTimeout(timer);
+                window.removeEventListener("click", handleUserActivity);
+                window.removeEventListener("keydown", handleUserActivity);
+            };
         }
-        const timer = setTimeout(() => {
-            setShowLoader(false);
-        }, 300);
-        return () => clearTimeout(timer);
     }, []);
 
 
     useEffect(() => {
         const syncSession = async () => {
             try {
+                // Verificar si la sesión expiró por más de 24 horas de inactividad
+                if (AuthClientService.checkSessionInactivityTimeout()) {
+                    useAuthStore.getState().clearUser();
+                    return;
+                }
+
                 // Pre-check if any supabase session token exists in localStorage to avoid useless 401 calls
                 let hasToken = false;
                 if (typeof window !== "undefined") {
@@ -113,6 +151,9 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                     return;
                 }
 
+                // Si hay sesión activa, actualizar el registro de actividad reciente
+                AuthClientService.updateLastActivity();
+
                 // ⚡ Parallel fetch: user + profile role in one round-trip instead of two sequential calls
                 const [userRes, profileResRaw] = await Promise.all([
                     AuthService.getUser().catch(() => null),
@@ -123,12 +164,16 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                 const supabaseUser = userRes?.data?.user;
                 if (supabaseUser) {
+                    // Sync / merge local agency referral code to Supabase metadata if exists
+                    AgencyClientService.syncReferralOnLogin(supabaseUser);
                     // Fetch profile role now that we have the userId — this is the only call we can't parallelize
                     // without the user id, but we avoided the getSession() call above being repeated.
                     let profileRole = null;
+                    let dbProfile: any = null;
                     try {
                         const profileRes = await ProfileClientService.getProfile(supabaseUser.id);
-                        profileRole = profileRes?.profile?.role;
+                        dbProfile = profileRes?.profile || null;
+                        profileRole = dbProfile?.role;
                     } catch (pErr) {
                         console.warn("Could not fetch profile role:", pErr);
                     }
@@ -146,7 +191,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         viproDestination: metadata.vipro_destination || null,
                         hasPaidAdvisor: metadata.has_paid_advisor || false,
                         assignedAgentId: metadata.assigned_agent_id || null,
-                        photoUrl: metadata.photo_url || metadata.avatar_url || metadata.picture || null,
+                        photoUrl: dbProfile?.photo_url || metadata.photo_url || metadata.avatar_url || metadata.picture || null,
                         avatarChangesThisMonth: metadata.avatar_changes_this_month || 0,
                         lastAvatarChangeMonth: metadata.last_avatar_change_month || '',
                         ds160FullName: metadata.ds160_full_name || null,
@@ -155,7 +200,10 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         ds160PurposeOfTrip: metadata.ds160_purpose_of_trip || null,
                         ds160HasAssets: metadata.ds160_has_assets ?? true,
                         ds160Confirmed: metadata.ds160_confirmed || false,
-                        expedienteStatus: metadata.expediente_status || 'draft',
+                        expedienteStatus: dbProfile?.expediente_status || metadata.expediente_status || 'draft',
+                        clientDocs: dbProfile?.client_docs || metadata.client_docs || {},
+                        documentReviews: dbProfile?.document_reviews || metadata.document_reviews || {},
+                        appointmentRequest: dbProfile?.appointment_request || dbProfile?.cita_details || metadata.appointment_request || null,
                         role: (profileRole as typeof ROLES[keyof typeof ROLES]) || ROLES.USER,
                     };
 
@@ -165,7 +213,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         currentUser.role !== updatedUser.role || 
                         currentUser.email !== updatedUser.email || 
                         currentUser.firstName !== updatedUser.firstName ||
-                        currentUser.lastName !== updatedUser.lastName;
+                        currentUser.lastName !== updatedUser.lastName ||
+                        currentUser.photoUrl !== updatedUser.photoUrl;
 
                     if (isDifferent) {
                         useAuthStore.getState().setUser(updatedUser);
@@ -207,14 +256,13 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                         {/* LEFT SECTION: Logo & Desktop Links */}
                         <div className="flex items-center gap-10">
                             <div className="flex-shrink-0">
-                                <Link href="/">
+                                <Link href="/" onClick={handleLogoClick}>
                                     <Image
                                         src="/images/todovisa.png"
                                         alt="Logo TODOVISA"
                                         width={72}
                                         height={72}
-                                        className="object-contain"
-                                        style={{ width: "auto", height: "auto" }}
+                                        className="object-contain w-12 sm:w-16 md:w-20 h-auto"
                                     />
                                 </Link>
                             </div>
@@ -241,7 +289,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-[10px] text-text-secondary mt-1">Todos los destinos disponibles</span>
                                             </div>
                                         </Link>
-                                        {visaDestinations.map((c) => (
+                                        {headerDestinations.map((c: any) => (
                                             !c.enabled ? (
                                                 <div key={c.code} className="flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-gray-300 cursor-not-allowed">
                                                     <span className="text-base">{c.flag}</span>
@@ -310,7 +358,6 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                                 <Link href="/vipro-form" className="hover:text-brand-primary transition-colors duration-200">Evaluación VIPRO</Link>
                                 <Link href="/about-us" className="hover:text-brand-primary transition-colors duration-200">Sobre TodoVisa</Link>
-                                <Link href="/sobre-todovisa" className="hover:text-brand-primary transition-colors duration-200">Noticias</Link>
                             </div>
                         </div>
 
@@ -403,7 +450,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                     {/* Mobile menu dropdown */}
                     {isMenuOpen && (
-                        <div className="lg:hidden w-full bg-white border-t border-border-light shadow-xl absolute top-full left-0 z-40 py-6 px-[6%] flex flex-col gap-6 animate-in slide-in-from-top duration-250">
+                        <div className="lg:hidden w-full bg-white border-t border-border-light shadow-xl absolute top-full left-0 z-40 py-6 px-6 max-h-[85vh] overflow-y-auto flex flex-col gap-6 animate-in slide-in-from-top duration-250">
                             {/* Navigation Links */}
                             <div className="flex flex-col gap-5 text-sm font-semibold text-text-secondary text-left">
                                 {/* Visas Group */}
@@ -444,7 +491,6 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
 
                                 <Link href="/vipro-form" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Evaluación VIPRO</Link>
                                 <Link href="/about-us" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Sobre TodoVisa</Link>
-                                <Link href="/sobre-todovisa" onClick={() => setIsMenuOpen(false)} className="hover:text-brand-primary py-1">Noticias</Link>
                             </div>
 
                             <hr className="border-border-light/60" />
@@ -454,13 +500,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                 {userData?.id ? (
                                     <>
                                         <div className="flex items-center gap-3 bg-brand-light/30 p-3 rounded-lg border border-brand-primary/10 text-left">
-                                            <div className="w-10 h-10 bg-brand-light rounded-full flex items-center justify-center border border-brand-primary/20 overflow-hidden">
-                                                {userData.photoUrl ? (
-                                                    <img src={userData.photoUrl} alt="Avatar" className="w-full h-full object-cover" />
-                                                ) : (
-                                                    <span className="text-brand-primary font-bold text-sm">{userData.email.charAt(0).toUpperCase()}</span>
-                                                )}
-                                            </div>
+                                            <UserAvatar
+                                                src={userData.photoUrl}
+                                                name={userData.firstName + " " + userData.lastName}
+                                                size="md"
+                                            />
                                             <div className="flex flex-col">
                                                 <span className="text-text-primary font-bold text-xs">{userData.firstName + " " + userData.lastName}</span>
                                                 <span className="text-text-secondary text-[10px]">{userData.email}</span>

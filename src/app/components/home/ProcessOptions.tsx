@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/authStore';
+import { getSystemConfig } from "@/app/constants/config";
 
 const processOptions = {
   servicioCompleto: {
@@ -57,28 +58,18 @@ export const ProcessSection = () => {
   const [active, setActive] = useState('servicioCompleto');
   const router = useRouter();
   const { user } = useAuthStore();
-  const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  const [price, setPrice] = useState(() => getSystemConfig().fullServicePrice);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("fullServicePrice");
-    if (savedPrice) {
-      setPrice(Number(savedPrice));
-    }
-    const savedViproPrice = localStorage.getItem("viproPrice");
-    if (savedViproPrice) {
-      setViproPrice(Number(savedViproPrice));
-    }
+    const config = getSystemConfig();
+    setPrice(config.fullServicePrice);
+    setViproPrice(config.viproPrice);
 
     const handleStorage = () => {
-      const saved = localStorage.getItem("fullServicePrice");
-      if (saved) {
-        setPrice(Number(saved));
-      }
-      const savedVipro = localStorage.getItem("viproPrice");
-      if (savedVipro) {
-        setViproPrice(Number(savedVipro));
-      }
+      const updated = getSystemConfig();
+      setPrice(updated.fullServicePrice);
+      setViproPrice(updated.viproPrice);
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
@@ -146,8 +137,7 @@ export const ProcessSection = () => {
           {processOptions[active as keyof typeof processOptions].steps.map((step, index) => (
             <div
               key={`${active}-step-${index}`}
-              className="flex flex-col items-center w-full md:w-1/3 px-4 animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
-              style={{ animationDelay: `${index * 120}ms`, animationFillMode: 'both' }}
+              className="flex flex-col items-center w-full md:w-1/3 px-4 transition-all duration-300 ease-out"
             >
               
               <div className="w-4 h-4 bg-brand-primary rounded-full mb-10 hidden md:block ring-[6px] ring-white shadow-xs"></div>
@@ -173,7 +163,7 @@ export const ProcessSection = () => {
       {/* Plan Details Card */}
       <div
         key={`${active}-plan-details`}
-        className="w-full bg-brand-primary rounded-sm px-8 py-10 md:py-12 relative overflow-hidden flex flex-col md:flex-row items-center gap-8 animate-in fade-in-0 slide-in-from-bottom-3 duration-500 mt-20"
+        className="w-full bg-brand-primary rounded-sm px-8 py-10 md:py-12 relative overflow-hidden flex flex-col md:flex-row items-center gap-8 transition-all duration-300 mt-20"
       >
         {/* Background grid */}
         <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:12px_12px] pointer-events-none select-none"></div>

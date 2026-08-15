@@ -86,6 +86,8 @@ export class AuthRepository {
           if (attributes.ds160_has_assets !== undefined) profileUpdates.ds160_has_assets = attributes.ds160_has_assets;
           if (attributes.ds160_confirmed !== undefined) profileUpdates.ds160_confirmed = attributes.ds160_confirmed;
           if (attributes.document_reviews !== undefined) profileUpdates.document_reviews = attributes.document_reviews;
+          if (attributes.appointment_request !== undefined) profileUpdates.appointment_request = attributes.appointment_request;
+          if (attributes.cita_details !== undefined) profileUpdates.cita_details = attributes.cita_details;
 
           if (Object.keys(profileUpdates).length > 0) {
             await client.from("profiles").update(profileUpdates).eq("id", user.id);

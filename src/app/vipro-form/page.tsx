@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "../store/authStore";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import { AuthService } from "../service/AuthService";
+import { getSystemConfig } from "../constants/config";
 
 function ViproFormContent() {
     const headerRef = useRef(null);
@@ -15,13 +16,13 @@ function ViproFormContent() {
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const router = useRouter();
     const user = useAuthStore((state) => state.user);
-    const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+    const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
     useEffect(() => {
-        const savedPrice = localStorage.getItem("viproPrice");
-        if (savedPrice) {
-            setViproPrice(Number(savedPrice));
-        }
+        setViproPrice(getSystemConfig().viproPrice);
+        const handleStorage = () => setViproPrice(getSystemConfig().viproPrice);
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
     }, []);
 
     // Check if there is an in-progress evaluation
@@ -69,38 +70,14 @@ function ViproFormContent() {
         }
     }, []);
 
-    if (!user) {
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-md mx-auto my-12">
-                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center mb-6 text-2xl font-bold">
-                        🔒
-                    </div>
-                    <h2 className="text-2xl font-bold text-text-primary mb-3">Acceso Restringido</h2>
-                    <p className="text-sm text-text-secondary mb-8 leading-relaxed">
-                        Debes iniciar sesión con tu cuenta para acceder a la Evaluación VIPRO.
-                    </p>
-                    <button
-                        onClick={() => router.push("/auth/signin")}
-                        className="w-full bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm shadow-sm"
-                    >
-                        Iniciar Sesión
-                    </button>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
-
-    const isAdmin = user && (user.role === "admin" || user.role === "moderator");
-    const hasPaid = user.hasPaidVipro || user.hasPaidAdvisor || isAdmin;
-    const completed = user.viproCompleted;
+    const isAdmin = user ? (user.role === "admin" || user.role === "moderator") : false;
+    const hasPaid = user ? (user.hasPaidVipro || user.hasPaidAdvisor || isAdmin) : false;
+    const completed = user ? user.viproCompleted : false;
 
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
             <Header headerRef={headerRef} />
-            <main className="w-[80%] mx-auto py-12 md:py-20 flex flex-col gap-24 flex-1">
+            <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-16 flex flex-col gap-16 md:gap-24 flex-1">
                 <div className="flex flex-col md:flex-row items-center gap-20">
                     <div className="w-full md:w-1/2 flex flex-col items-start gap-6">
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-text-primary leading-tight tracking-tight text-left">
@@ -174,7 +151,13 @@ function ViproFormContent() {
                                         <span className="text-3xl font-extrabold text-brand-primary font-mono">${viproPrice.toFixed(2)} <span className="text-xs font-sans text-text-muted">USD</span></span>
                                     </div>
                                     <button
-                                        onClick={() => setIsCheckoutOpen(true)}
+                                        onClick={() => {
+                                            if (!user) {
+                                                router.push("/auth/signin?redirect=/vipro-form");
+                                            } else {
+                                                setIsCheckoutOpen(true);
+                                            }
+                                        }}
                                         className="w-full sm:w-auto bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold py-3.5 px-8 rounded-sm transition-all shadow-sm cursor-pointer text-center"
                                     >
                                         Adquirir Evaluación VIPRO &rarr;

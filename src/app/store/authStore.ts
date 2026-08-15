@@ -29,6 +29,7 @@ export interface UserData {
   hasCompletedVipro?: boolean;
   clientDocs?: Record<string, string>;
   documentReviews?: Record<string, any>;
+  appointmentRequest?: any;
 }
 
 interface AuthState {

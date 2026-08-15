@@ -4,25 +4,29 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { visaDestinations } from "../constants/visas/destinations";
-
-const countries = visaDestinations.map(d => ({
-    code: d.code.toUpperCase(),
-    name: d.name,
-    flag: d.flagImage,
-    type: d.type,
-    description: d.description,
-    available: d.enabled,
-    badge: d.badge
-}));
+import { getCentralizedDestinations } from "../constants/visas/destinations";
 
 export default function VisasPage() {
     const headerRef = useRef(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [destinations, setDestinations] = useState(() => getCentralizedDestinations());
 
     useEffect(() => {
-        if (headerRef.current) {}
+        setDestinations(getCentralizedDestinations());
+        const handleStorage = () => setDestinations(getCentralizedDestinations());
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
     }, []);
+
+    const countries = destinations.map(d => ({
+        code: d.code.toUpperCase(),
+        name: d.name,
+        flag: d.flagImage,
+        type: d.type,
+        description: d.description,
+        available: d.enabled,
+        badge: d.badge
+    }));
 
     const filteredCountries = countries.filter(c =>
         c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -34,9 +38,9 @@ export default function VisasPage() {
             <Header headerRef={headerRef} />
 
             {/* Header Hero Banner */}
-            <div className="w-full bg-brand-primary py-16 px-6 relative overflow-hidden text-left">
+            <div className="w-full bg-brand-primary py-16 px-4 sm:px-6 relative overflow-hidden text-left">
                 <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                <div className="w-[80%] mx-auto relative z-10 space-y-4">
+                <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-4">
                     <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest text-white/80 bg-white/10 px-3 py-1 rounded-full border border-white/20">
                         Catálogo Consular Global
                     </span>
@@ -49,7 +53,7 @@ export default function VisasPage() {
                 </div>
             </div>
 
-            <main className="w-[80%] mx-auto py-14 flex-1 space-y-10">
+            <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14 flex-1 space-y-10">
                 {/* Search Bar & Filters */}
                 <div className="bg-white border border-border-light rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div className="relative w-full sm:w-96">

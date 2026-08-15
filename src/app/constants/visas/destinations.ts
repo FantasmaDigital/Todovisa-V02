@@ -89,3 +89,47 @@ export const visaDestinations: VisaDestination[] = [
         aboutDesc: "e-Tourist Visa (ETA) electrónica con aprobación rápida en 72 horas."
     }
 ];
+
+export const agentTargetCountries = [
+    "Estados Unidos",
+    "Canadá",
+    "México",
+    "Reino Unido",
+    "Australia",
+    "España",
+    "China",
+    "India",
+    "Otro"
+];
+
+/**
+ * Returns active visa destinations from localStorage (synced with DB system_settings)
+ * or falls back to standard visaDestinations list.
+ */
+export function getCentralizedDestinations(): VisaDestination[] {
+    if (typeof window !== "undefined") {
+        const stored = localStorage.getItem("visa_destinations");
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed.map((item: any) => {
+                        const match = visaDestinations.find(d => d.code === item.code || d.name === item.name);
+                        return {
+                            ...match,
+                            ...item
+                        };
+                    });
+                }
+            } catch (e) {}
+        }
+    }
+    return visaDestinations;
+}
+
+/**
+ * Returns list of country names for selection forms (e.g. Agent Application, Citas, etc.)
+ */
+export function getDestinationCountryNames(): string[] {
+    return agentTargetCountries;
+}

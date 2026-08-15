@@ -35,7 +35,7 @@ export const countryVisaData: Record<string, CountryVisaInfo> = {
         flag: "/images/flag_uk.png",
         flagEmoji: null,
         available: true,
-        heroDescription: "Obtén toda la información necesaria para tramitar tu visa al Reino Unido: requisitos oficiales (UKVI), procedimiento de solicitud y guía probatoria de solvencia.",
+        heroDescription: "Obtén toda la información necesaria para solicitar tu visa al Reino Unido con acompañamiento experto: requisitos oficiales (UKVI), procedimiento de solicitud y guía probatoria de solvencia.",
         requiringCountries: [
             {
                 region: "África",
@@ -90,7 +90,7 @@ export const countryVisaData: Record<string, CountryVisaInfo> = {
         flag: "/images/flag_us.png",
         flagEmoji: null,
         available: true,
-        heroDescription: "Guía completa para tramitar tu visa de Turismo y Negocios a EE.UU. (B1/B2): formulario DS-160, arancel MRV, preparación de expediente y entrevista consular.",
+        heroDescription: "Guía completa para solicitar tu visa de Turismo y Negocios a EE.UU. (B1/B2) con acompañamiento profesional: formulario DS-160, arancel MRV, preparación de expediente y entrevista consular.",
         requiringCountries: [
             {
                 region: "América Latina",

@@ -7,7 +7,7 @@ const footerLinks = {
   Servicios: [
     { label: "Asesoría Virtual", href: "/citas" },
     { label: "Evaluación VIPRO", href: "/vipro-form" },
-    { label: "Tramitar mi Visa", href: "/visas" },
+    { label: "Solicitar acompañamiento para mi Visa", href: "/visas" },
     { label: "Cómo Funciona", href: "/#como-funciona" },
   ],
   Compañía: [
@@ -27,7 +27,7 @@ export function Footer() {
   return (
     <footer className="w-full bg-[#0A2540] text-white">
       {/* Top bar */}
-      <div className="w-[88%] max-w-7xl mx-auto py-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 border-b border-white/10">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 border-b border-white/10">
 
         {/* Brand column */}
         <div className="lg:col-span-2 flex flex-col gap-5">
@@ -107,7 +107,7 @@ export function Footer() {
       </div>
 
       {/* Bottom bar */}
-      <div className="w-[88%] max-w-7xl mx-auto py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/30">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/30">
         <span>© {new Date().getFullYear()} TODOVISA. Todos los derechos reservados.</span>
       </div>
     </footer>
