@@ -5,65 +5,18 @@ import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "../store/authStore";
+import { getCentralizedDestinations } from "../constants/visas/destinations";
+import { getSystemConfig } from "../constants/config";
 
-const countries = [
-    {
-        code: "US",
-        name: "Estados Unidos",
-        flag: "/images/flag_us.png",
-        flagEmoji: null,
-        description: "País de América del Norte conocido por su diversidad cultural, economía poderosa y liderazgo global en política y tecnología.",
-        available: false,
-    },
-    {
-        code: "CA",
-        name: "Canadá",
-        flag: "/images/flag_ca.png",
-        flagEmoji: null,
-        description: "País en América del Norte famoso por sus paisajes naturales vastos, multiculturalismo y alta calidad de vida.",
-        available: true,
-    },
-    {
-        code: "MX",
-        name: "México",
-        flag: "/images/flag_mx.png",
-        flagEmoji: null,
-        description: "País en América del Norte rico en cultura, historia, playas paradisíacas y vida urbana vibrante.",
-        available: true,
-    },
-    {
-        code: "UK",
-        name: "Inglaterra",
-        flag: "/images/flag_uk.png",
-        flagEmoji: null,
-        description: "Parte del Reino Unido famosa por su historia rica, contribuciones a la literatura y ciencia, y su monarquía.",
-        available: true,
-    },
-    {
-        code: "CN",
-        name: "China",
-        flag: "/images/flag_ch.png",
-        flagEmoji: null,
-        description: "País en Asia conocido por su antigua civilización, avances tecnológicos y maravillas como la Gran Muralla y la Ciudad Prohibida.",
-        available: false,
-    },
-    {
-        code: "AU",
-        name: "Australia",
-        flag: "/images/flag_aus.png",
-        flagEmoji: null,
-        description: "País en Oceanía famoso por su fauna única, paisajes naturales impresionantes y un estilo de vida relajado.",
-        available: true,
-    },
-    {
-        code: "IN",
-        name: "India",
-        flag: "/images/flag_in.png",
-        flagEmoji: null,
-        description: "País en Asia del Sur conocido por su diversidad cultural, riqueza histórica y espiritualidad, hogar de monumentos como el Taj Mahal.",
-        available: true,
-    },
-];
+// Derived dynamically from central visa destinations
+const getServiceCountries = () => getCentralizedDestinations().map(d => ({
+    code: d.code.toUpperCase(),
+    name: d.name,
+    flag: d.flagImage,
+    flagEmoji: d.flag,
+    description: d.description,
+    available: d.enabled
+}));
 
 const GuideIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -76,28 +29,18 @@ export default function ServicesPage() {
     const headerRef = useRef(null);
     const user = useAuthStore((state) => state.user);
     const isViproCompleted = Boolean(user?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))));
-    const [price, setPrice] = useState(Number(process.env.NEXT_PUBLIC_FULL_SERVICE_PRICE) || 150);
-    const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+    const [price, setPrice] = useState(() => getSystemConfig().fullServicePrice);
+    const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 
     useEffect(() => {
-        const savedPrice = localStorage.getItem("fullServicePrice");
-        if (savedPrice) {
-            setPrice(Number(savedPrice));
-        }
-        const savedViproPrice = localStorage.getItem("viproPrice");
-        if (savedViproPrice) {
-            setViproPrice(Number(savedViproPrice));
-        }
+        const config = getSystemConfig();
+        setPrice(config.fullServicePrice);
+        setViproPrice(config.viproPrice);
 
         const handleStorage = () => {
-            const saved = localStorage.getItem("fullServicePrice");
-            if (saved) {
-                setPrice(Number(saved));
-            }
-            const savedVipro = localStorage.getItem("viproPrice");
-            if (savedVipro) {
-                setViproPrice(Number(savedVipro));
-            }
+            const updated = getSystemConfig();
+            setPrice(updated.fullServicePrice);
+            setViproPrice(updated.viproPrice);
         };
         window.addEventListener("storage", handleStorage);
         return () => window.removeEventListener("storage", handleStorage);
@@ -265,7 +208,7 @@ export default function ServicesPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-                    {countries.map((country) => (
+                    {getServiceCountries().map((country) => (
                         <div
                             key={country.code}
                             className="bg-white rounded-lg overflow-hidden border border-gray-200/80 shadow-[0_2px_10px_rgba(0,0,0,0.04)] hover:shadow-xl transition-all duration-300 flex flex-col h-full hover:cursor-pointer hover:-translate-y-4"

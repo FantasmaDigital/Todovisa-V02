@@ -267,7 +267,14 @@ function AgentPortalContent() {
         } catch (_) {}
       }
 
-      if (!currentUser || (currentUser.email?.toLowerCase() !== appData.email?.toLowerCase() && currentUser.role !== "admin" && currentUser.role !== "moderator")) {
+      const isAuthorized = currentUser && (
+        (currentUser.id && appData.user_id && currentUser.id === appData.user_id) ||
+        (currentUser.email && appData.email && currentUser.email.toLowerCase().trim() === appData.email.toLowerCase().trim()) ||
+        currentUser.role === "admin" ||
+        currentUser.role === "moderator"
+      );
+
+      if (!isAuthorized) {
         console.warn("Acceso no autorizado a la postulación. Redireccionando al perfil.");
         router.push("/profile");
         return;

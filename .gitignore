@@ -44,6 +44,7 @@ next-env.d.ts
 supabase_schema.sql
 /db_scripts/
 /scripts/
+/scratch/
 
 # security / local environment
 .env*

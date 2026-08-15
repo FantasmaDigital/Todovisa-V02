@@ -5,17 +5,24 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import Link from "next/link";
 import Image from "next/image";
-import { visaDestinations } from "../constants/visas/destinations";
+import { getCentralizedDestinations } from "../constants/visas/destinations";
+import { getSystemConfig } from "../constants/config";
 
 export default function AboutUsPage() {
   const headerRef = useRef(null);
-  const [viproPrice, setViproPrice] = useState(Number(process.env.NEXT_PUBLIC_VIPRO_PRICE) || 19.99);
+  const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
+  const [activeDestinations, setActiveDestinations] = useState(() => getCentralizedDestinations());
 
   useEffect(() => {
-    const savedPrice = localStorage.getItem("viproPrice");
-    if (savedPrice) {
-      setViproPrice(Number(savedPrice));
-    }
+    setViproPrice(getSystemConfig().viproPrice);
+    setActiveDestinations(getCentralizedDestinations());
+
+    const handleStorage = () => {
+      setViproPrice(getSystemConfig().viproPrice);
+      setActiveDestinations(getCentralizedDestinations());
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   const stats = [
@@ -48,7 +55,7 @@ export default function AboutUsPage() {
     }
   ];
 
-  const destinations = visaDestinations.map(d => ({
+  const destinations = activeDestinations.map(d => ({
     name: d.name,
     flag: d.flag,
     desc: d.aboutDesc || d.description

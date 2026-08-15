@@ -11,6 +11,7 @@ import { Header } from "./components/shared/Header";
 import { Hero } from "./components/home/Hero";
 import { Testimoniasl } from "./components/home/Testimonials";
 import { AnimatedSection } from "./components/home/AnimatedSection";
+import { AgencyPromoBanner } from "./components/home/AgencyPromoBanner";
 
 export default function Home() {
   const headerRef = useRef(null);
@@ -68,6 +69,11 @@ export default function Home() {
             </AnimatedSection>
           </div>
         </section>
+
+        {/* Agency Promo Banner B2B */}
+        <AnimatedSection>
+          <AgencyPromoBanner />
+        </AnimatedSection>
 
         {/* split image */}
         <AnimatedSection>

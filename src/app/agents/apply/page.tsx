@@ -9,8 +9,11 @@ import { StorageClientService } from "@/services/client/StorageClientService";
 import { AgentClientService } from "@/services/client/AgentClientService";
 import { useAuthStore } from "../../store/authStore";
 import { ROLES } from "../../constants/roles";
+import { getDestinationCountryNames } from "@/app/constants/visas/destinations";
+import { AuthService } from "../../service/AuthService";
 
 interface FormData {
+  partnerType: "advisor" | "b2b_agency";
   fullName: string;
   email: string;
   phone: string;
@@ -36,6 +39,7 @@ export default function AgentApplyPage() {
 
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<FormData>({
+    partnerType: "advisor",
     fullName: "",
     email: "",
     phone: "",
@@ -85,7 +89,24 @@ export default function AgentApplyPage() {
 
   const removeDoc = (key: string) => setDocs((prev) => ({ ...prev, [key]: null }));
 
-  const countriesList = ["Estados Unidos", "Canadá", "México", "Reino Unido", "Australia", "España", "Otro"];
+  const [countriesList, setCountriesList] = useState(() => getDestinationCountryNames());
+  useEffect(() => {
+    setCountriesList(getDestinationCountryNames());
+    const handleStorage = () => setCountriesList(getDestinationCountryNames());
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
+    if (user?.email) {
+      setFormData((prev) => ({
+        ...prev,
+        email: user.email,
+        fullName: prev.fullName || `${user.firstName || ""} ${user.lastName || ""}`.trim()
+      }));
+    }
+  }, [user]);
+
   const specialtiesList = ["Visas de Turista", "Visas de Estudiante", "Visas de Trabajo", "Residencia Permanente", "Visas de Negocios / Inversión", "Renovación de Visa"];
   const languagesList = ["Español", "Inglés", "Francés", "Portugués", "Alemán"];
 
@@ -121,9 +142,10 @@ export default function AgentApplyPage() {
       // Step 1: Benefits and Earnings model viewer (always valid)
     } else if (step === 2) {
       if (!formData.fullName.trim()) newErrors.fullName = "El nombre completo es requerido.";
-      if (!formData.email.trim()) {
+      const activeEmail = (user?.email || formData.email || "").trim();
+      if (!activeEmail) {
         newErrors.email = "El correo electrónico es requerido.";
-      } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      } else if (!/\S+@\S+\.\S+/.test(activeEmail)) {
         newErrors.email = "Ingresa un correo electrónico válido.";
       }
       if (!formData.phone.trim()) newErrors.phone = "El teléfono de contacto es requerido.";
@@ -191,10 +213,12 @@ export default function AgentApplyPage() {
     }
 
     try {
-      await AgentClientService.submitApplication({
+      const activeEmail = (user?.email || formData.email || "").trim().toLowerCase();
+      const applicationPayload = {
         application_id: randomId,
+        user_id: user?.id || null,
         full_name: formData.fullName,
-        email: formData.email,
+        email: activeEmail,
         phone: formData.phone,
         country_residence: formData.countryResidence,
         experience_years: formData.experienceYears,
@@ -205,7 +229,9 @@ export default function AgentApplyPage() {
         biography: formData.biography,
         terms_accepted: formData.termsAccepted,
         status: "pending",
+        application_type: formData.partnerType === "b2b_agency" ? "agency" : "individual",
         documents: {
+          partner_type: formData.partnerType,
           dui: uploadedDocUrls.dui,
           certificacion: uploadedDocUrls.certificacion,
           antecedentes: uploadedDocUrls.antecedentes,
@@ -213,7 +239,14 @@ export default function AgentApplyPage() {
           titulo: uploadedDocUrls.titulo,
           cv: uploadedDocUrls.cv,
         }
-      });
+      };
+
+      await AgentClientService.submitApplication(applicationPayload);
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("user_agent_application", JSON.stringify(applicationPayload));
+        localStorage.setItem(`agent_app_${randomId}`, JSON.stringify(applicationPayload));
+      }
 
       setApplicationId(randomId);
       setIsSubmitted(true);
@@ -311,9 +344,82 @@ export default function AgentApplyPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-12 space-y-6">
-              {/* STEP 1: Incentives & Earnings model */}
+              {/* STEP 1: Incentives & Partner Type Selector */}
               {step === 1 && (
-                <div className="space-y-6 animate-fadeIn">
+                <div className="space-y-6 animate-fadeIn text-left">
+                  {/* Selector Card Block */}
+                  <div className="bg-white border-2 border-brand-primary/30 rounded-md p-6 sm:p-8 shadow-sm">
+                    <span className="text-xs font-black uppercase tracking-[0.2em] text-brand-primary">Paso 1: Modalidad de Afiliación</span>
+                    <h2 className="text-xl font-bold text-text-primary mt-1 mb-2">Selecciona tu Perfil de Registro</h2>
+                    <p className="text-xs text-text-secondary mb-6">Elige el tipo de cuenta con el que deseas incorporarte a la Red TodoVisa:</p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {/* Option 1: Asesor Consular Independiente */}
+                      <div
+                        onClick={() => setFormData((prev) => ({ ...prev, partnerType: "advisor" }))}
+                        className={`cursor-pointer rounded-xl p-6 border-2 transition-all duration-200 relative flex flex-col justify-between ${
+                          formData.partnerType === "advisor"
+                            ? "border-brand-primary bg-brand-light/30 shadow-md ring-2 ring-brand-primary/20 scale-[1.01]"
+                            : "border-border-light bg-white hover:border-gray-300"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-3xl">👤</span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[11px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
+                              60% Comisión
+                            </span>
+                          </div>
+                          <h3 className="font-bold text-text-primary text-base">Asesor Consular Independiente</h3>
+                          <p className="text-xs text-text-secondary mt-2 leading-relaxed">
+                            Para consultores, especialistas y profesionales independientes que brindan acompañamiento directo a expedientes asignados por TodoVisa.
+                          </p>
+                        </div>
+
+                        <div className="mt-5 pt-4 border-t border-border-light flex items-center justify-between text-xs">
+                          <span className="font-semibold text-text-primary">Tramitación Consular Directa</span>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
+                            formData.partnerType === "advisor" ? "bg-brand-primary text-white" : "border border-gray-300 text-transparent"
+                          }`}>
+                            ✓
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Option 2: Agencia de Viajes B2B */}
+                      <div
+                        onClick={() => setFormData((prev) => ({ ...prev, partnerType: "b2b_agency" }))}
+                        className={`cursor-pointer rounded-xl p-6 border-2 transition-all duration-200 relative flex flex-col justify-between ${
+                          formData.partnerType === "b2b_agency"
+                            ? "border-amber-500 bg-amber-50/50 shadow-md ring-2 ring-amber-500/20 scale-[1.01]"
+                            : "border-border-light bg-white hover:border-gray-300"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-3xl">🏢</span>
+                            <span className="bg-amber-100 text-amber-900 text-[11px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
+                              30% Referidos
+                            </span>
+                          </div>
+                          <h3 className="font-bold text-text-primary text-base">Agencia de Viajes / Empresa B2B</h3>
+                          <p className="text-xs text-text-secondary mt-2 leading-relaxed">
+                            Para empresas de turismo y agencias de viajes que desean monetizar sus clientes mediante un enlace exclusivo con comisiones automáticas.
+                          </p>
+                        </div>
+
+                        <div className="mt-5 pt-4 border-t border-border-light flex items-center justify-between text-xs">
+                          <span className="font-semibold text-text-primary">Enlace y Portal B2B Exclusivo</span>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
+                            formData.partnerType === "b2b_agency" ? "bg-amber-500 text-white" : "border border-gray-300 text-transparent"
+                          }`}>
+                            ✓
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Benefits grid */}
                   <div className="bg-white border border-border-light rounded-sm p-6 sm:p-8">
                     <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-primary">Por Qué Unirse</span>
@@ -330,88 +436,33 @@ export default function AgentApplyPage() {
                         <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
                         <div>
                           <h4 className="text-sm font-bold text-text-primary">Ganancias Transparentes</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Comisiones claras que premian tu experiencia y eficiencia. Sin sorpresas ni costos ocultos.</p>
+                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Comisiones claras (60% para Asesores, 30% para Agencias Referidoras). Sin sorpresas.</p>
                         </div>
-                      </div>
-                      <div className="flex gap-3">
-                        <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-text-primary">Gestión 100% Digital</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Panel centralizado para expedientes, chat con clientes y archivo seguro de documentos.</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-3">
-                        <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-text-primary">Flexibilidad Total</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Trabaja desde cualquier lugar, controla tus horarios y escala tu práctica a tu ritmo.</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Earning model */}
-                  <div className="bg-brand-primary text-white shadow-sm rounded-sm border-t border-white/10 p-6 sm:p-8 relative overflow-hidden text-left">
-                    <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:12px_12px]"></div>
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                      <div>
-                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/75">Modelo de Ingresos</span>
-                        <h3 className="text-lg font-bold font-serif italic text-white mt-0.5">Detalles de Ganancia Asesores</h3>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-3 text-xs">
-                        <div className="text-center">
-                          <span className="block text-2xl font-bold text-white">60%</span>
-                          <span className="text-white/60 leading-tight">Comisión base asesor</span>
-                        </div>
-                        <div className="text-center">
-                          <span className="block text-sm font-bold text-white mt-1">Semanal</span>
-                          <span className="text-white/60 leading-tight">Cada viernes</span>
-                        </div>
-                        <div className="text-center">
-                          <span className="block text-sm font-bold text-white mt-1">$60.00</span>
-                          <span className="text-white/60 leading-tight">USD por acompañamiento</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* B2B Agency Referral Card */}
-                  <div className="bg-gradient-to-r from-slate-900 to-blue-950 text-white rounded-sm p-6 sm:p-8 border border-blue-800/40 shadow-md text-left relative overflow-hidden">
-                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-                      <div className="space-y-2 max-w-xl">
-                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 rounded text-[11px] font-bold tracking-wider uppercase border border-amber-400/30">
-                          <span>🏢 Programa Especial para Agencias B2B</span>
-                        </div>
-                        <h3 className="text-xl font-bold text-white">¿Eres una Agencia de Viajes o Turismo?</h3>
-                        <p className="text-xs text-blue-100/80 leading-relaxed">
-                          Monetiza tus clientes referidos sin preocuparte por la gestión técnica consular. Obtén tu <strong>Enlace Exclusivo de Agencia</strong> para compartir con tus clientes y gana un <strong>30% de comisión directa</strong> por cada venta generada automáticamente.
-                        </p>
-                      </div>
-                      <div className="bg-white/10 p-4 rounded-lg border border-white/10 flex flex-col items-center justify-center min-w-[170px] text-center">
-                        <span className="text-3xl font-extrabold text-amber-300">30%</span>
-                        <span className="text-[11px] font-bold text-white uppercase tracking-wider mt-1">Comisión por Referido</span>
-                        <span className="text-[10px] text-blue-200 mt-1">Enlace personalizado único</span>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* STEP 2: Personal Info */}
+              {/* STEP 2: Personal / Corporate Info */}
               {step === 2 && (
                 <div className="space-y-5 animate-fadeIn text-left">
-                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Información Personal</h3>
+                  <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">
+                    {formData.partnerType === "b2b_agency" ? "Información de la Agencia de Viajes (B2B)" : "Información del Asesor Consular"}
+                  </h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div>
-                      <label htmlFor="fullName" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">Nombre Completo</label>
+                      <label htmlFor="fullName" className="block text-xs font-bold text-text-secondary uppercase mb-1.5">
+                        {formData.partnerType === "b2b_agency" ? "Nombre de la Agencia / Empresa (Razón Social)" : "Nombre Completo del Asesor"}
+                      </label>
                       <input
                         type="text"
                         name="fullName"
                         id="fullName"
                         value={formData.fullName}
                         onChange={handleInputChange}
-                        placeholder="Ej. Juan Pérez García"
+                        placeholder={formData.partnerType === "b2b_agency" ? "Ej. Agencia de Viajes Internacional S.A." : "Ej. Juan Pérez García"}
                         className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
                       />
                       {errors.fullName && <p className="text-xs text-status-error mt-1">{errors.fullName}</p>}
@@ -423,11 +474,21 @@ export default function AgentApplyPage() {
                         type="email"
                         name="email"
                         id="email"
-                        value={formData.email}
+                        value={user?.email || formData.email}
                         onChange={handleInputChange}
+                        readOnly={Boolean(user?.email)}
                         placeholder="ejemplo@todovisa.com"
-                        className="w-full px-3.5 py-2 border border-border-light rounded-sm text-sm text-text-primary bg-background-main focus:border-border-focus transition-all"
+                        className={`w-full px-3.5 py-2 border rounded-sm text-sm transition-all ${
+                          user?.email
+                            ? "bg-gray-100/90 text-gray-700 border-gray-200 cursor-not-allowed font-medium select-none"
+                            : "bg-background-main border-border-light text-text-primary focus:border-border-focus"
+                        }`}
                       />
+                      {user?.email ? (
+                        <p className="text-[10px] text-text-muted mt-1 flex items-center gap-1 font-medium">
+                          <span>🔒</span> Tu solicitud se vinculará a la cuenta registrada ({user.email}).
+                        </p>
+                      ) : null}
                       {errors.email && <p className="text-xs text-status-error mt-1">{errors.email}</p>}
                     </div>
 
@@ -627,13 +688,59 @@ export default function AgentApplyPage() {
                   <p className="text-xs text-text-secondary font-semibold">Sube los documentos solicitados. Los marcados con <span className="text-status-error font-bold">*</span> son obligatorios. Formatos: PDF, JPG, PNG (Máx. 10MB por archivo).</p>
 
                   {([
-                    { key: "dui", label: "Documento Único de Identidad (DUI / INE / Pasaporte)", required: true, hint: "Página principal con foto y datos visibles" },
-                    { key: "certificacion", label: "Certificación Consular o Migratoria", required: false, hint: "Ej. IATA, RCIC, CSIC, consulado acreditante" },
-                    { key: "antecedentes", label: "Carta de No Antecedentes Penales", required: false, hint: "Emitida en los últimos 6 meses" },
-                    { key: "domicilio", label: "Comprobante de Domicilio", required: false, hint: "Recibo de luz, agua o estado de cuenta (máx. 3 meses)" },
-                    { key: "titulo", label: "Título o Diploma Profesional", required: false, hint: "Derecho, Relaciones Internacionales, Administración, etc." },
-                    { key: "cv", label: "Currículum Vitae (CV)", required: false, hint: "Formato PDF preferido" },
-                  ] as { key: string; label: string; required: boolean; hint: string }[]).map(({ key, label, required, hint }) => (
+                    {
+                      key: "dui",
+                      label: formData.partnerType === "b2b_agency"
+                        ? "DUI / INE / Pasaporte del Representante Legal"
+                        : "Documento Único de Identidad (DUI / INE / Pasaporte)",
+                      required: true,
+                      hint: "Página principal con foto y datos visibles del representante"
+                    },
+                    {
+                      key: "certificacion",
+                      label: formData.partnerType === "b2b_agency"
+                        ? "Registro Mercantil / NIT / Licencia Turística"
+                        : "Certificación Consular o Migratoria",
+                      required: false,
+                      hint: formData.partnerType === "b2b_agency"
+                        ? "Registro de comercio, escritura de constitución o tarjeta NIT"
+                        : "Ej. IATA, RCIC, CSIC, consulado acreditante"
+                    },
+                    {
+                      key: "antecedentes",
+                      label: formData.partnerType === "b2b_agency"
+                        ? "Registro Tributario de la Empresa (Solvencia Fiscal)"
+                        : "Carta de No Antecedentes Penales",
+                      required: false,
+                      hint: "Emitido en los últimos 6 meses"
+                    },
+                    {
+                      key: "domicilio",
+                      label: formData.partnerType === "b2b_agency"
+                        ? "Comprobante de Domicilio Comercial de la Agencia"
+                        : "Comprobante de Domicilio Personal",
+                      required: false,
+                      hint: "Recibo de luz, agua o teléfono de la oficina (máx. 3 meses)"
+                    },
+                    {
+                      key: "titulo",
+                      label: formData.partnerType === "b2b_agency"
+                        ? "Brochure Comercial o Presentación de la Agencia"
+                        : "Título o Diploma Profesional",
+                      required: false,
+                      hint: formData.partnerType === "b2b_agency"
+                        ? "Catálogo de servicios de la agencia de viajes"
+                        : "Derecho, Relaciones Internacionales, Administración, etc."
+                    },
+                    {
+                      key: "cv",
+                      label: "Currículum Vitae (CV)",
+                      required: false,
+                      hint: "Formato PDF preferido"
+                    },
+                  ] as { key: string; label: string; required: boolean; hint: string }[])
+                  .filter(item => formData.partnerType !== "b2b_agency" || item.key !== "cv")
+                  .map(({ key, label, required, hint }) => (
                     <div key={key}>
                       <div className="flex items-center gap-1 mb-1.5">
                         <span className="text-xs font-bold text-text-secondary uppercase">{label}</span>

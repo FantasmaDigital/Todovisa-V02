@@ -11,13 +11,21 @@ import { AuthClientService } from "@/services/client/AuthClientService"
 import { ProfileClientService } from "@/services/client/ProfileClientService"
 import { AgencyClientService } from "@/services/client/AgencyClientService"
 import { ROLES } from "@/app/constants/roles"
-import { visaDestinations } from "@/app/constants/visas/destinations"
+import { visaDestinations, getCentralizedDestinations } from "@/app/constants/visas/destinations"
 
 export const Header = ({ headerRef }: { headerRef?: any }) => {
     const pathname = usePathname();
     const user = useAuthStore((state) => state.user);
     const [isMounted, setIsMounted] = useState(false);
     const [showLoader, setShowLoader] = useState(true);
+    const [headerDestinations, setHeaderDestinations] = useState(visaDestinations);
+
+    useEffect(() => {
+        setHeaderDestinations(getCentralizedDestinations());
+        const handleStorage = () => setHeaderDestinations(getCentralizedDestinations());
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
+    }, []);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     const handleLogoClick = (e: React.MouseEvent) => {
@@ -254,8 +262,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                         alt="Logo TODOVISA"
                                         width={72}
                                         height={72}
-                                        className="object-contain"
-                                        style={{ width: "auto", height: "auto" }}
+                                        className="object-contain w-12 sm:w-16 md:w-20 h-auto"
                                     />
                                 </Link>
                             </div>
@@ -282,7 +289,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 <span className="text-[10px] text-text-secondary mt-1">Todos los destinos disponibles</span>
                                             </div>
                                         </Link>
-                                        {visaDestinations.map((c) => (
+                                        {headerDestinations.map((c: any) => (
                                             !c.enabled ? (
                                                 <div key={c.code} className="flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-gray-300 cursor-not-allowed">
                                                     <span className="text-base">{c.flag}</span>
