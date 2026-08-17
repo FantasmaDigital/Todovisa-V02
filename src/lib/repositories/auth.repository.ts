@@ -74,8 +74,17 @@ export class AuthRepository {
           if (attributes.avatar_changes_this_month !== undefined) profileUpdates.avatar_changes_this_month = attributes.avatar_changes_this_month;
           if (attributes.last_avatar_change_month !== undefined) profileUpdates.last_avatar_change_month = attributes.last_avatar_change_month;
           if (attributes.expediente_status !== undefined) profileUpdates.expediente_status = attributes.expediente_status;
-          if (attributes.has_paid_advisor !== undefined) profileUpdates.has_paid_advisor = attributes.has_paid_advisor;
-          if (attributes.assigned_agent_id !== undefined) profileUpdates.assigned_agent_id = attributes.assigned_agent_id;
+          // Store custom metadata inside document_reviews JSONB column on profiles
+          const customMeta: Record<string, any> = {};
+          if (attributes.has_paid_vipro !== undefined) customMeta.has_paid_vipro = attributes.has_paid_vipro;
+          if (attributes.has_paid_advisor !== undefined) customMeta.has_paid_advisor = attributes.has_paid_advisor;
+          if (attributes.assigned_agent_id !== undefined) customMeta.assigned_agent_id = attributes.assigned_agent_id;
+          if (attributes.assigned_agency_name !== undefined) customMeta.assigned_agency_name = attributes.assigned_agency_name;
+          if (attributes.last_paypal_tx !== undefined) customMeta.last_paypal_tx = attributes.last_paypal_tx;
+          if (attributes.vipro_score !== undefined) customMeta.vipro_score = attributes.vipro_score;
+          if (attributes.vipro_completed !== undefined) customMeta.vipro_completed = attributes.vipro_completed;
+          if (attributes.vipro_destination !== undefined) customMeta.vipro_destination = attributes.vipro_destination;
+
           // Sync client document uploads so agents can access them
           if (attributes.client_docs !== undefined) profileUpdates.client_docs = attributes.client_docs;
           // Sync DS-160 consular form fields
@@ -85,9 +94,13 @@ export class AuthRepository {
           if (attributes.ds160_purpose_of_trip !== undefined) profileUpdates.ds160_purpose_of_trip = attributes.ds160_purpose_of_trip;
           if (attributes.ds160_has_assets !== undefined) profileUpdates.ds160_has_assets = attributes.ds160_has_assets;
           if (attributes.ds160_confirmed !== undefined) profileUpdates.ds160_confirmed = attributes.ds160_confirmed;
-          if (attributes.document_reviews !== undefined) profileUpdates.document_reviews = attributes.document_reviews;
           if (attributes.appointment_request !== undefined) profileUpdates.appointment_request = attributes.appointment_request;
           if (attributes.cita_details !== undefined) profileUpdates.cita_details = attributes.cita_details;
+
+          const existingReviews = (attributes.document_reviews && typeof attributes.document_reviews === 'object') ? attributes.document_reviews : {};
+          if (Object.keys(customMeta).length > 0 || attributes.document_reviews !== undefined) {
+            profileUpdates.document_reviews = { ...existingReviews, ...customMeta };
+          }
 
           if (Object.keys(profileUpdates).length > 0) {
             await client.from("profiles").update(profileUpdates).eq("id", user.id);

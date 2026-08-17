@@ -25,7 +25,9 @@ function ViproFormContent() {
         return () => window.removeEventListener("storage", handleStorage);
     }, []);
 
-    // Check if there is an in-progress evaluation
+    const [dbHasPaidVipro, setDbHasPaidVipro] = useState(false);
+
+    // Check if there is an in-progress evaluation and verify payment status
     useEffect(() => {
         const checkProgress = async () => {
             let hasProgress = false;
@@ -42,15 +44,18 @@ function ViproFormContent() {
                 }
             }
 
-            // If not in local storage and logged in, check user metadata
-            if (!hasProgress && user) {
+            // If logged in, check user metadata in Supabase
+            if (user) {
                 try {
                     const userRes = await AuthService.getUser();
                     const metadata = userRes.data?.user?.user_metadata || {};
-                    if (metadata.vipro_progress_answers) {
+                    if (!hasProgress && metadata.vipro_progress_answers) {
                         if (Object.keys(metadata.vipro_progress_answers).length > 0) {
                             hasProgress = true;
                         }
+                    }
+                    if (metadata.has_paid_vipro || metadata.has_paid_advisor || metadata.vipro_completed) {
+                        setDbHasPaidVipro(true);
                     }
                 } catch (err) {
                     console.error("Error checking progress in API:", err);
@@ -71,8 +76,8 @@ function ViproFormContent() {
     }, []);
 
     const isAdmin = user ? (user.role === "admin" || user.role === "moderator") : false;
-    const hasPaid = user ? (user.hasPaidVipro || user.hasPaidAdvisor || isAdmin) : false;
-    const completed = user ? user.viproCompleted : false;
+    const hasPaid = user ? (Boolean(user.hasPaidVipro) || Boolean(user.hasPaidAdvisor) || isAdmin || dbHasPaidVipro) : false;
+    const completed = user ? Boolean(user.viproCompleted && user.viproScore) : false;
 
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">

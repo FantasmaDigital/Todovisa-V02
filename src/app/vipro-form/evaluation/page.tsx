@@ -51,16 +51,56 @@ function ViproEvaluationContent() {
     const questions = questionsSpanish;
     const question = questions[currentStep];
 
-    // Protect route: Redirect only if regular user has not paid for VIPRO/Advisor and has not completed evaluation
+    // Protect route: Verify payment status from Supabase user_metadata before deciding whether to redirect
+    const [isVerifyingPaid, setIsVerifyingPaid] = useState(true);
+    const [hasVerifiedPaid, setHasVerifiedPaid] = useState(false);
+
     useEffect(() => {
-        if (isLoading) return;
+        const verifyPayment = async () => {
+            if (!user) {
+                setIsVerifyingPaid(false);
+                return;
+            }
+
+            const isAdminOrStaff = user.role === "admin" || user.role === "moderator";
+            if (isAdminOrStaff || user.hasPaidVipro || user.hasPaidAdvisor || user.viproCompleted) {
+                setHasVerifiedPaid(true);
+                setIsVerifyingPaid(false);
+                return;
+            }
+
+            try {
+                const userRes = await AuthService.getUser();
+                const metadata = userRes.data?.user?.user_metadata || {};
+                if (metadata.has_paid_vipro || metadata.has_paid_advisor || metadata.vipro_completed) {
+                    setHasVerifiedPaid(true);
+                    setUser({
+                        ...user,
+                        hasPaidVipro: Boolean(metadata.has_paid_vipro),
+                        hasPaidAdvisor: Boolean(metadata.has_paid_advisor),
+                        viproCompleted: Boolean(metadata.vipro_completed)
+                    });
+                }
+            } catch (err) {
+                console.error("Error verifying user payment status:", err);
+            } finally {
+                setIsVerifyingPaid(false);
+            }
+        };
+
+        verifyPayment();
+    }, [user, setUser]);
+
+    useEffect(() => {
+        if (isLoading || isVerifyingPaid) return;
         const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
         const targetEvalId = searchParams.get("evalId") || searchParams.get("eval_id");
         const hasEvalTarget = Boolean(targetEvalId || targetUserId);
-        if (user && !isAdminOrStaff && !user.hasPaidVipro && !user.hasPaidAdvisor && !user.viproCompleted && !hasEvalTarget && !completed) {
+
+        if (user && !isAdminOrStaff && !hasVerifiedPaid && !hasEvalTarget && !completed) {
             router.push("/vipro-form");
         }
-    }, [user, router, isLoading, searchParams, targetUserId, completed]);
+    }, [user, router, isLoading, isVerifyingPaid, hasVerifiedPaid, searchParams, targetUserId, completed]);
 
     // Load existing completed results and submitted answers from Supabase DB & localStorage
     useEffect(() => {
@@ -129,8 +169,13 @@ function ViproEvaluationContent() {
                 }
 
                 const isAdminOrStaff = Boolean(user && (user.role === "admin" || user.role === "moderator"));
-                const hasLocalCompleted = typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")));
-                const isCompletedEvaluation = Boolean(loadedEvalRecord || user?.viproCompleted || hasLocalCompleted || user?.hasPaidVipro || user?.hasPaidAdvisor || targetEvalId || isAdminOrStaff);
+                const hasLocalCompleted = !user && typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")));
+
+                const isEvalRecordCompleted = Boolean(loadedEvalRecord && loadedEvalRecord.is_completed === true && loadedEvalRecord.score !== null && loadedEvalRecord.score !== undefined);
+                const isUserMetadataCompleted = Boolean(user?.viproCompleted && user?.viproScore !== null && user?.viproScore !== undefined);
+                const isExplicitTargetEval = Boolean(targetEvalId && loadedEvalRecord && loadedEvalRecord.is_completed === true);
+
+                const isCompletedEvaluation = Boolean(isEvalRecordCompleted || (isUserMetadataCompleted && isEvalRecordCompleted) || isExplicitTargetEval || (hasLocalCompleted && isEvalRecordCompleted));
 
                 if (isCompletedEvaluation) {
                     if (!isCancelled) {
@@ -148,7 +193,7 @@ function ViproEvaluationContent() {
                         }
 
                         const storedScoreStr = typeof window !== "undefined" ? localStorage.getItem("vipro_score") : null;
-                        const scoreVal = loadedEvalRecord?.score || (storedScoreStr ? parseInt(storedScoreStr, 10) : null) || user?.viproScore || 88;
+                        const scoreVal = loadedEvalRecord?.score ?? user?.viproScore ?? (storedScoreStr ? parseInt(storedScoreStr, 10) : null) ?? 0;
 
                         setEvaluationResult({
                             score: scoreVal,
@@ -331,8 +376,7 @@ function ViproEvaluationContent() {
                             destination_country: "US",
                             answers: answers,
                             current_step: currentStep,
-                            is_completed: false,
-                            updated_at: new Date().toISOString()
+                            is_completed: false
                         });
                         console.log(`Step ${currentStep + 1} saved to vipro_evaluations table.`);
                     } catch (err) {

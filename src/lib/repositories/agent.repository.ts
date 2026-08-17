@@ -1,4 +1,5 @@
 import supabase from "@/app/lib/supabase";
+import supabaseAdmin from "@/lib/supabaseAdmin";
 import { UserRole } from "@/app/constants/roles";
 
 export class AgentRepository {
@@ -77,13 +78,81 @@ export class AgentRepository {
       }
     }
 
-    // Merge photo_url into activeApps data
-    const activeApps = rawActiveApps.map(app => ({
-      ...app,
-      photo_url: app.user_id ? (photoMap[app.user_id] || null) : null
-    }));
+    // Fetch agent reviews stats
+    let reviewsStatsMap: Record<string, { rating: number; reviewsCount: number }> = {};
+    const { data: reviewsData } = await supabase
+      .from("agent_reviews")
+      .select("agent_id, rating");
+
+    if (reviewsData && reviewsData.length > 0) {
+      const statsTemp: Record<string, { totalRating: number; count: number }> = {};
+      reviewsData.forEach((rev) => {
+        if (!statsTemp[rev.agent_id]) {
+          statsTemp[rev.agent_id] = { totalRating: 0, count: 0 };
+        }
+        statsTemp[rev.agent_id].totalRating += Number(rev.rating) || 0;
+        statsTemp[rev.agent_id].count += 1;
+      });
+
+      Object.keys(statsTemp).forEach((id) => {
+        const item = statsTemp[id];
+        reviewsStatsMap[id] = {
+          rating: Number((item.totalRating / item.count).toFixed(1)),
+          reviewsCount: item.count,
+        };
+      });
+    }
+
+    // Merge photo_url and reviews stats into activeApps data
+    const activeApps = rawActiveApps.map(app => {
+      const agentKey = app.user_id || app.application_id;
+      const stats = reviewsStatsMap[agentKey] || (app.user_id ? reviewsStatsMap[app.user_id] : null) || { rating: 5.0, reviewsCount: 0 };
+
+      return {
+        ...app,
+        photo_url: app.user_id ? (photoMap[app.user_id] || null) : null,
+        rating: stats.rating,
+        reviewsCount: stats.reviewsCount,
+      };
+    });
 
     return { activeApps, agencyMemberIds: Array.from(memberIdsSet) };
+  }
+
+  static async getAgentReviews(agentId: string) {
+    const { data, error } = await supabase
+      .from("agent_reviews")
+      .select("*")
+      .or(`agent_id.eq.${agentId},agent_id.eq.agent-${agentId}`)
+      .order("created_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
+  static async createAgentReview(reviewData: {
+    agent_id: string;
+    reviewer_id?: string;
+    reviewer_name?: string;
+    rating: number;
+    comment: string;
+  }) {
+    const dbClient = supabaseAdmin || supabase;
+    const { data, error } = await dbClient
+      .from("agent_reviews")
+      .insert({
+        agent_id: reviewData.agent_id,
+        reviewer_id: reviewData.reviewer_id || null,
+        reviewer_name: reviewData.reviewer_name || "Cliente TodoVisa",
+        rating: Math.max(1, Math.min(5, Math.round(reviewData.rating))),
+        comment: reviewData.comment || "",
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data;
   }
 
   static async getPortalDetails(userId?: string, applicationId?: string) {
@@ -248,7 +317,25 @@ export class AgentRepository {
       payload.notes = typeof commissionData.notes === "object" ? JSON.stringify(commissionData.notes) : String(commissionData.notes);
     }
 
-    const { data, error } = await supabase.from("agent_commissions").insert(payload).select();
+    const dbClient = supabaseAdmin || supabase;
+    const { data, error } = await dbClient.from("agent_commissions").insert(payload).select();
+    return { data, error };
+  }
+
+  static async createUserPurchase(purchaseData: Record<string, any>) {
+    const dbClient = supabaseAdmin || supabase;
+    const payload: Record<string, any> = {
+      user_id: purchaseData.user_id,
+      reference_id: purchaseData.reference_id || `TV-${(purchaseData.product_type || 'TX').toUpperCase()}-${Date.now().toString().slice(-6)}`,
+      product_type: purchaseData.product_type || 'vipro',
+      amount: Number(purchaseData.amount || 0),
+      payment_method: purchaseData.payment_method || 'paypal',
+      status: purchaseData.status || 'completed',
+      agent_id: purchaseData.agent_id || null,
+      created_at: new Date().toISOString()
+    };
+
+    const { data, error } = await dbClient.from("user_purchases").insert(payload).select();
     return { data, error };
   }
 
