@@ -88,8 +88,8 @@ export default function AgentesPage() {
             name: app.full_name || app.email || "Asesor TodoVisa",
             title: `Asesor Independiente · ${(app.specialties || ["General"])[0]}`,
             photo: app.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(app.full_name || "Asesor")}&background=0d9488&color=fff&size=200`,
-            rating: 4.8,
-            reviewsCount: 0,
+            rating: typeof app.rating === "number" ? app.rating : 5.0,
+            reviewsCount: typeof app.reviewsCount === "number" ? app.reviewsCount : 0,
             languages: app.languages || ["Español"],
             countries: app.target_countries || ["Estados Unidos"],
             specialties: app.specialties || ["Asesoría General"],
@@ -137,32 +137,41 @@ export default function AgentesPage() {
   const allSpecialties = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.specialties))).sort()];
   const allLanguages = ["Todos", ...Array.from(new Set(agents.flatMap(a => a.languages))).sort()];
   const availabilities = ["Todos", "Inmediata", "Próxima semana"];
-  // Filter logic
-  const filteredAgents = agents.filter((agent) => {
-    const matchesSearch =
-      agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      agent.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      agent.bio.toLowerCase().includes(searchTerm.toLowerCase());
+  
+  // Filter logic and Star Rating Sort (higher ratings & more reviews appear FIRST)
+  const filteredAgents = agents
+    .filter((agent) => {
+      const matchesSearch =
+        agent.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        agent.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        agent.bio.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesCountry =
-      selectedCountry === "Todos" ||
-      agent.countries.some((c) => c.toLowerCase() === selectedCountry.toLowerCase());
+      const matchesCountry =
+        selectedCountry === "Todos" ||
+        agent.countries.some((c) => c.toLowerCase() === selectedCountry.toLowerCase());
 
-    const matchesSpecialty =
-      selectedSpecialty === "Todos" ||
-      agent.specialties.some((s) => s.toLowerCase() === selectedSpecialty.toLowerCase());
+      const matchesSpecialty =
+        selectedSpecialty === "Todos" ||
+        agent.specialties.some((s) => s.toLowerCase() === selectedSpecialty.toLowerCase());
 
-    const matchesLanguage =
-      selectedLanguage === "Todos" ||
-      agent.languages.some((l) => l.toLowerCase() === selectedLanguage.toLowerCase());
+      const matchesLanguage =
+        selectedLanguage === "Todos" ||
+        agent.languages.some((l) => l.toLowerCase() === selectedLanguage.toLowerCase());
 
-    const matchesAvailability =
-      selectedAvailability === "Todos" ||
-      agent.availability.toLowerCase() === selectedAvailability.toLowerCase();
+      const matchesAvailability =
+        selectedAvailability === "Todos" ||
+        agent.availability.toLowerCase() === selectedAvailability.toLowerCase();
 
-
-    return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability;
-  });
+      return matchesSearch && matchesCountry && matchesSpecialty && matchesLanguage && matchesAvailability;
+    })
+    .sort((a, b) => {
+      // Primary: Rating descending (5.0 -> 4.9 -> ...)
+      if (b.rating !== a.rating) {
+        return b.rating - a.rating;
+      }
+      // Secondary: Reviews count descending
+      return b.reviewsCount - a.reviewsCount;
+    });
 
   const clearFilters = () => {
     setSearchTerm("");

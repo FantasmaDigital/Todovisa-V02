@@ -109,9 +109,19 @@ export default function SignUpForm() {
                     viproScore: metadata.vipro_score || null,
                     viproCompleted: metadata.vipro_completed || false,
                     viproDestination: metadata.vipro_destination || null,
+                    hasPaidVipro: Boolean(metadata.has_paid_vipro),
                     hasPaidAdvisor: metadata.has_paid_advisor || false,
                     assignedAgentId: metadata.assigned_agent_id || null
                 });
+            }
+
+            // Clean up guest VIPRO localStorage keys on signup
+            if (typeof window !== "undefined") {
+                localStorage.removeItem("vipro_completed");
+                localStorage.removeItem("vipro_score");
+                localStorage.removeItem("vipro_destination");
+                localStorage.removeItem("vipro_evaluation");
+                localStorage.removeItem("vipro_answers");
             }
 
             router.push('/');

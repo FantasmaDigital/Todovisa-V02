@@ -28,7 +28,9 @@ const GuideIcon = () => (
 export default function ServicesPage() {
     const headerRef = useRef(null);
     const user = useAuthStore((state) => state.user);
-    const isViproCompleted = Boolean(user?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))));
+    const isViproCompleted = user 
+        ? Boolean(user.viproCompleted || user.viproScore || user.hasCompletedVipro) 
+        : Boolean(typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))));
     const [price, setPrice] = useState(() => getSystemConfig().fullServicePrice);
     const [viproPrice, setViproPrice] = useState(() => getSystemConfig().viproPrice);
 

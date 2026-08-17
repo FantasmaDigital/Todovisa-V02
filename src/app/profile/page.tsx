@@ -675,33 +675,21 @@ export default function PerfilUsuarioPage() {
           if (byEmail) foundData = byEmail as AgentApplicationData;
         }
 
-        // 2. Fallback to localStorage if no DB record found
-        if (!foundData && typeof window !== "undefined") {
-          const cachedUserApp = localStorage.getItem("user_agent_application");
-          if (cachedUserApp) {
-            try {
-              foundData = JSON.parse(cachedUserApp);
-            } catch (e) {}
-          } else {
-            // Find any agent_app_ key in localStorage
-            for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i);
-              if (key && key.startsWith("agent_app_")) {
-                try {
-                  const val = localStorage.getItem(key);
-                  if (val) {
-                    foundData = JSON.parse(val);
-                    break;
-                  }
-                } catch (e) {}
-              }
-            }
-          }
-        }
-
         if (foundData) {
           setUserApplication(foundData);
           setPartnerApp(foundData);
+        } else {
+          setUserApplication(null);
+          setPartnerApp(null);
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("user_agent_application");
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith("agent_app_")) {
+                localStorage.removeItem(key);
+              }
+            }
+          }
         }
       } catch (err) {
         console.error("Error loading user application:", err);
@@ -1797,23 +1785,12 @@ export default function PerfilUsuarioPage() {
         }
 
         if (viproRes.status === "fulfilled" && viproRes.value) {
-          const evalData = Array.isArray(viproRes.value) ? viproRes.value : [viproRes.value];
+          const evalData = Array.isArray(viproRes.value) ? viproRes.value : (viproRes.value ? [viproRes.value] : []);
           setViproEvaluations(evalData);
-          if (evalData.length > 0 && !user.viproCompleted) {
-            setUser({ ...user, viproCompleted: true, viproScore: evalData[0].score || user.viproScore });
+          const completedEval = evalData.find((ev: any) => ev && ev.is_completed === true && ev.score !== null && ev.score !== undefined);
+          if (completedEval && !user.viproCompleted) {
+            setUser({ ...user, viproCompleted: true, viproScore: completedEval.score });
           }
-        } else if (user.viproCompleted || user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) {
-          setViproEvaluations([
-            {
-              id: "vipro-sample-1",
-              user_id: user.id,
-              user_email: user.email,
-              destination_country: user.viproDestination || "US",
-              score: user.viproScore || 88,
-              is_completed: true,
-              created_at: new Date().toISOString(),
-            }
-          ]);
         }
       } catch (err) {
         console.error("Failed to load user records from API:", err);
@@ -1855,14 +1832,16 @@ export default function PerfilUsuarioPage() {
             setAllPreformulariosList(preforms);
           }
         });
-      // Fetch VIPRO evaluations, commissions, and profiles in parallel to compute real stats
+      // Fetch VIPRO evaluations, commissions, user_purchases, and profiles in parallel to compute real stats
       Promise.all([
         FormClientService.getAllViproEvaluations().catch(() => []),
-        Promise.resolve(supabase.from("agent_commissions").select("*")).catch(() => ({ data: [] })),
+        fetch("/api/agents/commissions").then(r => r.json()).then(res => res.data || []).catch(() => []),
+        AgentClientService.getAllPurchases().catch(() => []),
         ProfileClientService.getAllProfiles().catch(() => [])
-      ]).then(([evals, commsResult, profiles]) => {
+      ]).then(([evals, commsResult, rawPurchases, profiles]) => {
         const validEvals = Array.isArray(evals) ? evals : [];
-        const commissions = Array.isArray(commsResult?.data) ? commsResult.data : [];
+        const commissions = Array.isArray(commsResult) ? commsResult : [];
+        const userPurchasesList = Array.isArray(rawPurchases) ? rawPurchases : [];
         const allProfs = Array.isArray(profiles) ? profiles : [];
 
         // Build a profile map by ID & email for quick lookup
@@ -1880,22 +1859,22 @@ export default function PerfilUsuarioPage() {
 
         setViproEvaluations(validEvals);
 
-        // Build purchases array from real DB records (vipro_evaluations)
-        const viproPurchases = validEvals.map((ev: any) => {
-          const prof = ev.user_id ? pMap[ev.user_id] : (ev.user_email ? pMap[ev.user_email.toLowerCase()] : null);
+        // Build purchases array from user_purchases table (primary financial source of truth)
+        const directPurchases = userPurchasesList.map((p: any) => {
+          const prof = p.user_id ? pMap[p.user_id] : null;
           return {
-            id: ev.id,
-            user_id: ev.user_id,
-            user_name: prof?.name || ev.full_name || ev.user_name || null,
-            user_email: ev.user_email || prof?.email || "",
-            product_type: "vipro",
-            amount: Number(ev.amount || ev.price || viproPrice) || 19.99,
-            paypal_tx_id: ev.paypal_tx_id || ev.transaction_id || null,
-            created_at: ev.created_at || new Date().toISOString()
+            id: p.id,
+            user_id: p.user_id,
+            user_name: prof?.name || "Cliente",
+            user_email: prof?.email || "",
+            product_type: p.product_type || "vipro",
+            amount: Number(p.amount) || (p.product_type === "vipro" ? 19.99 : 150),
+            paypal_tx_id: p.reference_id || p.id,
+            created_at: p.created_at || new Date().toISOString()
           };
         });
 
-        // Build purchases array from real DB records (agent_commissions)
+        // Build purchases array from real agent_commissions table
         const advisorPurchases = commissions.map((c: any) => {
           let notesObj: any = {};
           if (c.notes) {
@@ -1907,6 +1886,7 @@ export default function PerfilUsuarioPage() {
           const clientId = c.client_id || c.user_id || notesObj.client_id;
           const clientEmail = c.client_email || notesObj.client_email || "";
           const prof = clientId ? pMap[clientId] : (clientEmail ? pMap[clientEmail.toLowerCase()] : null);
+          const txId = c.paypal_tx_id || c.transaction_id || notesObj.paypal_transaction_id || c.id;
 
           return {
             id: c.id,
@@ -1915,7 +1895,7 @@ export default function PerfilUsuarioPage() {
             user_email: clientEmail || prof?.email || "",
             product_type: c.service_type === "vipro" ? "vipro" : "advisor",
             amount: Number(c.gross_amount) || Number(c.sale_amount) || (c.service_type === "vipro" ? 19.99 : 150),
-            paypal_tx_id: c.paypal_tx_id || c.transaction_id || notesObj.paypal_transaction_id || null,
+            paypal_tx_id: txId,
             created_at: c.created_at || new Date().toISOString()
           };
         });
@@ -1925,7 +1905,7 @@ export default function PerfilUsuarioPage() {
         allProfs.forEach((p: any) => {
           const full = `${p.first_name || ""} ${p.last_name || ""}`.trim() || p.email;
           if (p.has_paid_vipro) {
-            const exists = viproPurchases.some(vp => vp.user_id === p.id);
+            const exists = directPurchases.some(dp => dp.user_id === p.id && dp.product_type === "vipro") || advisorPurchases.some(ap => ap.user_id === p.id && ap.product_type === "vipro");
             if (!exists) {
               profilePurchases.push({
                 id: `prof-vipro-${p.id}`,
@@ -1934,13 +1914,13 @@ export default function PerfilUsuarioPage() {
                 user_email: p.email || "",
                 product_type: "vipro",
                 amount: Number(viproPrice) || 19.99,
-                paypal_tx_id: p.last_paypal_tx || null,
+                paypal_tx_id: p.last_paypal_tx || `prof-vipro-${p.id}`,
                 created_at: p.updated_at || new Date().toISOString()
               });
             }
           }
           if (p.has_paid_advisor) {
-            const exists = advisorPurchases.some(ap => ap.user_id === p.id);
+            const exists = directPurchases.some(dp => dp.user_id === p.id && dp.product_type === "advisor") || advisorPurchases.some(ap => ap.user_id === p.id && ap.product_type === "advisor");
             if (!exists) {
               profilePurchases.push({
                 id: `prof-advisor-${p.id}`,
@@ -1949,14 +1929,31 @@ export default function PerfilUsuarioPage() {
                 user_email: p.email || "",
                 product_type: "advisor",
                 amount: Number(fullServicePrice) || 150,
-                paypal_tx_id: p.last_paypal_tx || null,
+                paypal_tx_id: p.last_paypal_tx || `prof-advisor-${p.id}`,
                 created_at: p.updated_at || new Date().toISOString()
               });
             }
           }
         });
 
-        setDbPurchases([...viproPurchases, ...advisorPurchases, ...profilePurchases]);
+        // Normalize transaction keys to collapse prefixed & raw PayPal IDs
+        const normalizeTxKey = (raw: string | null | undefined, userId?: string, prod?: string): string => {
+          if (!raw) return `${userId || "user"}-${prod || "prod"}`;
+          const clean = raw.replace(/^PAYPAL-|^TV-VIPRO-|^TV-ADVISOR-|^TV-/gi, "");
+          return clean ? clean.toUpperCase() : `${userId || "user"}-${prod || "prod"}`;
+        };
+
+        // Merge all purchases uniquely by normalized transaction key
+        const uniqueMap = new Map<string, any>();
+        [...directPurchases, ...advisorPurchases, ...profilePurchases].forEach(item => {
+          const rawId = item.paypal_tx_id || item.last_paypal_tx || item.id;
+          const key = normalizeTxKey(rawId, item.user_id, item.product_type);
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, item);
+          }
+        });
+
+        setDbPurchases(Array.from(uniqueMap.values()));
       }).catch(err => {
         console.error("Error loading admin stats:", err);
       });
@@ -2585,9 +2582,13 @@ export default function PerfilUsuarioPage() {
                     ];
 
                     const isViproCompleted = Boolean(
-                      user.viproCompleted ||
-                      viproEvaluations.some((ev: any) => ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase())) ||
-                      (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+                      (user.viproCompleted && user.viproScore !== null && user.viproScore !== undefined) ||
+                      viproEvaluations.some((ev: any) => 
+                        (ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase())) &&
+                        ev.is_completed === true &&
+                        ev.score !== null &&
+                        ev.score !== undefined
+                      )
                     );
 
                     const hasPurchases = dbPurchases.length > 0 || user.hasPaidAdvisor || user.hasPaidVipro || isViproCompleted;
@@ -3047,8 +3048,7 @@ export default function PerfilUsuarioPage() {
 
                   const isViproCompleted = Boolean(
                     user.viproCompleted ||
-                    myEvals.length > 0 ||
-                    (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+                    myEvals.length > 0
                   );
                   const hasPaidAdvisor = Boolean(user.hasPaidAdvisor || dbPurchases.some((p: any) => p.product_type === "advisor" && p.status === "completed"));
                   const hasVipro = Boolean(user.hasPaidVipro || isViproCompleted || dbPurchases.some((p: any) => p.product_type === "vipro" && p.status === "completed"));
@@ -4009,14 +4009,20 @@ export default function PerfilUsuarioPage() {
                     );
                   }
 
-                  const myEvals = viproEvaluations.filter((ev: any) => ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase()));
+                  const myEvals = viproEvaluations.filter((ev: any) => 
+                    ev.user_id === user.id || (user.email && ev.user_email?.toLowerCase() === user.email.toLowerCase())
+                  );
+                  const completedEvals = myEvals.filter((ev: any) => 
+                    ev.is_completed === true &&
+                    ev.score !== null &&
+                    ev.score !== undefined
+                  );
                   const isViproCompleted = Boolean(
-                    user.viproCompleted ||
-                    myEvals.length > 0 ||
-                    (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))
+                    (user.viproCompleted && user.viproScore !== null && user.viproScore !== undefined) ||
+                    completedEvals.length > 0
                   );
                   const hasCompleted = isViproCompleted;
-                  const latestEval = myEvals.length > 0 ? myEvals[0] : null;
+                  const latestEval = completedEvals.length > 0 ? completedEvals[0] : (myEvals.length > 0 ? myEvals[0] : null);
 
                   return (
                     <div>
@@ -5178,7 +5184,7 @@ export default function PerfilUsuarioPage() {
                               </div>
                             </div>
                             <div className="text-3xl font-black text-[#113E5F] font-mono">
-                              {viproEvaluations.length.toLocaleString()}
+                              {dbPurchases.filter((p: any) => p.product_type === "vipro").length.toLocaleString()}
                             </div>
                             <p className="text-[11px] text-text-muted mt-1 font-medium">Evaluaciones VIPRO adquiridas</p>
                           </div>
@@ -5617,9 +5623,10 @@ export default function PerfilUsuarioPage() {
                               const userIdShort = ev.user_id ? ev.user_id.substring(0, 8) : "N/A";
                               const countryCode = String(ev.destination_country || "US").toUpperCase();
 
-                              const evScore = ev.score || 88;
-                              const isHigh = evScore >= 80;
-                              const evDate = ev.created_at ? new Date(ev.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : "22 Jul 2026";
+                              const isCompleted = Boolean(ev.is_completed === true && ev.score !== null && ev.score !== undefined);
+                              const evScore = isCompleted ? Number(ev.score) : null;
+                              const isHigh = evScore !== null && evScore >= 80;
+                              const evDate = ev.created_at ? new Date(ev.created_at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : "Reciente";
 
                               return (
                                 <tr key={ev.id || idx} className="hover:bg-gray-50/80 transition-colors">
@@ -5633,9 +5640,15 @@ export default function PerfilUsuarioPage() {
                                     </div>
                                   </td>
                                   <td className="py-3.5 px-4">
-                                    <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${isHigh ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
-                                      {evScore} / 100 ({isHigh ? "Alta Viabilidad" : "Viabilidad Media"})
-                                    </span>
+                                    {isCompleted ? (
+                                      <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${isHigh ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
+                                        {evScore} / 100 ({isHigh ? "Alta Viabilidad" : "Viabilidad Media"})
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-800 border-amber-200">
+                                        🟡 Pendiente (En Progreso)
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="py-3.5 px-4 text-text-secondary">{evDate}</td>
                                   <td className="py-3.5 px-4 text-center">

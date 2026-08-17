@@ -60,30 +60,41 @@ export function SignInForm() {
                 AgencyClientService.syncReferralOnLogin(userObj);
 
                 // Sync local guest VIPRO evaluation to Supabase if it wasn't saved in Supabase yet
-                if (typeof window !== "undefined" && !viproCompleted) {
-                    const localCompleted = localStorage.getItem("vipro_completed") === "true";
-                    if (localCompleted) {
-                        const localScoreStr = localStorage.getItem("vipro_score");
-                        const localScore = localScoreStr ? parseInt(localScoreStr, 10) : null;
-                        const localDestination = localStorage.getItem("vipro_destination");
+                if (typeof window !== "undefined") {
+                    if (!viproCompleted) {
+                        const localCompleted = localStorage.getItem("vipro_completed") === "true";
+                        if (localCompleted) {
+                            const localScoreStr = localStorage.getItem("vipro_score");
+                            const localScore = localScoreStr ? parseInt(localScoreStr, 10) : null;
+                            const localDestination = localStorage.getItem("vipro_destination");
 
-                        viproCompleted = true;
-                        viproScore = localScore;
-                        viproDestination = localDestination;
+                            viproCompleted = true;
+                            viproScore = localScore;
+                            viproDestination = localDestination;
 
-                        try {
-                            // Update user metadata via API route
-                            await AuthService.updateUser({
-                                vipro_score: localScore,
-                                vipro_completed: true,
-                                vipro_destination: localDestination
-                            });
-                            console.log("Synced local guest VIPRO on Sign-in.");
-                        } catch (err) {
-                            console.error("Failed to sync local VIPRO on sign-in:", err);
+                            try {
+                                // Update user metadata via API route
+                                await AuthService.updateUser({
+                                    vipro_score: localScore,
+                                    vipro_completed: true,
+                                    vipro_destination: localDestination
+                                });
+                                console.log("Synced local guest VIPRO on Sign-in.");
+                            } catch (err) {
+                                console.error("Failed to sync local VIPRO on sign-in:", err);
+                            }
                         }
                     }
+
+                    // Always clean up guest VIPRO localStorage keys on login so other users on same device don't bleed data
+                    localStorage.removeItem("vipro_completed");
+                    localStorage.removeItem("vipro_score");
+                    localStorage.removeItem("vipro_destination");
+                    localStorage.removeItem("vipro_evaluation");
+                    localStorage.removeItem("vipro_answers");
                 }
+
+                const hasPaidVipro = Boolean(metadata.has_paid_vipro);
 
                 setUser({
                     id: userObj.id,
@@ -95,6 +106,7 @@ export function SignInForm() {
                     viproScore: viproScore,
                     viproCompleted: viproCompleted,
                     viproDestination: viproDestination,
+                    hasPaidVipro: hasPaidVipro,
                     hasPaidAdvisor: hasPaidAdvisor,
                     assignedAgentId: assignedAgentId
                 });

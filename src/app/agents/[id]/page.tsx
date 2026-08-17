@@ -48,6 +48,26 @@ export default function AgentProfilePage() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // Reviews states
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  const [newRating, setNewRating] = useState(5);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [newComment, setNewComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+
+  const fetchReviews = async (agentTargetId: string) => {
+    setLoadingReviews(true);
+    try {
+      const data = await AgentClientService.getReviews(agentTargetId);
+      setReviews(data);
+    } catch (err) {
+      console.error("Error fetching reviews:", err);
+    } finally {
+      setLoadingReviews(false);
+    }
+  };
+
   useEffect(() => {
     if (!agentId) return;
 
@@ -67,14 +87,15 @@ export default function AgentProfilePage() {
 
         if (matchedApp) {
           const phone = matchedApp.phone?.replace(/\D/g, "") || "50370200976";
-          setAgent({
-            id: `agent-${matchedApp.user_id || matchedApp.application_id}`,
+          const agentUserId = matchedApp.user_id || matchedApp.application_id;
+          const agentObj: Agent = {
+            id: `agent-${agentUserId}`,
             userId: matchedApp.user_id,
             name: matchedApp.full_name || matchedApp.email || "Asesor TodoVisa",
             title: `Asesor Independiente · ${(matchedApp.specialties || ["General"])[0]}`,
             photo: matchedApp.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(matchedApp.full_name || "Asesor")}&background=0d9488&color=fff&size=200`,
-            rating: 4.8,
-            reviewsCount: 0,
+            rating: typeof matchedApp.rating === "number" ? matchedApp.rating : 5.0,
+            reviewsCount: typeof matchedApp.reviewsCount === "number" ? matchedApp.reviewsCount : 0,
             languages: matchedApp.languages || ["Español"],
             countries: matchedApp.target_countries || ["Estados Unidos"],
             specialties: matchedApp.specialties || ["Asesoría General"],
@@ -84,7 +105,9 @@ export default function AgentProfilePage() {
             whatsapp: `https://wa.me/${phone}?text=Hola,%20me%20gustar%C3%ADa%20recibir%20asesor%C3%ADa.`,
             featured: false,
             partnerType: "outsourced_agent",
-          });
+          };
+          setAgent(agentObj);
+          fetchReviews(agentUserId);
         } else {
           setError("No se encontró el perfil de este asesor.");
         }
@@ -98,6 +121,47 @@ export default function AgentProfilePage() {
 
     fetchAgentDetails();
   }, [agentId]);
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agent) return;
+    if (!user) {
+      showToast("Debes iniciar sesión para dejar una reseña.", "info");
+      return;
+    }
+    if (!newComment.trim()) {
+      showToast("Por favor escribe un comentario sobre tu experiencia.", "error");
+      return;
+    }
+
+    setSubmittingReview(true);
+    try {
+      const targetAgentId = agent.userId || agent.id.replace("agent-", "");
+      await AgentClientService.submitReview({
+        agent_id: targetAgentId,
+        reviewer_id: user.id,
+        reviewer_name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+        rating: newRating,
+        comment: newComment.trim(),
+      });
+
+      showToast("¡Muchas gracias! Tu reseña ha sido publicada.", "success");
+      setNewComment("");
+      // Refresh reviews list and update current agent rating state
+      const updatedReviews = await AgentClientService.getReviews(targetAgentId);
+      setReviews(updatedReviews);
+      if (updatedReviews.length > 0) {
+        const total = updatedReviews.reduce((sum: number, r: any) => sum + Number(r.rating || 0), 0);
+        const avg = Number((total / updatedReviews.length).toFixed(1));
+        setAgent(prev => prev ? { ...prev, rating: avg, reviewsCount: updatedReviews.length } : null);
+      }
+    } catch (err: any) {
+      console.error("Error submitting review:", err);
+      showToast(err.message || "Error al enviar la reseña.", "error");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   const handleHireAgent = () => {
     if (!user) {
@@ -285,6 +349,97 @@ export default function AgentProfilePage() {
                       <p className="text-xs text-text-secondary mt-0.5">Te prepara con preguntas reales para que asistas con seguridad al consulado.</p>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Reviews & Ratings Section */}
+              <div className="bg-white rounded-lg border border-border-light p-8 space-y-6">
+                <div className="flex items-center justify-between border-b border-border-light pb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-text-primary">Evaluaciones y Reseñas</h3>
+                    <p className="text-xs text-text-secondary">Opiniones de clientes que contrataron asesoría con este experto.</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center gap-1 text-xl font-extrabold text-amber-500">
+                      <span>{agent.rating.toFixed(1)}</span>
+                      <span>★</span>
+                    </div>
+                    <span className="text-xs text-text-muted">{reviews.length} {reviews.length === 1 ? 'reseña' : 'reseñas'}</span>
+                  </div>
+                </div>
+
+                {/* Submit New Review Form */}
+                <div className="bg-background-main border border-border-light rounded-lg p-5">
+                  <h4 className="text-sm font-bold text-text-primary mb-2">Deja tu reseña para este asesor</h4>
+                  <form onSubmit={handleSubmitReview} className="space-y-4">
+                    {/* Star Rating Picker */}
+                    <div>
+                      <label className="block text-xs font-semibold text-text-secondary mb-1.5">Tu calificación:</label>
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setNewRating(star)}
+                            onMouseEnter={() => setHoverRating(star)}
+                            onMouseLeave={() => setHoverRating(0)}
+                            className="text-2xl cursor-pointer focus:outline-none transition-transform hover:scale-110"
+                          >
+                            <span className={(hoverRating || newRating) >= star ? "text-amber-400" : "text-gray-300"}>
+                              ★
+                            </span>
+                          </button>
+                        ))}
+                        <span className="ml-2 text-xs font-bold text-text-primary">{hoverRating || newRating} / 5 estrellas</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="review-comment" className="block text-xs font-semibold text-text-secondary mb-1.5">Tu comentario u experiencia:</label>
+                      <textarea
+                        id="review-comment"
+                        rows={3}
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        placeholder="Cuenta cómo fue tu proceso de asesoría con este agente..."
+                        className="w-full p-3 text-xs bg-white border border-border-light rounded focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all placeholder:text-text-muted"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submittingReview}
+                      className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {submittingReview ? "Publicando..." : "Publicar Reseña"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Reviews List */}
+                <div className="space-y-4 pt-2">
+                  {loadingReviews ? (
+                    <p className="text-xs text-text-muted italic">Cargando opiniones...</p>
+                  ) : reviews.length === 0 ? (
+                    <p className="text-xs text-text-muted italic text-center py-4">Aún no hay reseñas escritas para este asesor. ¡Sé el primero en dejar una!</p>
+                  ) : (
+                    reviews.map((rev) => (
+                      <div key={rev.id} className="border-b border-border-light pb-4 last:border-b-0 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-text-primary">{rev.reviewer_name || "Cliente TodoVisa"}</span>
+                          <span className="text-[10px] text-text-muted">
+                            {rev.created_at ? new Date(rev.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                          </span>
+                        </div>
+                        <div className="flex items-center text-amber-400 text-xs">
+                          {Array.from({ length: 5 }).map((_, idx) => (
+                            <span key={idx}>{idx < rev.rating ? "★" : "☆"}</span>
+                          ))}
+                        </div>
+                        <p className="text-xs text-text-secondary leading-relaxed">{rev.comment}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

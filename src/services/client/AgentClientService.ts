@@ -79,6 +79,23 @@ export class AgentClientService {
     return handleResponse(res);
   }
 
+  static async recordPurchase(purchaseData: Record<string, any>) {
+    const headers = await getAuthHeaders();
+    const res = await fetch("/api/purchases", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(purchaseData),
+    });
+    return handleResponse(res);
+  }
+
+  static async getAllPurchases() {
+    const headers = await getAuthHeaders();
+    const res = await fetch("/api/purchases", { headers });
+    const result = await handleResponse(res);
+    return result.data;
+  }
+
   static async getRequests() {
     const headers = await getAuthHeaders();
     const res = await fetch("/api/agents/requests", { headers });
@@ -91,5 +108,28 @@ export class AgentClientService {
     const res = await fetch(`/api/agents/requests?agentId=${encodeURIComponent(agentId)}`, { headers });
     const result = await handleResponse(res);
     return result.data;
+  }
+
+  static async getReviews(agentId: string) {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`/api/agents/reviews?agentId=${encodeURIComponent(agentId)}`, { headers });
+    const result = await handleResponse(res);
+    return result.data || [];
+  }
+
+  static async submitReview(reviewData: {
+    agent_id: string;
+    reviewer_id?: string;
+    reviewer_name?: string;
+    rating: number;
+    comment: string;
+  }) {
+    const headers = await getAuthHeaders();
+    const res = await fetch("/api/agents/reviews", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(reviewData),
+    });
+    return handleResponse(res);
   }
 }

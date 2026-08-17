@@ -43,7 +43,23 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       setUser: (user) => set({ user }),
-      clearUser: () => set({ user: null }),
+      clearUser: () => {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("vipro_completed");
+          localStorage.removeItem("vipro_score");
+          localStorage.removeItem("vipro_destination");
+          localStorage.removeItem("vipro_evaluation");
+          localStorage.removeItem("vipro_answers");
+          localStorage.removeItem("vipro_answers_US");
+          localStorage.removeItem("vipro_answers_CA");
+          localStorage.removeItem("vipro_answers_AU");
+          localStorage.removeItem("vipro_answers_UK");
+          localStorage.removeItem("vipro_saved_progress");
+          localStorage.removeItem("user_agent_application");
+          localStorage.removeItem("todovisa_guest_application");
+        }
+        set({ user: null });
+      },
     }),
     {
       name: 'auth-storage', // Nombre para el localStorage
