@@ -240,7 +240,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
             <header ref={headerRef} className="w-full bg-background-main sticky top-0 z-50 flex flex-col justify-center">
                 {/* Promo Banner */}
                 <div className="bg-brand-primary w-full p-2.5 flex justify-center font-bold text-white text-xs md:text-sm text-center">
-                    {userData?.viproCompleted || (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")))) ? (
+                    {(userData ? Boolean(userData.viproCompleted || userData.viproScore || userData.hasCompletedVipro) : (typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score"))))) ? (
                         <Link href="/profile?tab=proceso" className="hover:underline flex items-center gap-1">
                             <span>📋 Diagnóstico Consular VIPRO completado — Revisa tu perfilamiento aquí &nbsp;→</span>
                         </Link>

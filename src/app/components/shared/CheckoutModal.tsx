@@ -185,11 +185,28 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         const userMeta = (user as any).user_metadata || {};
         const clientFolio = dbProfile?.folio_number || dbProfile?.client_folio || userMeta.folio_number || `TDA-${Math.floor(100000 + Math.random() * 900000)}`;
 
+        // Auto-process typed referral code if user didn't explicitly click "Aplicar" before paying
+        let activeAgencyInfo = agencyReferralInfo;
+        if (referralCodeInput.trim() && !activeAgencyInfo) {
+          try {
+            const validation = await AgencyClientService.processAndStoreAgencyCode(referralCodeInput, user.id);
+            if (validation && validation.valid && validation.agencyId) {
+              activeAgencyInfo = {
+                agencyId: validation.agencyId,
+                agencyName: validation.agencyName || "Agencia Aliada"
+              };
+              setAgencyReferralInfo(activeAgencyInfo);
+            }
+          } catch (codeErr) {
+            console.warn("Notice: auto-applying referral code error:", codeErr);
+          }
+        }
+
         // Resolve Agency Referral Info
-        const agencyRefId = agencyReferralInfo?.agencyId || 
+        const agencyRefId = activeAgencyInfo?.agencyId || 
                             (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null) || 
                             userMeta.referred_by_agency_id || null;
-        const agencyRefName = agencyReferralInfo?.agencyName || 
+        const agencyRefName = activeAgencyInfo?.agencyName || 
                               userMeta.referred_by_agency_name || 
                               (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_info") : null) || null;
 
@@ -200,12 +217,13 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         };
         if (product === "vipro") {
           updateData.has_paid_vipro = true;
+          if (agencyRefName) {
+            updateData.assigned_agency_name = agencyRefName;
+          }
         } else {
           updateData.has_paid_advisor = true;
-          if (agent) {
-            updateData.assigned_agent_id = agent.userId || agent.id;
-            updateData.assigned_agency_name = agent.agencyName || agencyRefName || null;
-          }
+          updateData.assigned_agent_id = agent?.userId || agent?.id || agencyRefId || null;
+          updateData.assigned_agency_name = agent?.agencyName || agencyRefName || null;
         }
 
         // Persist to Supabase Auth metadata & profiles table
@@ -218,6 +236,21 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           console.log("Purchase & status successfully saved to Supabase database & user metadata.");
         } catch (err) {
           console.error("Failed to save status to Supabase profile:", err);
+        }
+
+        // Record entry in user_purchases table
+        try {
+          await AgentClientService.recordPurchase({
+            user_id: user.id,
+            reference_id: txId,
+            product_type: product,
+            amount: amountToPay,
+            payment_method: isSandbox ? "paypal_sandbox" : "paypal",
+            status: "completed",
+            agent_id: agent?.userId || agent?.id || null
+          });
+        } catch (purchErr) {
+          console.warn("Notice: user_purchases API error:", purchErr);
         }
 
         // ── 3. STORE CLIENT REQUEST IN AGENCY_CLIENT_REQUESTS TABLE ───────────
@@ -348,12 +381,11 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         const updatedStoreUser: any = { ...user };
         if (product === "vipro") {
           updatedStoreUser.hasPaidVipro = true;
+          if (agencyRefName) updatedStoreUser.assignedAgencyName = agencyRefName;
         } else {
           updatedStoreUser.hasPaidAdvisor = true;
-          if (agent) {
-            updatedStoreUser.assignedAgentId = agent.userId || agent.id;
-            updatedStoreUser.assignedAgencyName = agent.agencyName || agencyRefName || null;
-          }
+          updatedStoreUser.assignedAgentId = agent?.userId || agent?.id || agencyRefId || null;
+          updatedStoreUser.assignedAgencyName = agent?.agencyName || agencyRefName || null;
         }
         setUser(updatedStoreUser);
       }

@@ -96,7 +96,7 @@ export class FormRepository {
       if (data) return data;
     }
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("vipro_evaluations")
       .select("*")
       .eq("user_id", userId)
@@ -104,24 +104,51 @@ export class FormRepository {
       .limit(1)
       .maybeSingle();
 
-    if (error && !data) {
-      // Fallback query without user_id filter if needed
-      const { data: latest } = await supabase
-        .from("vipro_evaluations")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return latest;
-    }
-
-    return data;
+    return data || null;
   }
 
   static async saveViproEvaluation(evalData: Record<string, any>) {
+    const payload = { ...evalData };
+    delete payload.updated_at; // Remove updated_at column since it is not present in vipro_evaluations table schema
+
+    if (payload.id) {
+      const { data, error } = await supabase
+        .from("vipro_evaluations")
+        .update(payload)
+        .eq("id", payload.id)
+        .select();
+
+      if (error) throw new Error(error.message);
+      return data;
+    } else if (payload.user_id) {
+      const { data: existing } = await supabase
+        .from("vipro_evaluations")
+        .select("id")
+        .eq("user_id", payload.user_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        const { data, error } = await supabase
+          .from("vipro_evaluations")
+          .update(payload)
+          .eq("id", existing.id)
+          .select();
+
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    }
+
+    if (!payload.created_at) {
+      payload.created_at = new Date().toISOString();
+    }
+
     const { data, error } = await supabase
       .from("vipro_evaluations")
-      .upsert(evalData);
+      .insert(payload)
+      .select();
 
     if (error) throw new Error(error.message);
     return data;

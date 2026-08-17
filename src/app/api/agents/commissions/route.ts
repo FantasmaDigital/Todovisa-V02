@@ -1,5 +1,19 @@
 import { AgentRepository } from "@/lib/repositories/agent.repository";
 import { NextResponse } from "next/server";
+import supabaseAdmin from "@/lib/supabaseAdmin";
+import supabase from "@/app/lib/supabase";
+
+export async function GET() {
+  try {
+    const dbClient = supabaseAdmin || supabase;
+    const { data, error } = await dbClient.from("agent_commissions").select("*").order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ data: data || [] }, { status: 200 });
+  } catch (err: any) {
+    console.error("GET /api/agents/commissions error:", err);
+    return NextResponse.json({ error: err.message || "Failed to fetch commissions" }, { status: 500 });
+  }
+}
 
 export async function POST(request: Request) {
   try {
