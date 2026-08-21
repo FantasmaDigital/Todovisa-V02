@@ -13,9 +13,22 @@ import { Testimoniasl } from "./components/home/Testimonials";
 import { AnimatedSection } from "./components/home/AnimatedSection";
 import { AgencyPromoBanner } from "./components/home/AgencyPromoBanner";
 
+import { useRouter } from "next/navigation";
+
 export default function Home() {
   const headerRef = useRef(null);
+  const router = useRouter();
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get("ref") || params.get("agency_ref") || params.get("code");
+      if (ref) {
+        router.push(`/referral?ref=${encodeURIComponent(ref)}`);
+      }
+    }
+  }, [router]);
 
   useEffect(() => {
     if (headerRef.current) {
@@ -23,6 +36,7 @@ export default function Home() {
       setHeaderHeight(height);
     }
   }, []);
+
 
   return (
     <div className="w-full flex flex-col min-h-screen bg-color-text-primary">

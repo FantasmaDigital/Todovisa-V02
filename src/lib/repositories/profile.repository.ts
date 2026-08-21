@@ -98,15 +98,43 @@ export class ProfileRepository {
   }
 
   static async getCommissionsByAgentId(agentId: string) {
+    const idsToSearch = new Set<string>([agentId]);
+
+    // Buscar perfil y aplicaciones vinculadas para obtener application_id, email, etc.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, email")
+      .eq("id", agentId)
+      .maybeSingle();
+
+    if (profile?.email) {
+      idsToSearch.add(profile.email);
+    }
+
+    const { data: apps } = await supabase
+      .from("agent_applications")
+      .select("application_id, user_id, email, agency_id")
+      .or(`user_id.eq.${agentId},application_id.eq.${agentId},email.eq.${profile?.email || agentId}`);
+
+    apps?.forEach((a) => {
+      if (a.user_id) idsToSearch.add(a.user_id);
+      if (a.application_id) idsToSearch.add(a.application_id);
+      if (a.agency_id) idsToSearch.add(a.agency_id);
+      if (a.email) idsToSearch.add(a.email);
+    });
+
+    const idList = Array.from(idsToSearch);
+
     const { data, error } = await supabase
       .from("agent_commissions")
       .select("*")
-      .eq("agent_id", agentId)
+      .in("agent_id", idList)
       .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
     return data || [];
   }
+
 
   static async getPayoutsByAgentId(agentId: string) {
     const { data, error } = await supabase

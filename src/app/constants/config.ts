@@ -3,9 +3,10 @@
 export const DEFAULT_PRICING = {
   viproPrice: 19.99,
   fullServicePrice: 100.00,
-  agencyReferralRate: 30, // 30% for agency referrals
+  agencyReferralRate: 20, // 20% for agency referrals
   agentCommissionRate: 60, // 60% for all advisors
 };
+
 
 /**
  * Reads active prices and commission rates from localStorage (synced with DB system_settings)

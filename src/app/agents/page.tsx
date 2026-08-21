@@ -45,7 +45,19 @@ export default function AgentesPage() {
 
 
 
+  // Si se ingresa mediante un enlace de referido con ?ref=, redirigir al portal de referidos de empresa
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get("ref") || params.get("agency_ref") || params.get("code");
+      if (ref) {
+        router.push(`/referral?ref=${encodeURIComponent(ref)}`);
+      }
+    }
+  }, [router]);
+
   // Checkout modal states
+
   const [checkoutAgent, setCheckoutAgent] = useState<Agent | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 

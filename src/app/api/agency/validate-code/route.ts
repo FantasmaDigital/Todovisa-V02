@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     // 1. Buscar en agent_applications por application_id o id o por user_id que coincida
     const { data: apps, error: appErr } = await supabase
       .from("agent_applications")
-      .select("id, application_id, user_id, full_name, agency_id, status")
+      .select("id, application_id, user_id, full_name, status")
       .or(`application_id.eq.${cleanCode},id.eq.${cleanCode},user_id.eq.${cleanCode}`);
 
     if (appErr) {
@@ -27,9 +27,10 @@ export async function POST(request: Request) {
 
     if (apps && apps.length > 0) {
       const matchedApp = apps[0];
-      targetAgencyId = matchedApp.user_id || matchedApp.agency_id || matchedApp.id;
+      targetAgencyId = matchedApp.user_id || matchedApp.id;
       agencyName = matchedApp.full_name;
     } else {
+
       // 2. Si no se encontró por ID directo de aplicación, buscar en profiles por ID directo
       const { data: profileDirect } = await supabase
         .from("profiles")
