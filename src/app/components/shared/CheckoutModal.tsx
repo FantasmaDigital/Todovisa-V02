@@ -8,6 +8,7 @@ import { AgencyClientService } from "@/services/client/AgencyClientService";
 import { ProfileClientService } from "@/services/client/ProfileClientService";
 import { getSystemConfig } from "@/app/constants/config";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import { CompanyReferralModal } from "./CompanyReferralModal";
 
 interface Agent {
   id: string;
@@ -49,6 +50,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   const [agencyReferralInfo, setAgencyReferralInfo] = useState<{ agencyId: string; agencyName: string } | null>(null);
   const [referralError, setReferralError] = useState<string | null>(null);
   const [isValidatingCode, setIsValidatingCode] = useState(false);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
 
   // Auto-complete referral code from user metadata (Supabase) or localStorage
   useEffect(() => {
@@ -494,7 +496,18 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                   <span>⚠️ {referralError}</span>
                 </p>
               )}
+
+              <div className="pt-1 text-left">
+                <button
+                  type="button"
+                  onClick={() => setIsCompanyModalOpen(true)}
+                  className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 underline cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
+                >
+                  <span>📋 ¿Prefieres llenar tus datos para ser contactado por un asesor propio de TodoVisa?</span>
+                </button>
+              </div>
             </div>
+
 
             {/* Price Details */}
             <div className="px-6 py-4 border-b border-border-light space-y-2">
@@ -657,6 +670,14 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         )}
 
       </div>
+
+      {/* Modal de captación de cliente por referido de empresa */}
+      <CompanyReferralModal
+        isOpen={isCompanyModalOpen}
+        onClose={() => setIsCompanyModalOpen(false)}
+        initialCode={referralCodeInput}
+      />
     </div>
   );
 }
+

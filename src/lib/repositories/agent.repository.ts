@@ -301,16 +301,21 @@ export class AgentRepository {
       rate = rate * 100;
     }
 
+    const grossAmt = Number(commissionData.sale_amount || commissionData.gross_amount || 0);
+    const commAmt = Number(commissionData.commission_amount || (grossAmt * (rate / 100)));
+
     const payload: Record<string, any> = {
       agent_id: commissionData.agent_id,
       client_folio: folio,
       client_name: commissionData.client_name || "Cliente TodoVisa",
       service_type: serviceType,
-      gross_amount: Number(commissionData.sale_amount || commissionData.gross_amount || 0),
+      gross_amount: grossAmt,
       commission_rate: rate,
+      commission_amount: commAmt,
       status: commissionData.status || "pending",
       created_at: new Date().toISOString()
     };
+
 
     // Store rich metadata in notes column (PayPal Tx ID, Client Email, Rates breakdown, etc.)
     if (commissionData.notes) {

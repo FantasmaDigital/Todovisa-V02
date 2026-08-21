@@ -12,13 +12,13 @@ import { ProfileClientService } from "@/services/client/ProfileClientService"
 import { AgencyClientService } from "@/services/client/AgencyClientService"
 import { ROLES } from "@/app/constants/roles"
 import { visaDestinations, getCentralizedDestinations } from "@/app/constants/visas/destinations"
-
 export const Header = ({ headerRef }: { headerRef?: any }) => {
     const pathname = usePathname();
     const user = useAuthStore((state) => state.user);
     const [isMounted, setIsMounted] = useState(false);
     const [showLoader, setShowLoader] = useState(true);
     const [headerDestinations, setHeaderDestinations] = useState(visaDestinations);
+
 
     useEffect(() => {
         setHeaderDestinations(getCentralizedDestinations());
@@ -93,10 +93,11 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
             }
 
             const params = new URLSearchParams(window.location.search);
-            const refParam = params.get("ref") || params.get("agency_ref");
+            const refParam = params.get("ref") || params.get("agency_ref") || params.get("code");
             if (refParam) {
                 AgencyClientService.processAndStoreAgencyCode(refParam);
             }
+
 
             // Registrar escuchadores de eventos para refrescar el tiempo de actividad del usuario
             const handleUserActivity = () => {
@@ -361,6 +362,8 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                             </div>
                         </div>
 
+
+
                         {/* RIGHT SECTION: Actions or Mobile Hamburger */}
                         <div className="flex items-center gap-4">
                             {/* Desktop Actions */}
@@ -543,3 +546,4 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
         </>
     )
 }
+
