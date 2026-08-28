@@ -125,7 +125,7 @@ export class AgencyClientService {
 
   /**
    * Envía el formulario de contacto cuando el cliente ingresa mediante un código de referido de empresa.
-   * Al ser procesado, un asesor propio de TodoVisa contactará al cliente para finalizar el trámite.
+   * Al ser procesado, un asesor propio de TodoVisa contactará al cliente para finalizar el proceso.
    */
   static async submitReferralLead(data: {
     client_name: string;

@@ -206,7 +206,7 @@ export default function AgentesPage() {
             Encuentra a tu agente certificado
           </h1>
           <p className="text-white/95 text-base md:text-lg max-w-2xl leading-relaxed">
-            Te conectamos con los mejores asesores especializados. Elige al experto ideal para tu destino, tipo de visa e idioma y asegura un trámite sin contratiempos.
+            Te conectamos con los mejores asesores especializados. Elige al experto ideal para tu destino, tipo de visa e idioma y asegura un proceso sin contratiempos.
           </p>
         </div>
       </div>

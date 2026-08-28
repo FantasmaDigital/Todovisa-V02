@@ -26,7 +26,7 @@ export function FeatureSplit({ refHeaderHeight }: { refHeaderHeight?: any }) {
               Conecta con expertos<br />desde donde estés
             </h2>
             <p className="text-base md:text-lg text-text-secondary mb-8 leading-relaxed max-w-lg font-medium">
-              Resuelve todas tus dudas y prepara tu trámite migratorio desde la comodidad de tu hogar. Nuestro sistema de agentes virtuales te guía paso a paso de forma rápida, segura y confidencial.
+              Resuelve todas tus dudas y prepara tu proceso migratorio desde la comodidad de tu hogar. Nuestro sistema de agentes virtuales te guía paso a paso de forma rápida, segura y confidencial.
             </p>
             <Link href="/agents" className="bg-brand-primary text-white font-semibold px-8 py-3.5 rounded-sm hover:bg-[#0f3755] transition-colors text-sm shadow-xs inline-block">
               Conectar con un agente

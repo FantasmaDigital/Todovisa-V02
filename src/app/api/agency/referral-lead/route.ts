@@ -110,7 +110,7 @@ export async function POST(request: Request) {
             sender: "user",
             user_id: `referral-lead-${Date.now()}`,
             agent_id: targetAgencyId || "todovisa-staff",
-            text: `[NUEVO LEAD DE REFERIDO DE EMPRESA]\nEmpresa/Código: ${agencyName} (${cleanCode})\nCliente: ${client_name}\nCorreo: ${client_email}\nTeléfono: ${client_phone}\nTrámite: ${visa_type} - ${destination_country}\nNotas: ${notes || "Sin notas adicionales"}\nEstado: Pendiente de contacto por Asesor TodoVisa`,
+            text: `[NUEVO LEAD DE REFERIDO DE EMPRESA]\nEmpresa/Código: ${agencyName} (${cleanCode})\nCliente: ${client_name}\nCorreo: ${client_email}\nTeléfono: ${client_phone}\nProceso: ${visa_type} - ${destination_country}\nNotas: ${notes || "Sin notas adicionales"}\nEstado: Pendiente de contacto por Asesor TodoVisa`,
           },
         ]);
       } catch (mErr: any) {
@@ -123,11 +123,11 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        message: "Formulario de contacto enviado correctamente.",
+        message: "¡Tus datos han sido registrados con éxito!",
         leadId: newLead?.id || `lead-${Date.now()}`,
         agencyName: agencyName,
         agencyCode: cleanCode,
-        advisorNote: "Un asesor propio de la empresa TodoVisa se pondrá en contacto a la brevedad para dar seguimiento y finalizar tu trámite consular.",
+        advisorNote: "Un asesor propio de la empresa TodoVisa se pondrá en contacto a la brevedad para dar seguimiento y finalizar tu proceso consular.",
       },
       { status: 200 }
     );

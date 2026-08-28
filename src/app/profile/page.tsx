@@ -1748,7 +1748,7 @@ export default function PerfilUsuarioPage() {
         gross_amount: gross,
         commission_rate: rate,
         commission_amount: commissionAmt,
-        service_type: "Trámite de Visa (Referido Empresa)",
+        service_type: "Proceso de Visa (Referido Empresa)",
         status: "pending",
         notes: {
           manual_admin_assignment: true,
@@ -2498,7 +2498,7 @@ export default function PerfilUsuarioPage() {
       {/* Banner Superior del Perfil */}
       <div className="w-full bg-brand-primary py-12 px-6 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        <div className="w-[80%] mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
+        <div className="w-[95%] sm:w-[90%] lg:w-[80%] max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
           {/* Avatar gigante en el banner (clickable) */}
           <div className="relative group w-20 h-20 bg-brand-light border-4 border-white/20 rounded-full flex items-center justify-center shadow-lg overflow-hidden select-none">
             <UserAvatar
@@ -2559,7 +2559,7 @@ export default function PerfilUsuarioPage() {
 
 
       {/* Grid Principal */}
-      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8 transition-all duration-300">
+      <main className="w-[95%] sm:w-[90%] lg:w-[80%] max-w-7xl mx-auto py-6 sm:py-10 flex-1 flex flex-col lg:flex-row gap-8 transition-all duration-300 min-w-0 max-w-full">
 
         {/* Columna Izquierda: Tarjeta de Resumen y Menú */}
         <aside className={`w-full ${isSidebarCollapsed ? 'lg:w-[70px]' : 'lg:w-1/4'} flex-shrink-0 transition-all duration-300`}>
@@ -2622,7 +2622,7 @@ export default function PerfilUsuarioPage() {
 
                   const baseUserTabs = [
                     { id: "datos", label: "Mis Datos Personales" },
-                    { id: "proceso", label: "Seguimiento de Trámite" },
+                    { id: "proceso", label: "Seguimiento de Proceso" },
                     { id: "vipro", label: "Evaluación VIPRO" },
                     { id: "asesor", label: "Mi Asesor Asignado" },
                     { id: "pagos", label: "Pagos y Comprobantes" },
@@ -2735,8 +2735,8 @@ export default function PerfilUsuarioPage() {
         </aside>
 
         {/* Columna Derecha: Contenido del Tab Activo */}
-        <section className={`w-full ${isSidebarCollapsed ? 'lg:flex-grow lg:w-[calc(100%-90px)]' : 'lg:w-3/4'} transition-all duration-300`}>
-          <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
+        <section className={`w-full ${isSidebarCollapsed ? 'lg:flex-grow lg:w-[calc(100%-90px)]' : 'lg:w-3/4'} transition-all duration-300 min-w-0 max-w-full`}>
+          <div className="bg-white rounded-lg border border-border-light p-4 sm:p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px] min-w-0 max-w-full overflow-hidden">
             {isLoadingPartnerApp ? (
               <div className="space-y-6 text-left animate-pulse">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-light pb-4">
@@ -3166,10 +3166,10 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h2 className="text-xl font-bold text-text-primary">
                               {hasPaidAdvisor
-                                ? "Seguimiento de Trámite de Visa (Servicio Completo)"
+                                ? "Seguimiento de Proceso de Visa (Servicio Completo)"
                                 : isViproOnly
                                   ? "Seguimiento de Evaluación VIPRO Express"
-                                  : "Seguimiento de Trámite de Visa"}
+                                  : "Seguimiento de Proceso de Visa"}
                             </h2>
                             <p className="text-xs text-text-secondary mt-1">
                               {hasPaidAdvisor
@@ -3431,7 +3431,7 @@ export default function PerfilUsuarioPage() {
                                   </span>
                                 </div>
                                 <p className="text-xs text-emerald-900 leading-relaxed">
-                                  Has completado exitosamente todos los 6 Pasos del proceso de acompañamiento consular. Tu expediente ha sido auditado por tu asesor, tu cita presencial / simulacro consular ha sido confirmada y has dejado tu reseña oficial. ¡Éxitos en tu trámite consular!
+                                  Has completado exitosamente todos los 6 Pasos del proceso de acompañamiento consular. Tu expediente ha sido auditado por tu asesor, tu cita presencial / simulacro consular ha sido confirmada y has dejado tu reseña oficial. ¡Éxitos en tu proceso consular!
                                 </p>
                               </div>
                             );
@@ -3881,7 +3881,7 @@ export default function PerfilUsuarioPage() {
 
                                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-sm border border-slate-200">
                                           <div>
-                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Trámite</span>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Proceso</span>
                                             <span className="font-semibold text-slate-900 block mt-0.5">{activeCita.appointment_type || "Simulacro / Cita Consular"}</span>
                                           </div>
                                           <div>
@@ -4319,7 +4319,7 @@ export default function PerfilUsuarioPage() {
                               </span>
                             </div>
                             <p className="text-xs text-brand-primary font-bold">
-                              {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa")}
+                              {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Procesos de Visa")}
                             </p>
                             <p className="text-xs text-text-secondary leading-relaxed">
                               {assignedAgentProfile?.bio || assignedAgencyProfile?.bio || "Asesor consular certificado. Tu expediente cuenta con auditoría y respaldo institucional."}
@@ -4468,15 +4468,15 @@ export default function PerfilUsuarioPage() {
                           </div>
 
                           {viproEvaluations.length > 0 ? (
-                            <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
-                              <table className="w-full text-left border-collapse">
+                            <div className="w-full max-w-full overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm table-scroll-container">
+                              <table className="w-full min-w-[550px] text-left border-collapse">
                                 <thead>
-                                  <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
-                                    <th className="py-3 px-4">Destino</th>
-                                    <th className="py-3 px-4">Fecha</th>
-                                    <th className="py-3 px-4">Calificación</th>
-                                    <th className="py-3 px-4">Resultado</th>
-                                    <th className="py-3 px-4 text-right">Acción</th>
+                                  <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6] whitespace-nowrap">
+                                    <th className="py-3 px-4 whitespace-nowrap">Destino</th>
+                                    <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                                    <th className="py-3 px-4 whitespace-nowrap">Calificación</th>
+                                    <th className="py-3 px-4 whitespace-nowrap">Resultado</th>
+                                    <th className="py-3 px-4 text-right whitespace-nowrap">Acción</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border-light text-xs">
@@ -4562,16 +4562,16 @@ export default function PerfilUsuarioPage() {
                         <p className="text-xs text-text-secondary mt-1">Revisa el detalle de tus compras de servicios y descarga tus comprobantes.</p>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
+                      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light bg-white shadow-sm table-scroll-container">
+                        <table className="w-full min-w-[650px] text-left border-collapse">
                           <thead>
-                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
-                              <th className="py-3 px-4">Referencia</th>
-                              <th className="py-3 px-4">Concepto</th>
-                              <th className="py-3 px-4">Fecha</th>
-                              <th className="py-3 px-4">Monto</th>
-                              <th className="py-3 px-4">Estado</th>
-                              <th className="py-3 px-4 text-right">Acción</th>
+                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40 whitespace-nowrap">
+                              <th className="py-3 px-4 whitespace-nowrap">Referencia</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Concepto</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Monto</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Estado</th>
+                              <th className="py-3 px-4 text-right whitespace-nowrap">Acción</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border-light text-xs">
@@ -4637,7 +4637,7 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
                             <p className="text-[11px] text-text-secondary leading-relaxed">
-                              Como completaste tu evaluación VIPRO de ${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
+                              Como completaste tu evaluación VIPRO de ${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier proceso de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
                             </p>
                           </div>
                         </div>
@@ -4665,7 +4665,7 @@ export default function PerfilUsuarioPage() {
                         <div className="p-4 rounded-md border text-left bg-emerald-50/50 border-emerald-200 text-emerald-800">
                           <h4 className="font-bold text-sm mb-1">¡Perfil Acreditado Activo!</h4>
                           <p className="text-xs leading-relaxed opacity-90">
-                            Eres un asesor respaldado por <strong>{myAgency.first_name} {myAgency.last_name}</strong>. Tu perfil aparece con insignia de verificación y estás habilitado para gestionar los trámites asignados por tu empresa en la red TodoVisa.
+                            Eres un asesor respaldado por <strong>{myAgency.first_name} {myAgency.last_name}</strong>. Tu perfil aparece con insignia de verificación y estás habilitado para gestionar los procesos asignados por tu empresa en la red TodoVisa.
                           </p>
                         </div>
 
@@ -4903,16 +4903,16 @@ export default function PerfilUsuarioPage() {
 
                     {!selectedApp ? (
                       /* APPLICATIONS LISTING */
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
+                      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light bg-white shadow-sm table-scroll-container">
+                        <table className="w-full min-w-[650px] text-left border-collapse">
                           <thead>
-                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
-                              <th className="py-3 px-4">Código</th>
-                              <th className="py-3 px-4">Postulante / Empresa</th>
-                              <th className="py-3 px-4">Tipo</th>
-                              <th className="py-3 px-4">Fecha</th>
-                              <th className="py-3 px-4">Estado</th>
-                              <th className="py-3 px-4 text-right">Acción</th>
+                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40 whitespace-nowrap">
+                              <th className="py-3 px-4 whitespace-nowrap">Código</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Postulante / Empresa</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Tipo</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Estado</th>
+                              <th className="py-3 px-4 text-right whitespace-nowrap">Acción</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border-light text-xs">
@@ -5444,13 +5444,13 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[500px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">Usuario / Email</th>
-                            <th className="py-3 px-4">Rol en Sistema</th>
-                            <th className="py-3 px-4">Estado</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Usuario / Email</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Rol en Sistema</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Estado</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5538,14 +5538,14 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[650px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">Solicitante</th>
-                            <th className="py-3 px-4">Preformulario</th>
-                            <th className="py-3 px-4">Documentos Cargados</th>
-                            <th className="py-3 px-4 text-center">Acción</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Solicitante</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Preformulario</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Documentos Cargados</th>
+                            <th className="py-3 px-4 text-center whitespace-nowrap">Acción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5690,14 +5690,14 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[600px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">Cliente</th>
-                            <th className="py-3 px-4">Scoring Consular</th>
-                            <th className="py-3 px-4">Fecha</th>
-                            <th className="py-3 px-4 text-center">Acción</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Cliente</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Scoring Consular</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                            <th className="py-3 px-4 text-center whitespace-nowrap">Acción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5838,7 +5838,7 @@ export default function PerfilUsuarioPage() {
                     </div>
 
                     {/* Tabla de Ancho Amplio (min-w-[1500px]) con Scroll Horizontal */}
-                    <div className="overflow-x-auto rounded-sm border border-border-light bg-white shadow-xs">
+                    <div className="w-full max-w-full overflow-x-auto rounded-sm border border-border-light bg-white shadow-xs table-scroll-container">
                       <table className="w-full min-w-[1500px] text-xs text-left text-text-primary border-collapse">
                         <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
                           <tr>
@@ -5846,7 +5846,7 @@ export default function PerfilUsuarioPage() {
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[180px]">Cliente Solicitante</th>
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[240px]">Información de Contacto</th>
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[340px]">Empresa / Código de Referido</th>
-                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[200px]">Trámite & País</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[200px]">Proceso & País</th>
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[240px]">Notas del Cliente</th>
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[180px]">Estado</th>
                             <th className="py-3.5 px-4 text-right whitespace-nowrap min-w-[180px]">Acciones Admin</th>
@@ -5977,7 +5977,7 @@ export default function PerfilUsuarioPage() {
                                         <option value="pending_advisor_contact">Pendiente Asesor</option>
                                         <option value="contacted">Contactado</option>
                                         <option value="in_progress">En Gestión</option>
-                                        <option value="completed">Trámite Concluido</option>
+                                        <option value="completed">Proceso Concluido</option>
                                       </select>
                                     </td>
 
@@ -6045,16 +6045,16 @@ export default function PerfilUsuarioPage() {
                       </button>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[700px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">ID Transacción</th>
-                            <th className="py-3 px-4">Cliente</th>
-                            <th className="py-3 px-4">Concepto</th>
-                            <th className="py-3 px-4">Monto</th>
-                            <th className="py-3 px-4">Estado</th>
-                            <th className="py-3 px-4 text-right">Acción Admin</th>
+                            <th className="py-3 px-4 whitespace-nowrap">ID Transacción</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Cliente</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Concepto</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Monto</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Estado</th>
+                            <th className="py-3 px-4 text-right whitespace-nowrap">Acción Admin</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -6998,11 +6998,11 @@ export default function PerfilUsuarioPage() {
                       </div>
                       {user.role === ROLES.AGENCY ? (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+                          Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada proceso consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
                         </p>
                       ) : (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Asesor Certificado de la red TodoVisa, recibes el <strong>{getSystemConfig().agentCommissionRate}% del importe bruto</strong> de cada trámite consular asignado. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                          Como Asesor Certificado de la red TodoVisa, recibes el <strong>{getSystemConfig().agentCommissionRate}% del importe bruto</strong> de cada proceso consular asignado. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
                         </p>
                       )}
                     </div>
@@ -7040,7 +7040,7 @@ export default function PerfilUsuarioPage() {
                             commission_amount: agentCommissionAmount,
                             status: isCompleted ? 'paid' : 'processing',
                             paid_at: isCompleted ? new Date().toISOString() : null,
-                            notes: 'Comisión de trámite en curso',
+                            notes: 'Comisión de proceso en curso',
                             created_at: client.created_at || new Date().toISOString()
                           });
                         }
@@ -7069,7 +7069,7 @@ export default function PerfilUsuarioPage() {
                               <p className="text-lg font-bold text-text-primary font-mono mt-1">{totalClients}</p>
                             </div>
                             <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Saldo en Trámite</span>
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Saldo en Proceso</span>
                               <p className="text-lg font-bold text-amber-600 font-mono mt-1">${pendingBalance.toFixed(2)} USD</p>
                             </div>
                             <div className="p-4 bg-background-main border border-border-light rounded-sm">
@@ -7094,16 +7094,16 @@ export default function PerfilUsuarioPage() {
                                 No se han encontrado registros de comisiones aprobadas para tu cuenta.
                               </div>
                             ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs border-collapse">
+                              <div className="w-full max-w-full overflow-x-auto table-scroll-container">
+                                <table className="w-full min-w-[600px] text-left text-xs border-collapse">
                                   <thead>
-                                    <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
-                                      <th className="py-2.5">Fecha</th>
-                                      <th className="py-2.5">Cliente Solicitante</th>
-                                      <th className="py-2.5">Trámite / Servicio</th>
-                                      <th className="py-2.5">Tasa Comisión</th>
-                                      <th className="py-2.5">Monto Comisión</th>
-                                      <th className="py-2.5">Estado</th>
+                                    <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold whitespace-nowrap">
+                                      <th className="py-2.5 whitespace-nowrap">Fecha</th>
+                                      <th className="py-2.5 whitespace-nowrap">Cliente Solicitante</th>
+                                      <th className="py-2.5 whitespace-nowrap">Proceso / Servicio</th>
+                                      <th className="py-2.5 whitespace-nowrap">Tasa Comisión</th>
+                                      <th className="py-2.5 whitespace-nowrap">Monto Comisión</th>
+                                      <th className="py-2.5 whitespace-nowrap">Estado</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-border-light">
@@ -7321,7 +7321,7 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
                             <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                              Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>20% del valor del trámite</strong> a tu cuenta de agencia (80% para TodoVisa).
+                              Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>20% del valor del proceso</strong> a tu cuenta de agencia (80% para TodoVisa).
                             </p>
                           </div>
                         </div>
@@ -7332,7 +7332,7 @@ export default function PerfilUsuarioPage() {
                       <div className="bg-white border border-border-light rounded-sm p-6 text-left shadow-xs space-y-4">
                         <div>
                           <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-1">Enlace de Referido Exclusivo</h3>
-                          <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su trámite con tu código de agencia.</p>
+                          <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su proceso con tu código de agencia.</p>
                         </div>
 
                         <div className="flex flex-col sm:flex-row gap-3 pt-2">
@@ -7409,7 +7409,7 @@ export default function PerfilUsuarioPage() {
               router.push("/vipro-form");
             } else {
               setActiveTab("proceso"); // Redirect to tracking so they see Step 4 workspace
-              showToast("¡Asesor contratado y expediente de trámite activado con éxito!", "success");
+              showToast("¡Asesor contratado y expediente de proceso activado con éxito!", "success");
             }
           }}
         />

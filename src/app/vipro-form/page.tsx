@@ -4,6 +4,7 @@ import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuthStore } from "../store/authStore";
 import { CheckoutModal } from "../components/shared/CheckoutModal";
 import { AuthService } from "../service/AuthService";
@@ -168,6 +169,12 @@ function ViproFormContent() {
                                         Adquirir Evaluación VIPRO &rarr;
                                     </button>
                                 </div>
+                                <p className="text-[11px] text-text-muted mt-2 text-left">
+                                    Al adquirir o utilizar VIPRO, declaras conocer y aceptar los{" "}
+                                    <Link href="/vipro-form/terminos" className="text-brand-primary font-bold hover:underline">
+                                        Términos y Condiciones de Uso VIPRO
+                                    </Link>.
+                                </p>
                             </div>
                         ) : inProgress ? (
                             /* Paid and in-progress state */
@@ -181,13 +188,19 @@ function ViproFormContent() {
                                 <p className="text-sm text-text-secondary font-sans">
                                     Puedes continuar respondiendo donde lo dejaste para recibir tu reporte de viabilidad y puntaje consular.
                                 </p>
-                                <div className="flex mt-2">
+                                <div className="flex flex-col gap-2 mt-2">
                                     <button
                                         onClick={() => router.push("/vipro-form/evaluation")}
                                         className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer"
                                     >
                                         Continuar Evaluación
                                     </button>
+                                    <p className="text-[11px] text-text-muted">
+                                        Consulta los{" "}
+                                        <Link href="/vipro-form/terminos" className="text-brand-primary font-semibold hover:underline">
+                                            Términos y Condiciones VIPRO
+                                        </Link>.
+                                    </p>
                                 </div>
                             </div>
                         ) : (
@@ -202,13 +215,19 @@ function ViproFormContent() {
                                 <p className="text-xs text-text-secondary leading-relaxed">
                                     Ya has adquirido tu evaluación VIPRO con éxito. Comienza ahora para obtener tu diagnóstico y recomendaciones de preparación.
                                 </p>
-                                <div className="flex mt-2">
+                                <div className="flex flex-col gap-2 mt-2">
                                     <button
                                         onClick={() => router.push("/vipro-form/evaluation")}
                                         className="w-full sm:w-auto bg-brand-primary text-white font-semibold py-3.5 px-8 rounded-md hover:bg-brand-hover transition-colors shadow-md text-sm cursor-pointer"
                                     >
                                         Empezar Evaluación VIPRO
                                     </button>
+                                    <p className="text-[11px] text-text-muted">
+                                        Al realizar el cuestionario aceptas los{" "}
+                                        <Link href="/vipro-form/terminos" className="text-brand-primary font-semibold hover:underline">
+                                            Términos y Condiciones VIPRO
+                                        </Link>.
+                                    </p>
                                 </div>
                             </div>
                         )}

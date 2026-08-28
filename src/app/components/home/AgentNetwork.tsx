@@ -35,7 +35,7 @@ export const AgentNetwork = () => {
                     <div className="max-w-md">
                         <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">Red de Expertos TodoVisa</span>
                         <p className="text-white font-bold text-xl md:text-2xl mt-1 leading-snug font-serif italic">
-                            Gana hasta ${commissionAmount.toFixed(2)} USD por trámite. Sin buscar clientes.
+                            Gana hasta ${commissionAmount.toFixed(2)} USD por proceso. Sin buscar clientes.
                         </p>
                     </div>
                     <div className="grid grid-cols-2 gap-6 text-center text-xs">
@@ -62,7 +62,7 @@ export const AgentNetwork = () => {
                                 Tu experiencia consular<br className="hidden sm:inline" /> merece ser rentable.
                             </h2>
                             <p className="text-base md:text-lg text-text-secondary mb-6 leading-relaxed font-medium">
-                                TodoVisa conecta a asesores certificados con clientes que ya han sido evaluados y están listos para comenzar su trámite. Tú solo haces lo que mejor sabes hacer: conseguir visas aprobadas.
+                                TodoVisa conecta a asesores certificados con clientes que ya han sido evaluados y están listos para comenzar su proceso. Tú solo haces lo que mejor sabes hacer: conseguir visas aprobadas.
                             </p>
                             <p className="text-sm text-text-secondary mb-8 leading-relaxed border-l-2 border-brand-primary/30 pl-4 italic">
                                 &ldquo;Dejé de perder tiempo buscando prospectos. Ahora gestiono 8–12 expedientes activos por semana desde mi laptop.&rdquo;<br />

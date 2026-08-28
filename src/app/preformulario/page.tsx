@@ -350,9 +350,9 @@ function PreformularioContent() {
                             </div>
                         </div>
 
-                        {/* Modalidad de Trámite Selector */}
+                        {/* Modalidad de Proceso Selector */}
                         <div className="space-y-3">
-                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">Modalidad del Trámite</label>
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider text-left">Modalidad del Proceso</label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <button
                                     type="button"
@@ -500,7 +500,7 @@ function PreformularioContent() {
                                 Tu asesor asignado ha recibido tu expediente. Se comunicará contigo mediante el chat de tu portal para agendar la primera revisión virtual.
                             </p>
                             <p className="text-[11px] text-text-secondary leading-relaxed">
-                                Puedes verificar el estatus del trámite o enviarle un mensaje a tu asesor en cualquier momento desde tu panel de usuario.
+                                Puedes verificar el estatus del proceso o enviarle un mensaje a tu asesor en cualquier momento desde tu panel de usuario.
                             </p>
                         </div>
 

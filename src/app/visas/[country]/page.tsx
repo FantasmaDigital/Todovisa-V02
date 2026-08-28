@@ -157,7 +157,7 @@ export default function VisaDetailPage() {
                                         <div className="bg-white border border-red-200 p-4 rounded-xl space-y-2">
                                             <p className="font-bold text-red-700">✗ Señales de Alerta (Rechazo):</p>
                                             <ul className="list-disc pl-5 space-y-1.5 text-text-secondary">
-                                                <li>Depósitos masivos atípicos justo antes del trámite.</li>
+                                                <li>Depósitos masivos atípicos justo antes del proceso.</li>
                                                 <li>Capturas de pantalla o impresiones de banca en línea sin certificar.</li>
                                                 <li>Cuentas empresariales sin acta constitutiva que te relacione.</li>
                                                 <li>Saldos netos menores al costo estimado del viaje.</li>

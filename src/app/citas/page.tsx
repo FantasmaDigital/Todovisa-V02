@@ -411,7 +411,7 @@ function CitasPageContent() {
               🔒
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800 font-serif mb-2">Acceso Restringido al Trámite</h2>
+              <h2 className="text-xl font-bold text-slate-800 font-serif mb-2">Acceso Restringido al Proceso</h2>
               <p className="text-xs text-slate-600 leading-relaxed">
                 El agendamiento de citas está disponible únicamente para clientes con un proceso consular activo en su cuenta. No tienes permisos para consultar o modificar este expediente.
               </p>
@@ -442,7 +442,7 @@ function CitasPageContent() {
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div>
               <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-2">
-                Trámite ID: {targetProcessId ? targetProcessId.substring(0, 8) : "Activo"} • Asesoría Virtual
+                Proceso ID: {targetProcessId ? targetProcessId.substring(0, 8) : "Activo"} • Asesoría Virtual
               </p>
               <h1 className="text-3xl md:text-5xl text-white leading-tight mb-2 font-semibold font-serif italic">
                 Agenda tu asesoría virtual
@@ -477,7 +477,7 @@ function CitasPageContent() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-white p-4 rounded-xl border border-emerald-200">
                   <div>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Trámite</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Proceso</span>
                     <span className="font-semibold text-slate-800 block mt-0.5">{appointmentRequest.appointment_type}</span>
                   </div>
                   <div>
@@ -671,7 +671,7 @@ function CitasPageContent() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                 </svg>
                 <p className="text-[11px] text-text-secondary leading-relaxed">
-                  Trámite auditado para el expediente ID <strong className="text-text-primary">{targetProcessId?.substring(0, 8)}</strong> con sincronización en tiempo real.
+                  Proceso auditado para el expediente ID <strong className="text-text-primary">{targetProcessId?.substring(0, 8)}</strong> con sincronización en tiempo real.
                 </p>
               </div>
             </aside>

@@ -6,7 +6,7 @@ export const HeroCard = ({
     description,
     imageSrc,
     linkUrl = "/vipro-form",
-    buttonText = "Explorar Trámite →"
+    buttonText = "Explorar Proceso →"
 }: {
     eyebrow: string;
     title: string;

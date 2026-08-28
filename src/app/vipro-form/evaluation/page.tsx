@@ -4,6 +4,7 @@ import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useAuthStore } from "../../store/authStore";
 import { FormClientService } from "@/services/client/FormClientService";
 import { AuthService } from "@/app/service/AuthService";
@@ -713,6 +714,14 @@ function ViproEvaluationContent() {
                                 Empezar Diagnóstico VIPRO →
                             </button>
                         </div>
+
+                        <p className="text-xs text-text-muted text-center pt-2 border-t border-border-light">
+                            Al iniciar y enviar esta autoevaluación declaro haber leído, comprendido y aceptado los{" "}
+                            <Link href="/vipro-form/terminos" target="_blank" className="text-brand-primary font-bold hover:underline">
+                                Términos y Condiciones de Uso VIPRO
+                            </Link>
+                            , reconociendo la naturaleza informativa y no vinculante del diagnóstico.
+                        </p>
                     </div>
                 </main>
                 <Footer />

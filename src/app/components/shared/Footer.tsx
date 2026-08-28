@@ -17,6 +17,7 @@ const footerLinks = {
     { label: "Preguntas Frecuentes", href: "/sobre-todovisa" },
   ],
   Legal: [
+    { label: "Términos y Condiciones VIPRO", href: "/vipro-form/terminos" },
     { label: "Política de Privacidad", href: "/about-us#privacidad" },
     { label: "Términos de Uso", href: "/about-us#terminos" },
     { label: "Aviso de Cookies", href: "/about-us#cookies" },

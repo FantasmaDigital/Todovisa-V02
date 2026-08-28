@@ -63,11 +63,11 @@ export default function Home() {
             <AnimatedSection className="h-full" delay={150}>
               <HeroCard
                 eyebrow="PRIMERA VEZ Y RENOVACIONES"
-                title="Trámites de Visado Asistidos"
+                title="Procesos de Visado Asistidos"
                 description="Gestionamos tu visa para Estados Unidos (Drop Box Waiver), México, Canadá, Australia y el Reino Unido con rigor documental y máxima efectividad."
                 imageSrc="/images/estadosunidos.webp"
                 linkUrl="/agents"
-                buttonText="Iniciar Trámite de Visa →"
+                buttonText="Iniciar Proceso de Visa →"
               />
             </AnimatedSection>
 

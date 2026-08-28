@@ -77,7 +77,7 @@ export const FAQs = () => {
                     Evaluación VIPRO
                 </a>
                 <a href="/agents" className="bg-white text-text-primary border border-border-light hover:bg-gray-50 font-bold px-8 py-3.5 rounded-lg text-sm transition-all duration-200 shadow-sm focus:outline-none cursor-pointer">
-                    Iniciar Trámite
+                    Iniciar Proceso
                 </a>
             </div>
         </section>

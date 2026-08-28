@@ -530,7 +530,7 @@ export default function AgentApplyPage() {
                   <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Perfil Profesional</h3>
 
                   <div>
-                    <label htmlFor="experienceYears" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Experiencia en Trámites Consulares</label>
+                    <label htmlFor="experienceYears" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Experiencia en Procesos Consulares</label>
                     <select
                       name="experienceYears"
                       id="experienceYears"

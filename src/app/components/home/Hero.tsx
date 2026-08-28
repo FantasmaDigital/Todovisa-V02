@@ -43,7 +43,7 @@ export const Hero = ({ headerHeight }: { headerHeight: number | null }) => {
           <span className="flex items-center gap-1 text-amber-300">
             ★ ★ ★ ★ ★
           </span>
-          <span className="font-medium">4.9/5 por +1,000 trámites evaluados</span>
+          <span className="font-medium">4.9/5 por +1,000 procesos evaluados</span>
         </div>
 
         {/* Heading */}
