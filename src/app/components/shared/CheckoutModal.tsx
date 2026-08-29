@@ -46,6 +46,16 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
     }
   }, []);
 
+  // Automatic activation and redirection after payment confirmation
+  useEffect(() => {
+    if (step === "success") {
+      const timer = setTimeout(() => {
+        onSuccess();
+      }, 1600);
+      return () => clearTimeout(timer);
+    }
+  }, [step, onSuccess]);
+
   const [referralCodeInput, setReferralCodeInput] = useState("");
   const [agencyReferralInfo, setAgencyReferralInfo] = useState<{ agencyId: string; agencyName: string } | null>(null);
   const [referralError, setReferralError] = useState<string | null>(null);
@@ -204,19 +214,48 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           }
         }
 
-        // Resolve Agency Referral Info
+        // Resolve Agency Referral Info safely from state, user metadata or parsed localStorage
+        let localAgencyId: string | null = null;
+        let localAgencyName: string | null = null;
+        let localAgencyCode: string | null = null;
+        if (typeof window !== "undefined") {
+          const infoStr = localStorage.getItem("todovisa_agency_info");
+          if (infoStr) {
+            try {
+              const parsed = JSON.parse(infoStr);
+              localAgencyId = parsed.agencyId || null;
+              localAgencyName = parsed.agencyName || null;
+              localAgencyCode = parsed.code || null;
+            } catch (e) {}
+          }
+        }
+
         const agencyRefId = activeAgencyInfo?.agencyId || 
-                            (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null) || 
-                            userMeta.referred_by_agency_id || null;
+                            userMeta.referred_by_agency_id || 
+                            localAgencyId || 
+                            null;
         const agencyRefName = activeAgencyInfo?.agencyName || 
                               userMeta.referred_by_agency_name || 
-                              (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_info") : null) || null;
+                              localAgencyName || 
+                              null;
+        const agencyRefCode = referralCodeInput.trim() || 
+                              userMeta.referred_by_agency_code || 
+                              localAgencyCode || 
+                              (typeof window !== "undefined" ? localStorage.getItem("todovisa_agency_ref") : null) || 
+                              null;
 
         // ── 2. PREPARE & SAVE PROFILE / AUTH UPDATE ───────────────────────────
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updateData: any = {
           last_paypal_tx: txId
         };
+
+        if (agencyRefId) {
+          updateData.referred_by_agency_id = agencyRefId;
+          if (agencyRefName) updateData.referred_by_agency_name = agencyRefName;
+          if (agencyRefCode) updateData.referred_by_agency_code = agencyRefCode;
+        }
+
         if (product === "vipro") {
           updateData.has_paid_vipro = true;
           if (agencyRefName) {
@@ -276,7 +315,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           // A) Agency Referral Commission (30%) if client was referred by an agency
           if (agencyRefId) {
             try {
-              const agencyRate = sysConfig.agencyReferralRate; // Centralized rate (30%)
+              const agencyRate = sysConfig.agencyReferralRate; // Centralized rate (20%)
               const agencyCommissionAmount = (amountToPay * agencyRate) / 100;
               const todovisaShare = amountToPay - agencyCommissionAmount;
 
@@ -348,7 +387,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
           // C) VIPRO Purchase ($19.99): Record transaction & commission if referred by agency or assigned agent
           const targetAgentId = agencyRefId || agent?.userId || agent?.id || (user as any).assigned_agent_id || user.id;
           try {
-            const viproRate = agencyRefId ? sysConfig.agencyReferralRate : 0; // 30% for agency referral or 0% logging
+            const viproRate = agencyRefId ? sysConfig.agencyReferralRate : 0; // 20% for agency referral or 0% logging
             const commAmount = (amountToPay * viproRate) / 100;
             const todovisaShare = amountToPay - commAmount;
 
@@ -406,41 +445,36 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="bg-white rounded-lg max-w-xl w-full overflow-hidden shadow-2xl relative border border-border-light flex flex-col animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="bg-white rounded-2xl max-w-2xl md:max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative border border-border-light animate-in zoom-in-95 duration-200">
         
-        {/* Close Button */}
-        {step !== "processing" && (
-          <button
-            onClick={onClose}
-            className="absolute right-4 top-4 text-text-secondary hover:text-text-primary bg-background-main hover:bg-background-hover p-1.5 rounded-full transition-colors z-20 focus:outline-none cursor-pointer"
-            title="Cerrar"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
-
         {/* STEP 1: PAYPAL CHECKOUT */}
         {step === "billing" && (
-          <div className="flex flex-col text-left">
+          <div className="flex flex-col h-full overflow-hidden text-left">
             {/* Header */}
-            <div className="p-6 bg-[#003087] text-white border-b border-white/10 relative overflow-hidden">
+            <div className="px-6 py-4 sm:py-5 bg-[#003087] text-white border-b border-white/10 relative overflow-hidden flex items-center justify-between shrink-0">
               <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:12px_12px]"></div>
-              <div className="flex items-center justify-between">
+              <div className="relative z-10 flex items-center justify-between w-full pr-2">
                 <div>
-                  <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-blue-200 mb-1">Pasarela Oficial PayPal</p>
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-blue-200 mb-0.5">Pasarela Oficial PayPal</p>
+                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                     <span>💳 Pago Seguro con PayPal</span>
                   </h3>
                 </div>
-                <div className="bg-white/10 px-3 py-1 rounded text-[11px] font-bold text-white border border-white/20">
-                  {isSandbox ? "🟡 Sandbox Test Env" : "🟢 Live PayPal"}
-                </div>
               </div>
+              <button
+                onClick={onClose}
+                className="relative z-20 ml-3 text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors focus:outline-none cursor-pointer shrink-0"
+                title="Cerrar"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
 
+            {/* Scrollable Body Container */}
+            <div className="overflow-y-auto max-h-[calc(90vh-76px)] flex-1">
             {/* Agent Summary */}
             {product !== "vipro" && agent && (
               <div className="p-5 bg-blue-50/50 border-b border-border-light flex flex-col gap-3">
@@ -556,8 +590,8 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 </div>
               ) : (
                 <PayPalScriptProvider options={{ clientId: paypalClientId, currency: "USD" }}>
-                  <div className="space-y-3 text-left">
-                    <p className="text-xs text-text-secondary text-center mb-4">
+                  <div className="space-y-3 text-left max-w-lg mx-auto">
+                    <p className="text-xs text-text-secondary text-center mb-3">
                       Completa tu transacción de manera 100% segura usando tu saldo PayPal o tu tarjeta de débito/crédito:
                     </p>
                     <div className="relative z-10">
@@ -602,9 +636,10 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                 <span>Sin cargos ocultos</span>
               </div>
             </div>
+            </div>
 
             {/* Footer */}
-            <div className="p-4 bg-background-main/50 border-t border-border-light flex justify-end">
+            <div className="p-4 bg-background-main/50 border-t border-border-light flex justify-end shrink-0">
               <button
                 type="button"
                 onClick={onClose}
@@ -656,11 +691,16 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               )}
             </div>
 
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-4 py-2 rounded-full border border-emerald-200 animate-pulse">
+              <div className="w-3 h-3 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+              <span>Activación automática en curso. Redirigiendo...</span>
+            </div>
+
             <button
               onClick={() => {
                 onSuccess();
               }}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-sm shadow-sm transition-colors focus:outline-none cursor-pointer"
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors focus:outline-none cursor-pointer"
             >
               {product === "vipro"
                 ? "Ir a mi Formulario VIPRO"

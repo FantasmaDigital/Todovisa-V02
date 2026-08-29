@@ -178,9 +178,7 @@ export function CompanyReferralModal({
                 <p className="text-slate-800 font-semibold leading-relaxed">
                   ✓ Un <strong>asesor propio de TodoVisa</strong> se pondrá en contacto directo contigo vía teléfono o WhatsApp para dar seguimiento y finalizar tu proceso de visa.
                 </p>
-                <p className="text-slate-600 font-medium text-[11px] leading-relaxed pt-2 border-t border-slate-200">
-                  ★ La empresa referidora queda registrada en tu expediente y la comisión correspondiente se asignará desde nuestro módulo de administración al completarse el proceso.
-                </p>
+                
               </div>
 
               <button

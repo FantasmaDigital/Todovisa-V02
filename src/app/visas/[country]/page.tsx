@@ -228,10 +228,10 @@ export default function VisaDetailPage() {
                             <div className="mt-6 pt-4 border-t border-border-light text-center flex flex-col sm:flex-row justify-between items-center gap-3">
                                 <span className="text-[10px] text-text-secondary font-bold uppercase">¿Deseas que revisemos tus documentos?</span>
                                 <Link
-                                    href="/citas"
+                                    href="/agents"
                                     className="px-4 py-2 bg-brand-primary text-white text-xs font-bold rounded-lg hover:bg-brand-hover transition-colors shadow-sm"
                                 >
-                                    Agendar Revisión Virtual →
+                                    Contratar Asesor Certificado →
                                 </Link>
                             </div>
                         </div>

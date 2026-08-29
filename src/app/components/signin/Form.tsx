@@ -45,72 +45,75 @@ export function SignInForm() {
         try {
             const result = await AuthService.signIn(data.Email || '', data.Password || '');
 
-            // Check if the user data was successfully retrieved and set in the store
-            if (result.data?.user) {
-                const userObj = result.data.user;
-                const metadata = userObj.user_metadata || {};
-                
-                let viproScore = metadata.vipro_score || null;
-                let viproCompleted = metadata.vipro_completed || false;
-                let viproDestination = metadata.vipro_destination || null;
-                const hasPaidAdvisor = metadata.has_paid_advisor || false;
-                const assignedAgentId = metadata.assigned_agent_id || null;
+            if (result.error || !result.data?.user) {
+                setAuthError(result.error || 'Credenciales de acceso no válidas');
+                setIsLoading(false);
+                return;
+            }
 
-                // Sync/merge local agency referral code to Supabase metadata if present
-                AgencyClientService.syncReferralOnLogin(userObj);
+            const userObj = result.data.user;
+            const metadata = userObj.user_metadata || {};
+            
+            let viproScore = metadata.vipro_score || null;
+            let viproCompleted = metadata.vipro_completed || false;
+            let viproDestination = metadata.vipro_destination || null;
+            const hasPaidAdvisor = metadata.has_paid_advisor || false;
+            const assignedAgentId = metadata.assigned_agent_id || null;
 
-                // Sync local guest VIPRO evaluation to Supabase if it wasn't saved in Supabase yet
-                if (typeof window !== "undefined") {
-                    if (!viproCompleted) {
-                        const localCompleted = localStorage.getItem("vipro_completed") === "true";
-                        if (localCompleted) {
-                            const localScoreStr = localStorage.getItem("vipro_score");
-                            const localScore = localScoreStr ? parseInt(localScoreStr, 10) : null;
-                            const localDestination = localStorage.getItem("vipro_destination");
+            // Sync/merge local agency referral code to Supabase metadata if present
+            AgencyClientService.syncReferralOnLogin(userObj);
 
-                            viproCompleted = true;
-                            viproScore = localScore;
-                            viproDestination = localDestination;
+            // Sync local guest VIPRO evaluation to Supabase if it wasn't saved in Supabase yet
+            if (typeof window !== "undefined") {
+                if (!viproCompleted) {
+                    const localCompleted = localStorage.getItem("vipro_completed") === "true";
+                    if (localCompleted) {
+                        const localScoreStr = localStorage.getItem("vipro_score");
+                        const localScore = localScoreStr ? parseInt(localScoreStr, 10) : null;
+                        const localDestination = localStorage.getItem("vipro_destination");
 
-                            try {
-                                // Update user metadata via API route
-                                await AuthService.updateUser({
-                                    vipro_score: localScore,
-                                    vipro_completed: true,
-                                    vipro_destination: localDestination
-                                });
-                                console.log("Synced local guest VIPRO on Sign-in.");
-                            } catch (err) {
-                                console.error("Failed to sync local VIPRO on sign-in:", err);
-                            }
+                        viproCompleted = true;
+                        viproScore = localScore;
+                        viproDestination = localDestination;
+
+                        try {
+                            // Update user metadata via API route
+                            await AuthService.updateUser({
+                                vipro_score: localScore,
+                                vipro_completed: true,
+                                vipro_destination: localDestination
+                            });
+                            console.log("Synced local guest VIPRO on Sign-in.");
+                        } catch (err) {
+                            console.error("Failed to sync local VIPRO on sign-in:", err);
                         }
                     }
-
-                    // Always clean up guest VIPRO localStorage keys on login so other users on same device don't bleed data
-                    localStorage.removeItem("vipro_completed");
-                    localStorage.removeItem("vipro_score");
-                    localStorage.removeItem("vipro_destination");
-                    localStorage.removeItem("vipro_evaluation");
-                    localStorage.removeItem("vipro_answers");
                 }
 
-                const hasPaidVipro = Boolean(metadata.has_paid_vipro);
-
-                setUser({
-                    id: userObj.id,
-                    email: userObj.email || '',
-                    firstName: metadata.first_name || '',
-                    lastName: metadata.last_name || '',
-                    phone: metadata.phone || '',
-                    country: metadata.country || '',
-                    viproScore: viproScore,
-                    viproCompleted: viproCompleted,
-                    viproDestination: viproDestination,
-                    hasPaidVipro: hasPaidVipro,
-                    hasPaidAdvisor: hasPaidAdvisor,
-                    assignedAgentId: assignedAgentId
-                });
+                // Always clean up guest VIPRO localStorage keys on login so other users on same device don't bleed data
+                localStorage.removeItem("vipro_completed");
+                localStorage.removeItem("vipro_score");
+                localStorage.removeItem("vipro_destination");
+                localStorage.removeItem("vipro_evaluation");
+                localStorage.removeItem("vipro_answers");
             }
+
+            const hasPaidVipro = Boolean(metadata.has_paid_vipro);
+
+            setUser({
+                id: userObj.id,
+                email: userObj.email || '',
+                firstName: metadata.first_name || '',
+                lastName: metadata.last_name || '',
+                phone: metadata.phone || '',
+                country: metadata.country || '',
+                viproScore: viproScore,
+                viproCompleted: viproCompleted,
+                viproDestination: viproDestination,
+                hasPaidVipro: hasPaidVipro,
+                hasPaidAdvisor: hasPaidAdvisor,
+                assignedAgentId: assignedAgentId
+            });
 
             router.push('/');
         } catch (error: unknown) {
@@ -132,6 +135,8 @@ export function SignInForm() {
         }
     };
 
+    const [showPassword, setShowPassword] = useState(false);
+
     return (
         <div className="w-full md:w-1/2 flex items-center justify-center p-4 sm:p-8">
             <form onSubmit={handleSubmit(onSubmit)} className="w-full h-full max-w-md flex flex-col justify-center items-center gap-6 m-auto p-4">
@@ -145,7 +150,7 @@ export function SignInForm() {
                 <section className='flex flex-col gap-4 w-full'>
                     <div>
                         <input
-                            className={`w-full border-[1px] rounded-md px-3 py-2 text-md transition-colors outline-none focus:ring-1 ${errors.Email ? 'border-brand-primary focus:ring-brand-primary' : 'border-border-light focus:border-brand-primary focus:ring-brand-primary'}`}
+                            className={`w-full border-[1px] rounded-md px-3 py-2 text-md transition-colors outline-none focus:ring-1 ${errors.Email ? 'border-red-500 focus:ring-red-500' : 'border-border-light focus:border-brand-primary focus:ring-brand-primary'}`}
                             type="email"
                             placeholder="Email"
                             {...register("Email", {
@@ -159,23 +164,33 @@ export function SignInForm() {
                         {errors.Email && <span className="text-red-500 text-sm mt-1">{errors.Email.message}</span>}
                     </div>
 
-                    <div>
-                        <input
-                            className={`w-full border-[1px] rounded-md px-3 py-2 text-md transition-colors outline-none focus:ring-1 ${errors.Password ? 'border-brand-primary focus:ring-brand-primary' : 'border-border-light focus:border-brand-primary focus:ring-brand-primary'}`}
-                            type="password"
-                            placeholder="Contraseña"
-                            {...register("Password", {
-                                required: "La contraseña es obligatoria",
-                                minLength: {
-                                    value: 8,
-                                    message: "Debe tener al menos 8 caracteres"
-                                },
-                                pattern: {
-                                    value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).*$/,
-                                    message: "Debe incluir mayúscula, minúscula y un número"
-                                }
-                            })}
-                        />
+                    <div className="flex flex-col relative">
+                        <div className="relative flex items-center">
+                            <input
+                                className={`w-full border-[1px] rounded-md pl-3 pr-10 py-2 text-md transition-colors outline-none focus:ring-1 ${errors.Password ? 'border-red-500 focus:ring-red-500' : 'border-border-light focus:border-brand-primary focus:ring-brand-primary'}`}
+                                type={showPassword ? "text" : "password"}
+                                placeholder="Contraseña"
+                                {...register("Password", {
+                                    required: "La contraseña es obligatoria"
+                                })}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 text-gray-500 hover:text-gray-700"
+                            >
+                                {showPassword ? (
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                                    </svg>
+                                )}
+                            </button>
+                        </div>
                         {errors.Password && <span className="text-red-500 text-sm mt-1">{errors.Password.message}</span>}
                     </div>
 

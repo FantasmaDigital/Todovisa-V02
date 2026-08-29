@@ -28,9 +28,10 @@ export function SettingsInitializer() {
           }
 
           if (settings.agency_referral_rate) {
+            const sanitizedRate = (settings.agency_referral_rate === "30" || settings.agency_referral_rate === "0.3") ? "20" : settings.agency_referral_rate;
             const currentAgency = localStorage.getItem("agencyReferralRate");
-            if (currentAgency !== settings.agency_referral_rate) {
-              localStorage.setItem("agencyReferralRate", settings.agency_referral_rate);
+            if (currentAgency !== sanitizedRate) {
+              localStorage.setItem("agencyReferralRate", sanitizedRate);
               hasChanges = true;
             }
           }

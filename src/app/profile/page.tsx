@@ -513,12 +513,34 @@ export default function PerfilUsuarioPage() {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
       if (tabParam) {
-        setActiveTab(tabParam);
+        const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
+        const isAgency = user && user.role === ROLES.AGENCY;
+        const isAgent = user && user.role === ROLES.AGENT;
+
+        let isAllowed = true;
+        if (tabParam.startsWith("admin_")) {
+          if (tabParam === "admin_referidos") {
+            isAllowed = Boolean(isStaff || isAgency);
+          } else {
+            isAllowed = Boolean(isStaff);
+          }
+        } else if (["comisiones", "metodos_cobro", "invitar_agentes"].includes(tabParam)) {
+          isAllowed = Boolean(isStaff || isAgency || isAgent);
+        }
+
+        if (isAllowed) {
+          setActiveTab(tabParam);
+        } else {
+          setActiveTab("datos");
+          const url = new URL(window.location.href);
+          url.searchParams.delete("tab");
+          window.history.replaceState(null, "", url.toString());
+        }
       } else if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
         setActiveTab("admin_dashboard");
       }
     }
-  }, [user?.role]);
+  }, [user?.role, user?.id]);
 
   useEffect(() => {
     async function loadAdminApplications() {
@@ -5832,9 +5854,14 @@ export default function PerfilUsuarioPage() {
                         />
                         <svg className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                       </div>
-                      <span className="text-xs text-text-secondary font-semibold">
-                        Mostrando {referralLeadsList.length} registro(s)
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-text-secondary font-semibold">
+                          Mostrando {referralLeadsList.length} registro(s)
+                        </span>
+                        <span className="text-[11px] font-bold text-[#003087] bg-blue-50 border border-blue-200 px-2.5 py-1 rounded flex items-center gap-1.5 shadow-2xs">
+                          ↔️ Desplaza horizontalmente para ver todas las columnas
+                        </span>
+                      </div>
                     </div>
 
                     {/* Tabla de Ancho Amplio (min-w-[1500px]) con Scroll Horizontal */}
@@ -5849,7 +5876,7 @@ export default function PerfilUsuarioPage() {
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[200px]">Proceso & País</th>
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[240px]">Notas del Cliente</th>
                             <th className="py-3.5 px-4 whitespace-nowrap min-w-[180px]">Estado</th>
-                            <th className="py-3.5 px-4 text-right whitespace-nowrap min-w-[180px]">Acciones Admin</th>
+                            <th className="py-3.5 px-4 text-right whitespace-nowrap min-w-[180px]">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">

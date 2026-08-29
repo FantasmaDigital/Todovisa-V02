@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import supabaseAdmin from "@/lib/supabaseAdmin";
 import supabase from "@/app/lib/supabase";
 import { UserRole } from "@/app/constants/roles";
 
@@ -14,6 +15,8 @@ export async function POST(request: Request) {
       agency_code,
       notes,
     } = body;
+
+    const dbClient = supabaseAdmin || supabase;
 
     // Validación de campos obligatorios
     if (!client_name || !client_name.trim()) {
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
     let agencyName: string = "Empresa Aliada";
 
     // Buscar en agent_applications por application_id, id, o user_id
-    const { data: apps } = await supabase
+    const { data: apps } = await dbClient
       .from("agent_applications")
       .select("id, application_id, user_id, full_name")
       .or(`application_id.eq.${cleanCode},id.eq.${cleanCode},user_id.eq.${cleanCode}`);
@@ -53,10 +56,9 @@ export async function POST(request: Request) {
       const matchedApp = apps[0];
       targetAgencyId = matchedApp.user_id || matchedApp.id;
       agencyName = matchedApp.full_name || "Empresa Aliada";
-
     } else {
       // Buscar en profiles por ID directo
-      const { data: profileDirect } = await supabase
+      const { data: profileDirect } = await dbClient
         .from("profiles")
         .select("id, first_name, last_name, role")
         .eq("id", cleanCode)
@@ -70,7 +72,7 @@ export async function POST(request: Request) {
 
     // Si tenemos targetAgencyId, confirmar su perfil de AGENCIA
     if (targetAgencyId) {
-      const { data: profileData } = await supabase
+      const { data: profileData } = await dbClient
         .from("profiles")
         .select("id, role, first_name, last_name")
         .eq("id", targetAgencyId)
@@ -81,7 +83,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 2. Guardar el prospecto / lead de referido en la base de datos
+    // 2. Guardar el prospecto en la tabla agency_referral_leads
     const leadPayload = {
       client_name: client_name.trim(),
       client_email: (client_email || "").trim(),
@@ -93,33 +95,55 @@ export async function POST(request: Request) {
       agency_name: agencyName,
       notes: (notes || "").trim(),
       status: "pending_advisor_contact",
-      assigned_advisor: "Asesor Oficial TodoVisa",
+      assigned_advisor: "Asesor Oficial TodoVisa / Admin",
     };
 
-    const { data: newLead, error: insertError } = await supabase
+    let newLead: any = null;
+    const { data: insertedLead, error: insertError } = await dbClient
       .from("agency_referral_leads")
       .insert([leadPayload])
       .select()
       .single();
 
-    if (insertError) {
-      console.warn("⚠️ No se pudo insertar en la tabla agency_referral_leads (usando fallback en mensajes):", insertError.message);
-      try {
-        await supabase.from("messages").insert([
-          {
-            sender: "user",
-            user_id: `referral-lead-${Date.now()}`,
-            agent_id: targetAgencyId || "todovisa-staff",
-            text: `[NUEVO LEAD DE REFERIDO DE EMPRESA]\nEmpresa/Código: ${agencyName} (${cleanCode})\nCliente: ${client_name}\nCorreo: ${client_email}\nTeléfono: ${client_phone}\nProceso: ${visa_type} - ${destination_country}\nNotas: ${notes || "Sin notas adicionales"}\nEstado: Pendiente de contacto por Asesor TodoVisa`,
-          },
-        ]);
-      } catch (mErr: any) {
-        console.error("Error en fallback message insert:", mErr);
-      }
+    if (!insertError && insertedLead) {
+      newLead = insertedLead;
+    } else if (insertError) {
+      console.warn("⚠️ Advertencia al insertar en agency_referral_leads:", insertError.message);
     }
 
+    // 3. Crear registro en agency_client_requests para visibilidad directa en Admin
+    try {
+      await dbClient.from("agency_client_requests").insert([
+        {
+          agency_id: targetAgencyId || "admin",
+          agency_name: agencyName,
+          client_name: client_name.trim(),
+          client_email: (client_email || "").trim(),
+          client_phone: (client_phone || "").trim(),
+          notes: `[SOLICITUD DE ATENCIÓN REFERIDO] Código: ${cleanCode} | Visa: ${visa_type} - ${destination_country} | Notas: ${notes || "N/A"}`,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    } catch (reqErr: any) {
+      console.warn("Notice: insert into agency_client_requests error:", reqErr);
+    }
 
-    // 3. Responder al cliente con mensaje de confirmación
+    // 4. Enviar notificación directa a mensajes de Admin
+    try {
+      await dbClient.from("messages").insert([
+        {
+          sender: "user",
+          user_id: `referral-lead-${Date.now()}`,
+          agent_id: "admin",
+          text: `🚨 [NUEVA SOLICITUD DE ATENCIÓN POR ASESOR]\nEmpresa: ${agencyName} (${cleanCode})\nCliente: ${client_name.trim()}\nCorreo: ${client_email || "N/A"}\nTeléfono: ${client_phone || "N/A"}\nTrámite: ${visa_type} - ${destination_country}\nNotas: ${notes || "Sin notas adicionales"}\nEstado: Pendiente de contacto por Admin/Asesor TodoVisa`,
+        },
+      ]);
+    } catch (mErr: any) {
+      console.error("Error en fallback message insert:", mErr);
+    }
+
+    // 5. Responder al cliente con mensaje de confirmación
     return NextResponse.json(
       {
         success: true,
@@ -142,59 +166,86 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const authHeader = request.headers.get("authorization");
+    let userId: string | null = null;
+    let userRole: string | null = null;
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split("Bearer ")[1];
+      const { data: userData } = await supabase.auth.getUser(token);
+      if (userData?.user) {
+        userId = userData.user.id;
+        const { data: profile } = await (supabaseAdmin || supabase)
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .maybeSingle();
+        userRole = profile?.role || null;
+      }
+    }
+
+    // Seguridad de API: solo permitir acceso a roles ADMIN, MODERATOR o AGENCY
+    if (!userRole || (userRole !== UserRole.ADMIN && userRole !== UserRole.MODERATOR && userRole !== UserRole.AGENCY)) {
+      return NextResponse.json({ success: false, error: "Acceso no autorizado a datos de referidos." }, { status: 403 });
+    }
+
     const { searchParams } = new URL(request.url);
     const agencyCode = searchParams.get("agency_code") || searchParams.get("code");
     const agencyId = searchParams.get("agency_id");
 
-    let query = supabase.from("agency_referral_leads").select("*").order("created_at", { ascending: false });
+    const dbClient = supabaseAdmin || supabase;
+    let query = dbClient.from("agency_referral_leads").select("*").order("created_at", { ascending: false });
 
-    if (agencyCode) {
-      query = query.eq("agency_code", agencyCode);
-    }
-    if (agencyId) {
-      query = query.eq("agency_id", agencyId);
+    // Aislamiento por agencia: Si el rol es AGENCY, filtrar únicamente sus propios referidos
+    if (userRole === UserRole.AGENCY && userId) {
+      query = query.or(`agency_id.eq.${userId},agency_code.eq.${userId}`);
+    } else {
+      if (agencyCode) {
+        query = query.eq("agency_code", agencyCode);
+      }
+      if (agencyId) {
+        query = query.eq("agency_id", agencyId);
+      }
     }
 
     const { data: leads, error } = await query;
 
-    if (!error && leads) {
-      return NextResponse.json({ success: true, leads: leads }, { status: 200 });
-    }
+    let resultLeads = leads || [];
 
     // Fallback: Consultar en la tabla messages si agency_referral_leads aún no está creada
-    const { data: fallbackMsgs } = await supabase
-      .from("messages")
-      .select("*")
-      .ilike("text", "%LEAD DE REFERIDO EMPRESA%")
-      .order("created_at", { ascending: false });
+    if (!resultLeads || resultLeads.length === 0) {
+      const { data: fallbackMsgs } = await dbClient
+        .from("messages")
+        .select("*")
+        .or("text.ilike.%NUEVA SOLICITUD DE ATENCIÓN%,text.ilike.%LEAD DE REFERIDO EMPRESA%")
+        .order("created_at", { ascending: false });
 
-    const parsedLeads = (fallbackMsgs || []).map((msg: any) => {
-      const txt = msg.text || "";
-      const nameMatch = txt.match(/Cliente:\s*([^\n]+)/);
-      const emailMatch = txt.match(/Email:\s*([^\n]+)/);
-      const phoneMatch = txt.match(/Teléfono:\s*([^\n]+)/);
-      const codeMatch = txt.match(/Código Empresa:\s*([^\n]+)/);
-      const agencyNameMatch = txt.match(/Empresa Aliada:\s*([^\n]+)/);
-      const visaMatch = txt.match(/Trámite:\s*([^\n]+)/);
-      const countryMatch = txt.match(/País:\s*([^\n]+)/);
+      resultLeads = (fallbackMsgs || []).map((msg: any) => {
+        const txt = msg.text || "";
+        const nameMatch = txt.match(/Cliente:\s*([^\n]+)/);
+        const emailMatch = txt.match(/(?:Correo|Email):\s*([^\n]+)/);
+        const phoneMatch = txt.match(/Teléfono:\s*([^\n]+)/);
+        const codeMatch = txt.match(/(?:Código|Código Empresa):\s*([^\n]+)/);
+        const agencyNameMatch = txt.match(/Empresa:\s*([^\n]+)/);
+        const visaMatch = txt.match(/Trámite:\s*([^\n]+)/);
 
-      return {
-        id: msg.id,
-        client_name: nameMatch ? nameMatch[1].trim() : "Cliente Referido",
-        client_email: emailMatch ? emailMatch[1].trim() : "",
-        client_phone: phoneMatch ? phoneMatch[1].trim() : "",
-        agency_code: codeMatch ? codeMatch[1].trim() : (agencyCode || "N/A"),
-        agency_name: agencyNameMatch ? agencyNameMatch[1].trim() : "Empresa Aliada",
-        visa_type: visaMatch ? visaMatch[1].trim() : "Turismo (B1/B2)",
-        destination_country: countryMatch ? countryMatch[1].trim() : "Estados Unidos",
-        status: "pending_advisor_contact",
-        created_at: msg.created_at || new Date().toISOString()
-      };
-    });
+        return {
+          id: msg.id,
+          client_name: nameMatch ? nameMatch[1].trim() : "Cliente Referido",
+          client_email: emailMatch ? emailMatch[1].trim() : "",
+          client_phone: phoneMatch ? phoneMatch[1].trim() : "",
+          agency_code: codeMatch ? codeMatch[1].trim() : (agencyCode || "N/A"),
+          agency_name: agencyNameMatch ? agencyNameMatch[1].trim() : "Empresa Aliada",
+          visa_type: visaMatch ? visaMatch[1].trim() : "Turismo (B1/B2)",
+          destination_country: "Estados Unidos",
+          status: "pending_advisor_contact",
+          created_at: msg.created_at || new Date().toISOString(),
+        };
+      });
+    }
 
-    return NextResponse.json({ success: true, leads: parsedLeads }, { status: 200 });
+    return NextResponse.json({ success: true, leads: resultLeads }, { status: 200 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
-

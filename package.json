@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "npx tsx --test src/lib/__tests__/run-all.ts"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^10.3.0",

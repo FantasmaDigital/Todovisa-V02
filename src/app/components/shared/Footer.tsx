@@ -5,7 +5,7 @@ import Link from "next/link";
 
 const footerLinks = {
   Servicios: [
-    { label: "Asesoría Virtual", href: "/citas" },
+    { label: "Contratar Asesor", href: "/agents" },
     { label: "Evaluación VIPRO", href: "/vipro-form" },
     { label: "Solicitar acompañamiento para mi Visa", href: "/visas" },
     { label: "Cómo Funciona", href: "/#como-funciona" },
