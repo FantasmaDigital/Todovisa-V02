@@ -167,7 +167,7 @@ export default function MiEquipoPage() {
             <div>
               <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Actualización de Funcionalidad de Agencia</h3>
               <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                Las agencias registradas en TodoVisa ya no agregan agentes directamente a su equipo. En su lugar, cada agencia cuenta con un <strong>enlace de referidos exclusivo</strong>. Al compartir este enlace con tus clientes finales, obtendrás el <strong>20% de la compra</strong> de cada proceso de visado realizado con TodoVisa (80% para TodoVisa).
+                Las agencias registradas en TodoVisa ya no agregan agentes directamente a su equipo. En su lugar, cada agencia cuenta con un <strong>enlace de referidos exclusivo</strong>. Al compartir este enlace con tus clientes finales, obtendrás el <strong>20% de la compra</strong> de cada proceso de visado realizado con TodoVisa.
               </p>
             </div>
           </div>

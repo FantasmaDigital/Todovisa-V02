@@ -7442,7 +7442,7 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
                             <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                              Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>20% del valor del proceso</strong> a tu cuenta de agencia (80% para TodoVisa).
+                              Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>20% del valor del proceso</strong> a tu cuenta de agencia.
                             </p>
                           </div>
                         </div>
