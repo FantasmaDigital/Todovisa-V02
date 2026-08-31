@@ -98,15 +98,117 @@ export class ProfileRepository {
   }
 
   static async getCommissionsByAgentId(agentId: string) {
-    const { data, error } = await supabase
+    if (!agentId) return [];
+
+    const isUuidCheck = (str: string) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+    const idsToSearch = new Set<string>([agentId]);
+    const dbClient = getAdminClient();
+
+    // 1. Obtener email y datos del perfil si el id es UUID o email
+    let userEmail = "";
+    if (isUuidCheck(agentId)) {
+      const { data: profile } = await dbClient
+        .from("profiles")
+        .select("id, email")
+        .eq("id", agentId)
+        .maybeSingle();
+
+      if (profile?.email) {
+        userEmail = profile.email;
+        idsToSearch.add(profile.email);
+      }
+    } else if (agentId.includes("@")) {
+      userEmail = agentId;
+      idsToSearch.add(agentId);
+    }
+
+    // 2. Buscar aplicaciones por CUALQUIER identificador (application_id, user_id, agency_id, id, email)
+    const orConditions = [`application_id.eq.${agentId}`, `user_id.eq.${agentId}`, `agency_id.eq.${agentId}`, `id.eq.${agentId}`];
+    if (userEmail) {
+      orConditions.push(`email.eq.${userEmail}`);
+    }
+
+    const { data: apps } = await dbClient
+      .from("agent_applications")
+      .select("id, application_id, user_id, email, agency_id")
+      .or(orConditions.join(","));
+
+    apps?.forEach((a) => {
+      if (a.id) idsToSearch.add(a.id);
+      if (a.user_id) idsToSearch.add(a.user_id);
+      if (a.application_id) idsToSearch.add(a.application_id);
+      if (a.agency_id) idsToSearch.add(a.agency_id);
+      if (a.email) {
+        idsToSearch.add(a.email);
+        if (!userEmail) userEmail = a.email;
+      }
+    });
+
+    // 3. Si tenemos email, buscar profile ID correspondiente
+    if (userEmail) {
+      const { data: profByEmail } = await dbClient
+        .from("profiles")
+        .select("id, email")
+        .eq("email", userEmail)
+        .maybeSingle();
+      if (profByEmail?.id) idsToSearch.add(profByEmail.id);
+    }
+
+    // 4. Buscar en agency_referral_leads por agency_code, agency_id o id
+    const { data: leads } = await dbClient
+      .from("agency_referral_leads")
+      .select("id, agency_id, agency_code")
+      .or(`agency_code.eq.${agentId},agency_id.eq.${agentId},id.eq.${agentId}`);
+
+    leads?.forEach((l) => {
+      if (l.agency_id) idsToSearch.add(l.agency_id);
+      if (l.agency_code) idsToSearch.add(l.agency_code);
+    });
+
+    // 5. Filtrar UUIDs válidos para hacer la consulta directa por agent_id
+    const validUuids = Array.from(idsToSearch).filter(isUuidCheck);
+
+    let commissionsMap = new Map<string, any>();
+
+    if (validUuids.length > 0) {
+      const { data, error } = await dbClient
+        .from("agent_commissions")
+        .select("*")
+        .in("agent_id", validUuids)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        data.forEach((c) => commissionsMap.set(c.id, c));
+      }
+    }
+
+    // 6. Consulta exhaustiva fallback por notas o coincidencias parciales de IDs/emails
+    const { data: allComms } = await dbClient
       .from("agent_commissions")
       .select("*")
-      .eq("agent_id", agentId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(300);
 
-    if (error) throw new Error(error.message);
-    return data || [];
+    if (allComms) {
+      const searchTerms = Array.from(idsToSearch).filter(Boolean);
+      allComms.forEach((c) => {
+        if (commissionsMap.has(c.id)) return;
+
+        const notesStr = typeof c.notes === "string" ? c.notes : JSON.stringify(c.notes || {});
+        const matchesAgentId = c.agent_id && idsToSearch.has(c.agent_id);
+        const matchesNotes = searchTerms.some((term) => term && notesStr.includes(term));
+
+        if (matchesAgentId || matchesNotes) {
+          commissionsMap.set(c.id, c);
+        }
+      });
+    }
+
+    return Array.from(commissionsMap.values()).sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    );
   }
+
 
   static async getPayoutsByAgentId(agentId: string) {
     const { data, error } = await supabase

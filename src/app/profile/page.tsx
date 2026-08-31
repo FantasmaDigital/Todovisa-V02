@@ -12,6 +12,8 @@ import agentsData from "../dummies/agents.json";
 import { AuthService } from "../service/AuthService";
 import { ProfileClientService } from "@/services/client/ProfileClientService";
 import { AgentClientService } from "@/services/client/AgentClientService";
+import { AgencyClientService } from "@/services/client/AgencyClientService";
+
 import { StorageClientService } from "@/services/client/StorageClientService";
 import { FormClientService } from "@/services/client/FormClientService";
 import { SettingsClientService } from "@/services/client/SettingsClientService";
@@ -39,7 +41,8 @@ export interface Commission {
   gross_amount: number;
   commission_rate: number;
   commission_amount: number;
-  status: 'pending' | 'processing' | 'paid';
+  status: 'pending' | 'processing' | 'paid' | 'completed' | string;
+
   paid_at: string | null;
   notes: string | null;
   created_at: string;
@@ -201,7 +204,25 @@ export default function PerfilUsuarioPage() {
   const [isLoadingPayout, setIsLoadingPayout] = useState(false);
   const [copiedReferral, setCopiedReferral] = useState(false);
 
+  // Manual Admin Commission Assignment states
+  const [isAdminCommissionModalOpen, setIsAdminCommissionModalOpen] = useState(false);
+  const [selectedTxForCommission, setSelectedTxForCommission] = useState<any | null>(null);
+  const [selectedLeadForCommission, setSelectedLeadForCommission] = useState<any | null>(null);
+  const [adminTargetAgencyId, setAdminTargetAgencyId] = useState("");
+  const [adminCommissionAmount, setAdminCommissionAmount] = useState("");
+  const [adminCommissionGross, setAdminCommissionGross] = useState("");
+  const [adminCommissionClientName, setAdminCommissionClientName] = useState("");
+  const [adminCommissionRate, setAdminCommissionRate] = useState("20");
+  const [isAssigningCommission, setIsAssigningCommission] = useState(false);
+
+  // Dedicated Admin B2B Referral Leads states
+  const [referralLeadsList, setReferralLeadsList] = useState<any[]>([]);
+  const [isLoadingReferralLeads, setIsLoadingReferralLeads] = useState(false);
+  const [referralLeadSearch, setReferralLeadSearch] = useState("");
+
   // User's own application state (for B2B agency or independent agent application tracking)
+
+
   const [userApplication, setUserApplication] = useState<AgentApplicationData | null>(null);
   const [isLoadingUserApp, setIsLoadingUserApp] = useState(true);
 
@@ -476,7 +497,14 @@ export default function PerfilUsuarioPage() {
   const [countryCode, setCountryCode] = useState("SV");
 
   // Tab State: "datos", "proceso", "asesor", "pagos"
-  const [activeTab, setActiveTab] = useState("datos");
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) return tabParam;
+    }
+    return "datos";
+  });
 
   // Sync tab with URL query parameter ?tab=
   const handleTabChange = (tabId: string) => {
@@ -493,12 +521,30 @@ export default function PerfilUsuarioPage() {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
       if (tabParam) {
-        setActiveTab(tabParam);
+        const isStaff = user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR);
+        const isAgency = user && user.role === ROLES.AGENCY;
+        const isAgent = user && user.role === ROLES.AGENT;
+
+        let isAllowed = true;
+        if (tabParam.startsWith("admin_")) {
+          if (tabParam === "admin_referidos") {
+            isAllowed = Boolean(isStaff || isAgency);
+          } else {
+            isAllowed = Boolean(isStaff);
+          }
+        } else if (["comisiones", "metodos_cobro", "invitar_agentes"].includes(tabParam)) {
+          isAllowed = Boolean(isStaff || isAgency || isAgent);
+        }
+
+        if (isAllowed) {
+          setActiveTab(tabParam);
+          return;
+        }
       } else if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
         setActiveTab("admin_dashboard");
       }
     }
-  }, [user?.role]);
+  }, [user?.role, user?.id]);
 
   useEffect(() => {
     async function loadAdminApplications() {
@@ -1380,13 +1426,7 @@ export default function PerfilUsuarioPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Auto-switch to datos tab when user role is agent/agency
-  useEffect(() => {
-    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY)) {
-      const t = setTimeout(() => setActiveTab("datos"), 0);
-      return () => clearTimeout(t);
-    }
-  }, [user?.role]);
+
 
   // Fetch agent commissions from API
   const loadCommissions = async () => {
@@ -1710,7 +1750,94 @@ export default function PerfilUsuarioPage() {
     }
   }, []);
 
+  const handleAssignCommissionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminTargetAgencyId) {
+      showToast("Por favor selecciona o ingresa la empresa a la cual asignar la comisión.", "error");
+      return;
+    }
+    const gross = Number(adminCommissionGross) || 0;
+    const rate = Number(adminCommissionRate) || 20;
+    const commissionAmt = gross * (rate / 100);
+
+    setIsAssigningCommission(true);
+    try {
+      const res = await AgentClientService.createCommission({
+        agent_id: adminTargetAgencyId,
+        client_name: adminCommissionClientName || "Cliente Referido",
+        gross_amount: gross,
+        commission_rate: rate,
+        commission_amount: commissionAmt,
+        service_type: "Proceso de Visa (Referido Empresa)",
+        status: "pending",
+        notes: {
+          manual_admin_assignment: true,
+          assigned_by: user?.email || "Admin",
+          payment_reference: selectedTxForCommission?.id || selectedTxForCommission?.paypal_tx_id || "Manual Admin",
+          date: new Date().toISOString()
+        }
+      });
+
+      setIsAssigningCommission(false);
+      if (res && res.success) {
+        if (selectedLeadForCommission?.id) {
+          try {
+            await AgencyClientService.updateReferralLead({
+              id: selectedLeadForCommission.id,
+              status: "completed",
+              commission_assigned: true,
+            });
+
+            // Actualizar inmediatamente la lista local de leads
+            setReferralLeadsList((prevLeads) =>
+              prevLeads.map((l) =>
+                l.id === selectedLeadForCommission.id
+                  ? { ...l, status: "completed", commission_assigned: true }
+                  : l
+              )
+            );
+            await loadReferralLeadsData();
+          } catch (leadErr) {
+            console.error("Error al actualizar estado del lead:", leadErr);
+          }
+        }
+        showToast(`✅ Comisión de $${commissionAmt.toFixed(2)} USD (${rate}%) asignada exitosamente a la empresa.`, "success");
+        setIsAdminCommissionModalOpen(false);
+        setSelectedLeadForCommission(null);
+        loadCommissions();
+      } else {
+        showToast(res?.error || "Error al asignar la comisión", "error");
+      }
+    } catch (err: any) {
+      setIsAssigningCommission(false);
+      console.error("Error al asignar comisión:", err);
+      const errMsg = err?.message || String(err) || "No se pudo asignar la comisión.";
+      showToast(`No se pudo asignar la comisión: ${errMsg}`, "error");
+    }
+  };
+
+  const loadReferralLeadsData = async () => {
+    setIsLoadingReferralLeads(true);
+    try {
+      const leads = await AgencyClientService.getReferralLeads();
+      setReferralLeadsList(leads || []);
+    } catch (err) {
+      console.error("Error cargando leads de referidos:", err);
+    } finally {
+      setIsLoadingReferralLeads(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR || user.role === ROLES.AGENCY)) {
+      loadReferralLeadsData();
+    }
+  }, [user]);
+
+
   const [isDataLoading, setIsDataLoading] = useState(true);
+
+
 
   // Fetch real physical purchases and VIPRO evaluations from API in parallel
   useEffect(() => {
@@ -2415,7 +2542,7 @@ export default function PerfilUsuarioPage() {
       {/* Banner Superior del Perfil */}
       <div className="w-full bg-brand-primary py-12 px-6 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        <div className="w-[80%] mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
+        <div className="w-[95%] sm:w-[90%] lg:w-[80%] max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 relative z-10">
           {/* Avatar gigante en el banner (clickable) */}
           <div className="relative group w-20 h-20 bg-brand-light border-4 border-white/20 rounded-full flex items-center justify-center shadow-lg overflow-hidden select-none">
             <UserAvatar
@@ -2476,7 +2603,7 @@ export default function PerfilUsuarioPage() {
 
 
       {/* Grid Principal */}
-      <main className="w-[80%] mx-auto py-10 flex-1 flex flex-col lg:flex-row gap-8 transition-all duration-300">
+      <main className="w-[95%] sm:w-[90%] lg:w-[80%] max-w-7xl mx-auto py-6 sm:py-10 flex-1 flex flex-col lg:flex-row gap-8 transition-all duration-300 min-w-0 max-w-full">
 
         {/* Columna Izquierda: Tarjeta de Resumen y Menú */}
         <aside className={`w-full ${isSidebarCollapsed ? 'lg:w-[70px]' : 'lg:w-1/4'} flex-shrink-0 transition-all duration-300`}>
@@ -2522,6 +2649,7 @@ export default function PerfilUsuarioPage() {
                     asesor: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
                     pagos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
                     admin_dashboard: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 13a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1v-6z" /></svg>,
+                    admin_referidos: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>,
                     admin_socios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
                     admin_usuarios: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
                     admin_expedientes: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>,
@@ -2538,7 +2666,7 @@ export default function PerfilUsuarioPage() {
 
                   const baseUserTabs = [
                     { id: "datos", label: "Mis Datos Personales" },
-                    { id: "proceso", label: "Seguimiento de Trámite" },
+                    { id: "proceso", label: "Seguimiento de Proceso" },
                     { id: "vipro", label: "Evaluación VIPRO" },
                     { id: "asesor", label: "Mi Asesor Asignado" },
                     { id: "pagos", label: "Pagos y Comprobantes" },
@@ -2549,6 +2677,7 @@ export default function PerfilUsuarioPage() {
                     return [
                       { id: "datos", label: "Mis Datos Personales" },
                       { id: "admin_dashboard", label: "Panel de Control Global" },
+                      { id: "admin_referidos", label: "Leads Referidos de Empresa" },
                       { id: "admin_socios", label: user.role === ROLES.MODERATOR ? "Moderación de Socios" : "Administrar Socios y Agentes" },
                       { id: "admin_usuarios", label: "Gestión de Usuarios" },
                       { id: "admin_expedientes", label: "Monitor de Expedientes" },
@@ -2563,16 +2692,13 @@ export default function PerfilUsuarioPage() {
 
                     if (user.role === ROLES.AGENCY) {
                       const agencyTabs: any[] = [
-                        { id: "datos", label: "Mis Datos Personales" }
+                        { id: "datos", label: "Mis Datos Personales" },
+                        { id: "admin_referidos", label: "Mis Leads Referidos" },
+                        { id: "invitar_agentes", label: "Link de Referidos" },
+                        { id: "comisiones", label: "Comisiones Realizadas" },
+                        { id: "metodos_cobro", label: "Métodos de Cobro" },
+                        { id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" }
                       ];
-                      if (isAccredited) {
-                        agencyTabs.push(
-                          { id: "invitar_agentes", label: "Link de Referidos" },
-                          { id: "comisiones", label: "Comisiones Realizadas" },
-                          { id: "metodos_cobro", label: "Métodos de Cobro" }
-                        );
-                      }
-                      agencyTabs.push({ id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" });
                       return agencyTabs.map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                     }
 
@@ -2602,12 +2728,12 @@ export default function PerfilUsuarioPage() {
                     }
 
                     if (isAccredited) {
-                      agentTabs.push(
-                        { id: "chat_agente", label: "Gestión de Casos" },
-                        { id: "comisiones", label: "Comisiones Realizadas" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro" }
-                      );
+                      agentTabs.push({ id: "chat_agente", label: "Gestión de Casos" });
                     }
+                    agentTabs.push(
+                      { id: "comisiones", label: "Comisiones Realizadas" },
+                      { id: "metodos_cobro", label: "Métodos de Cobro" }
+                    );
 
                     // "Mi Acreditación" always at the very end
                     agentTabs.push({ id: "mi_acreditacion", label: "Mi Acreditación" });
@@ -2649,8 +2775,8 @@ export default function PerfilUsuarioPage() {
         </aside>
 
         {/* Columna Derecha: Contenido del Tab Activo */}
-        <section className={`w-full ${isSidebarCollapsed ? 'lg:flex-grow lg:w-[calc(100%-90px)]' : 'lg:w-3/4'} transition-all duration-300`}>
-          <div className="bg-white rounded-lg border border-border-light p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px]">
+        <section className={`w-full ${isSidebarCollapsed ? 'lg:flex-grow lg:w-[calc(100%-90px)]' : 'lg:w-3/4'} transition-all duration-300 min-w-0 max-w-full`}>
+          <div className="bg-white rounded-lg border border-border-light p-4 sm:p-6 md:p-8 shadow-[0_2px_8px_rgba(0,0,0,0.01)] min-h-[450px] min-w-0 max-w-full overflow-hidden">
             {isLoadingPartnerApp ? (
               <div className="space-y-6 text-left animate-pulse">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-light pb-4">
@@ -3080,10 +3206,10 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h2 className="text-xl font-bold text-text-primary">
                               {hasPaidAdvisor
-                                ? "Seguimiento de Trámite de Visa (Servicio Completo)"
+                                ? "Seguimiento de Proceso de Visa (Servicio Completo)"
                                 : isViproOnly
                                   ? "Seguimiento de Evaluación VIPRO Express"
-                                  : "Seguimiento de Trámite de Visa"}
+                                  : "Seguimiento de Proceso de Visa"}
                             </h2>
                             <p className="text-xs text-text-secondary mt-1">
                               {hasPaidAdvisor
@@ -3140,7 +3266,7 @@ export default function PerfilUsuarioPage() {
                             </button>
                           ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
                             <button
-                              onClick={() => setActiveTab("admin_vipro")}
+                              onClick={() => handleTabChange("admin_vipro")}
                               className="px-3 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-sm hover:bg-purple-200 transition-colors cursor-pointer shadow-xs"
                             >
                               👑 Ver Evaluaciones de Todos los Usuarios &rarr;
@@ -3175,7 +3301,7 @@ export default function PerfilUsuarioPage() {
                                 👤 {assignedAgent?.name || "Asesor Asignado"}
                               </span>
                               <button
-                                onClick={() => setActiveTab("asesor")}
+                                onClick={() => handleTabChange("asesor")}
                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 transition-colors cursor-pointer"
                               >
                                 Chat con Asesor
@@ -3183,7 +3309,7 @@ export default function PerfilUsuarioPage() {
                             </div>
                           ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
                             <button
-                              onClick={() => setActiveTab("admin_expedientes")}
+                              onClick={() => handleTabChange("admin_expedientes")}
                               className="px-3 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-sm hover:bg-purple-200 transition-colors cursor-pointer shadow-xs"
                             >
                               👑 Monitor de Expedientes Globales &rarr;
@@ -3345,7 +3471,7 @@ export default function PerfilUsuarioPage() {
                                   </span>
                                 </div>
                                 <p className="text-xs text-emerald-900 leading-relaxed">
-                                  Has completado exitosamente todos los 6 Pasos del proceso de acompañamiento consular. Tu expediente ha sido auditado por tu asesor, tu cita presencial / simulacro consular ha sido confirmada y has dejado tu reseña oficial. ¡Éxitos en tu trámite consular!
+                                  Has completado exitosamente todos los 6 Pasos del proceso de acompañamiento consular. Tu expediente ha sido auditado por tu asesor, tu cita presencial / simulacro consular ha sido confirmada y has dejado tu reseña oficial. ¡Éxitos en tu proceso consular!
                                 </p>
                               </div>
                             );
@@ -3426,7 +3552,7 @@ export default function PerfilUsuarioPage() {
                                     Has asignado correctamente a tu asesor experto: <span className="font-semibold text-text-primary">{assignedAgent?.name || user.assignedAgencyName || "Tu Asesor Asignado"}</span>.
                                   </p>
                                   <button
-                                    onClick={() => setActiveTab("asesor")}
+                                    onClick={() => handleTabChange("asesor")}
                                     className="mt-3 text-xs text-brand-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
                                   >
                                     💬 Ir a mi Chat con Asesor
@@ -3795,7 +3921,7 @@ export default function PerfilUsuarioPage() {
 
                                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-white p-3 rounded-sm border border-slate-200">
                                           <div>
-                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Trámite</span>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Proceso</span>
                                             <span className="font-semibold text-slate-900 block mt-0.5">{activeCita.appointment_type || "Simulacro / Cita Consular"}</span>
                                           </div>
                                           <div>
@@ -4233,7 +4359,7 @@ export default function PerfilUsuarioPage() {
                               </span>
                             </div>
                             <p className="text-xs text-brand-primary font-bold">
-                              {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Trámites de Visa")}
+                              {assignedAgentProfile?.location ? `📍 ${assignedAgentProfile.location}` : (assignedAgencyProfile?.location ? `📍 ${assignedAgencyProfile.location}` : "Consulado y Procesos de Visa")}
                             </p>
                             <p className="text-xs text-text-secondary leading-relaxed">
                               {assignedAgentProfile?.bio || assignedAgencyProfile?.bio || "Asesor consular certificado. Tu expediente cuenta con auditoría y respaldo institucional."}
@@ -4382,15 +4508,15 @@ export default function PerfilUsuarioPage() {
                           </div>
 
                           {viproEvaluations.length > 0 ? (
-                            <div className="overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm">
-                              <table className="w-full text-left border-collapse">
+                            <div className="w-full max-w-full overflow-x-auto border border-border-light rounded-xl bg-white shadow-sm table-scroll-container">
+                              <table className="w-full min-w-[550px] text-left border-collapse">
                                 <thead>
-                                  <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6]">
-                                    <th className="py-3 px-4">Destino</th>
-                                    <th className="py-3 px-4">Fecha</th>
-                                    <th className="py-3 px-4">Calificación</th>
-                                    <th className="py-3 px-4">Resultado</th>
-                                    <th className="py-3 px-4 text-right">Acción</th>
+                                  <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-[#FAF9F6] whitespace-nowrap">
+                                    <th className="py-3 px-4 whitespace-nowrap">Destino</th>
+                                    <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                                    <th className="py-3 px-4 whitespace-nowrap">Calificación</th>
+                                    <th className="py-3 px-4 whitespace-nowrap">Resultado</th>
+                                    <th className="py-3 px-4 text-right whitespace-nowrap">Acción</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border-light text-xs">
@@ -4476,16 +4602,16 @@ export default function PerfilUsuarioPage() {
                         <p className="text-xs text-text-secondary mt-1">Revisa el detalle de tus compras de servicios y descarga tus comprobantes.</p>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
+                      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light bg-white shadow-sm table-scroll-container">
+                        <table className="w-full min-w-[650px] text-left border-collapse">
                           <thead>
-                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
-                              <th className="py-3 px-4">Referencia</th>
-                              <th className="py-3 px-4">Concepto</th>
-                              <th className="py-3 px-4">Fecha</th>
-                              <th className="py-3 px-4">Monto</th>
-                              <th className="py-3 px-4">Estado</th>
-                              <th className="py-3 px-4 text-right">Acción</th>
+                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40 whitespace-nowrap">
+                              <th className="py-3 px-4 whitespace-nowrap">Referencia</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Concepto</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Monto</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Estado</th>
+                              <th className="py-3 px-4 text-right whitespace-nowrap">Acción</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border-light text-xs">
@@ -4524,7 +4650,7 @@ export default function PerfilUsuarioPage() {
                                         </button>
                                       ) : (
                                         <button
-                                          onClick={() => setActiveTab("asesor")}
+                                          onClick={() => handleTabChange("asesor")}
                                           className="text-brand-primary hover:underline font-semibold"
                                         >
                                           Ver Chat
@@ -4551,7 +4677,7 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h5 className="font-bold text-text-primary text-xs mb-1">Garantía de Aprobación de Descuento</h5>
                             <p className="text-[11px] text-text-secondary leading-relaxed">
-                              Como completaste tu evaluación VIPRO de ${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier trámite de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
+                              Como completaste tu evaluación VIPRO de ${viproPrice.toFixed(2)} USD, tienes activo un cupón del <span className="font-bold text-brand-primary">25% de descuento</span> aplicable a cualquier proceso de asesoría formal con nuestros agentes de la red. ¡Contáctalos para aplicarlo!
                             </p>
                           </div>
                         </div>
@@ -4579,7 +4705,7 @@ export default function PerfilUsuarioPage() {
                         <div className="p-4 rounded-md border text-left bg-emerald-50/50 border-emerald-200 text-emerald-800">
                           <h4 className="font-bold text-sm mb-1">¡Perfil Acreditado Activo!</h4>
                           <p className="text-xs leading-relaxed opacity-90">
-                            Eres un asesor respaldado por <strong>{myAgency.first_name} {myAgency.last_name}</strong>. Tu perfil aparece con insignia de verificación y estás habilitado para gestionar los trámites asignados por tu empresa en la red TodoVisa.
+                            Eres un asesor respaldado por <strong>{myAgency.first_name} {myAgency.last_name}</strong>. Tu perfil aparece con insignia de verificación y estás habilitado para gestionar los procesos asignados por tu empresa en la red TodoVisa.
                           </p>
                         </div>
 
@@ -4817,16 +4943,16 @@ export default function PerfilUsuarioPage() {
 
                     {!selectedApp ? (
                       /* APPLICATIONS LISTING */
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
+                      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light bg-white shadow-sm table-scroll-container">
+                        <table className="w-full min-w-[650px] text-left border-collapse">
                           <thead>
-                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40">
-                              <th className="py-3 px-4">Código</th>
-                              <th className="py-3 px-4">Postulante / Empresa</th>
-                              <th className="py-3 px-4">Tipo</th>
-                              <th className="py-3 px-4">Fecha</th>
-                              <th className="py-3 px-4">Estado</th>
-                              <th className="py-3 px-4 text-right">Acción</th>
+                            <tr className="border-b border-border-light text-[10px] font-bold uppercase tracking-wider text-text-secondary bg-background-main/40 whitespace-nowrap">
+                              <th className="py-3 px-4 whitespace-nowrap">Código</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Postulante / Empresa</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Tipo</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                              <th className="py-3 px-4 whitespace-nowrap">Estado</th>
+                              <th className="py-3 px-4 text-right whitespace-nowrap">Acción</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border-light text-xs">
@@ -5223,7 +5349,7 @@ export default function PerfilUsuarioPage() {
                     {/* Direct Action Hub */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                       <button
-                        onClick={() => setActiveTab("admin_socios")}
+                        onClick={() => handleTabChange("admin_socios")}
                         className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                       >
                         <div className="flex items-center justify-between mb-3">
@@ -5243,7 +5369,7 @@ export default function PerfilUsuarioPage() {
                       </button>
 
                       <button
-                        onClick={() => setActiveTab("admin_usuarios")}
+                        onClick={() => handleTabChange("admin_usuarios")}
                         className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                       >
                         <div className="flex items-center justify-between mb-3">
@@ -5263,7 +5389,7 @@ export default function PerfilUsuarioPage() {
                       </button>
 
                       <button
-                        onClick={() => setActiveTab("admin_expedientes")}
+                        onClick={() => handleTabChange("admin_expedientes")}
                         className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                       >
                         <div className="flex items-center justify-between mb-3">
@@ -5358,13 +5484,13 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[500px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">Usuario / Email</th>
-                            <th className="py-3 px-4">Rol en Sistema</th>
-                            <th className="py-3 px-4">Estado</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Usuario / Email</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Rol en Sistema</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Estado</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5452,14 +5578,14 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[650px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">Solicitante</th>
-                            <th className="py-3 px-4">Preformulario</th>
-                            <th className="py-3 px-4">Documentos Cargados</th>
-                            <th className="py-3 px-4 text-center">Acción</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Solicitante</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Preformulario</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Documentos Cargados</th>
+                            <th className="py-3 px-4 text-center whitespace-nowrap">Acción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5604,14 +5730,14 @@ export default function PerfilUsuarioPage() {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[600px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">Cliente</th>
-                            <th className="py-3 px-4">Scoring Consular</th>
-                            <th className="py-3 px-4">Fecha</th>
-                            <th className="py-3 px-4 text-center">Acción</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Cliente</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Scoring Consular</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Fecha</th>
+                            <th className="py-3 px-4 text-center whitespace-nowrap">Acción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5677,25 +5803,379 @@ export default function PerfilUsuarioPage() {
                   </div>
                 )}
 
+                {/* TAB: LEADS REFERIDOS DE EMPRESA (ADMIN Y EMPRESAS) */}
+                {activeTab === "admin_referidos" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR || user.role === ROLES.AGENCY) && (
+                  <div className="animate-fadeIn space-y-6 text-left">
+                    <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 border border-slate-200 text-slate-800 text-[10px] font-bold uppercase tracking-wider rounded-xs mb-1.5">
+                          <svg className="w-3.5 h-3.5 text-brand-primary" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                          <span>Módulo B2B & Referidos</span>
+                        </div>
+                        <h2 className="text-xl font-bold text-text-primary">Prospectos y Leads Referidos por Empresa</h2>
+                        <p className="text-xs text-text-secondary mt-1">
+                          Clientes ingresados mediante código corporativo. Atendidos directamente por Asesores oficiales TodoVisa.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={loadReferralLeadsData}
+                        className="px-4 py-2 bg-white border border-border-light hover:bg-background-hover text-text-primary text-xs font-semibold rounded-sm cursor-pointer transition-colors flex items-center gap-2 shrink-0 shadow-xs"
+                      >
+                        <svg className="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        <span>Actualizar Lista</span>
+                      </button>
+                    </div>
+
+                    {/* KPI Summary Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-white p-4 rounded-sm border border-border-light shadow-xs space-y-1">
+                        <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Total Prospectos</span>
+                        <div className="text-2xl font-black text-brand-primary">{referralLeadsList.length}</div>
+                        <p className="text-[11px] text-text-secondary">Leads de empresas aliadas</p>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-sm border border-slate-200 bg-slate-50/60 shadow-xs space-y-1">
+                        <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">Pendientes de Contacto</span>
+                        <div className="text-2xl font-black text-slate-800">
+                          {referralLeadsList.filter((l: any) => l.status === "pending_advisor_contact" || l.status === "pending" || !l.status).length}
+                        </div>
+                        <p className="text-[11px] text-slate-600">Requieren llamada de asesor</p>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-sm border border-slate-200 bg-slate-50/60 shadow-xs space-y-1">
+                        <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">En Gestión / Contactados</span>
+                        <div className="text-2xl font-black text-slate-800">
+                          {referralLeadsList.filter((l: any) => l.status === "contacted" || l.status === "in_progress").length}
+                        </div>
+                        <p className="text-[11px] text-slate-600">En proceso consular</p>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-sm border border-emerald-200 bg-emerald-50/40 shadow-xs space-y-1">
+                        <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">Completados / Ganados</span>
+                        <div className="text-2xl font-black text-emerald-700">
+                          {referralLeadsList.filter((l: any) => l.status === "completed").length}
+                        </div>
+                        <p className="text-[11px] text-emerald-800">Comisión lista para pago</p>
+                      </div>
+                    </div>
+
+                    {/* Filter & Search */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 border border-border-light rounded-sm shadow-xs">
+                      <div className="relative w-full sm:w-96">
+                        <input
+                          type="text"
+                          placeholder="Buscar por cliente, correo, WhatsApp o código de empresa..."
+                          value={referralLeadSearch}
+                          onChange={(e) => setReferralLeadSearch(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:outline-none focus:border-brand-primary font-sans"
+                        />
+                        <svg className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-text-secondary font-semibold">
+                          Mostrando {referralLeadsList.length} registro(s)
+                        </span>
+                        <span className="text-[11px] font-bold text-[#003087] bg-blue-50 border border-blue-200 px-2.5 py-1 rounded flex items-center gap-1.5 shadow-2xs">
+                          ↔️ Desplaza horizontalmente para ver todas las columnas
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tabla de Ancho Amplio (min-w-[1500px]) con Scroll Horizontal */}
+                    <div className="w-full max-w-full overflow-x-auto rounded-sm border border-border-light bg-white shadow-xs table-scroll-container">
+                      <table className="w-full min-w-[1500px] text-xs text-left text-text-primary border-collapse">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                          <tr>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[140px]">Fecha</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[180px]">Cliente Solicitante</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[240px]">Información de Contacto</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[340px]">Empresa / Código de Referido</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[200px]">Proceso & País</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[240px]">Notas del Cliente</th>
+                            <th className="py-3.5 px-4 whitespace-nowrap min-w-[180px]">Estado</th>
+                            <th className="py-3.5 px-4 text-right whitespace-nowrap min-w-[180px]">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border-light font-sans">
+                          {isLoadingReferralLeads ? (
+                            <tr>
+                              <td colSpan={8} className="py-10 text-center text-text-muted">
+                                Cargando prospectos de empresas...
+                              </td>
+                            </tr>
+                          ) : referralLeadsList && referralLeadsList.length > 0 ? (
+                            referralLeadsList
+                              .filter((lead: any) => {
+                                if (!referralLeadSearch.trim()) return true;
+                                const q = referralLeadSearch.toLowerCase();
+                                return (
+                                  (lead.client_name || "").toLowerCase().includes(q) ||
+                                  (lead.client_email || "").toLowerCase().includes(q) ||
+                                  (lead.client_phone || "").toLowerCase().includes(q) ||
+                                  (lead.agency_code || "").toLowerCase().includes(q) ||
+                                  (lead.agency_name || "").toLowerCase().includes(q) ||
+                                  (lead.notes || "").toLowerCase().includes(q)
+                                );
+                              })
+                              .map((lead: any, idx: number) => {
+                                const formattedDate = lead.created_at
+                                  ? new Date(lead.created_at).toLocaleDateString("es-ES", {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })
+                                  : "Reciente";
+
+                                const cleanPhone = (lead.client_phone || "").replace(/[^0-9]/g, "");
+
+                                return (
+                                  <tr key={lead.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                                    {/* Fecha */}
+                                    <td className="py-4 px-4 font-mono text-[11px] text-text-secondary align-top whitespace-nowrap">
+                                      {formattedDate}
+                                    </td>
+
+                                    {/* Cliente Solicitante */}
+                                    <td className="py-4 px-4 align-top whitespace-nowrap">
+                                      <div className="font-bold text-text-primary text-xs whitespace-nowrap">{lead.client_name || "Cliente Referido"}</div>
+                                    </td>
+
+                                    {/* Información de Contacto */}
+                                    <td className="py-4 px-4 align-top whitespace-nowrap space-y-1">
+                                      {lead.client_email ? (
+                                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 whitespace-nowrap">
+                                          <svg className="w-3.5 h-3.5 text-slate-500 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                                          <a href={`mailto:${lead.client_email}`} className="hover:underline hover:text-brand-primary">
+                                            {lead.client_email}
+                                          </a>
+                                        </div>
+                                      ) : (
+                                        <span className="text-[11px] text-slate-400 italic">Sin correo</span>
+                                      )}
+
+                                      {lead.client_phone ? (
+                                        <div className="pt-0.5">
+                                          <a
+                                            href={`https://wa.me/${cleanPhone}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-800 bg-slate-100 border border-slate-300 px-2 py-1 rounded hover:bg-slate-200 transition-colors whitespace-nowrap"
+                                          >
+                                            <svg className="w-3.5 h-3.5 text-slate-700 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                                            <span>{lead.client_phone}</span>
+                                          </a>
+                                        </div>
+                                      ) : (
+                                        <span className="text-[11px] text-slate-400 italic block">Sin teléfono</span>
+                                      )}
+                                    </td>
+
+                                    {/* Empresa / Código Completo sin saltos */}
+                                    <td className="py-4 px-4 align-top whitespace-nowrap">
+                                      <span className="font-bold text-brand-primary text-xs block whitespace-nowrap">
+                                        {lead.agency_name || "Empresa Aliada"}
+                                      </span>
+                                      <span className="font-mono text-xs bg-slate-100 text-slate-900 px-2.5 py-1 rounded border border-slate-300 inline-block mt-1 whitespace-nowrap select-all font-semibold tracking-wide">
+                                        {lead.agency_code || "N/A"}
+                                      </span>
+                                    </td>
+
+                                    {/* Trámite Consular */}
+                                    <td className="py-4 px-4 align-top whitespace-nowrap">
+                                      <div className="font-bold text-text-primary text-xs whitespace-nowrap">{lead.visa_type || "Turismo (B1/B2)"}</div>
+                                      <div className="text-[11px] text-slate-500 font-medium mt-0.5 whitespace-nowrap">{lead.destination_country || "Estados Unidos"}</div>
+                                    </td>
+
+                                    {/* Notas del Cliente */}
+                                    <td className="py-4 px-4 align-top">
+                                      {lead.notes ? (
+                                        <p className="text-[11px] text-slate-700 bg-slate-50 p-2 border border-slate-200 rounded leading-relaxed max-w-xs">
+                                          {lead.notes}
+                                        </p>
+                                      ) : (
+                                        <span className="text-[11px] text-slate-400 italic">Sin comentarios adicionales</span>
+                                      )}
+                                    </td>
+
+                                    {/* Estado */}
+                                    <td className="py-4 px-4 align-top whitespace-nowrap">
+                                      <select
+                                        value={lead.status || "pending_advisor_contact"}
+                                        onChange={async (e) => {
+                                          const newStatus = e.target.value;
+                                          try {
+                                            const isCompleted = newStatus === "completed";
+                                            let autoCommAssigned = lead.commission_assigned;
+
+                                            if (isCompleted && !lead.commission_assigned) {
+                                              const targetAgency = lead.agency_id || lead.agency_code;
+                                              if (targetAgency) {
+                                                const gross = 150;
+                                                const rate = 20;
+                                                const commissionAmt = gross * (rate / 100);
+                                                const commRes = await AgentClientService.createCommission({
+                                                  agent_id: targetAgency,
+                                                  client_name: lead.client_name || "Cliente Referido",
+                                                  gross_amount: gross,
+                                                  commission_rate: rate,
+                                                  commission_amount: commissionAmt,
+                                                  service_type: `Proceso de Visa (${lead.visa_type || "Referido Empresa"})`,
+                                                  status: "pending",
+                                                  notes: {
+                                                    manual_admin_assignment: true,
+                                                    assigned_by: user?.email || "Admin Status Change",
+                                                    lead_id: lead.id,
+                                                    date: new Date().toISOString()
+                                                  }
+                                                });
+                                                if (commRes && commRes.success) {
+                                                  autoCommAssigned = true;
+                                                  showToast(`✅ Comisión de $${commissionAmt.toFixed(2)} USD generada automáticamente para la empresa.`, "success");
+                                                }
+                                              }
+                                            }
+
+                                            await AgencyClientService.updateReferralLead({
+                                              id: lead.id,
+                                              status: newStatus,
+                                              commission_assigned: autoCommAssigned,
+                                            });
+
+                                            setReferralLeadsList((prevLeads) =>
+                                              prevLeads.map((l) =>
+                                                l.id === lead.id
+                                                  ? { ...l, status: newStatus, commission_assigned: autoCommAssigned }
+                                                  : l
+                                              )
+                                            );
+
+                                            showToast("Estado de prospecto actualizado", "success");
+                                            await loadReferralLeadsData();
+                                            if (typeof loadCommissions === 'function') loadCommissions();
+                                          } catch (err) {
+                                            showToast("No se pudo actualizar el estado", "error");
+                                          }
+                                        }}
+                                        className="w-full min-w-[150px] px-2.5 py-1.5 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-primary whitespace-nowrap"
+                                      >
+                                        <option value="pending_advisor_contact">Pendiente Asesor</option>
+                                        <option value="contacted">Contactado</option>
+                                        <option value="in_progress">En Gestión</option>
+                                        <option value="completed">Proceso Concluido</option>
+                                      </select>
+                                    </td>
+
+                                    {/* Acciones Admin */}
+                                    <td className="py-4 px-4 align-top text-right whitespace-nowrap">
+                                      {(() => {
+                                        const isCommissionAssigned = Boolean(
+                                          lead.commission_assigned ||
+                                          agentCommissions.some((c: any) => {
+                                            const notesStr = typeof c.notes === "string" ? c.notes : JSON.stringify(c.notes || {});
+                                            return (
+                                              (lead.id && notesStr.includes(String(lead.id))) ||
+                                              (lead.client_name && c.client_name && c.client_name.trim().toLowerCase() === lead.client_name.trim().toLowerCase())
+                                            );
+                                          })
+                                        );
+
+                                        if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
+                                          if (isCommissionAssigned) {
+                                            return (
+                                              <button
+                                                disabled={true}
+                                                className="px-3 py-1.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-sm cursor-not-allowed opacity-90 shadow-2xs flex items-center gap-1.5 ml-auto"
+                                              >
+                                                <span>✓</span>
+                                                <span>Comisión Asignada</span>
+                                              </button>
+                                            );
+                                          } else {
+                                            return (
+                                              <button
+                                                onClick={() => {
+                                                  setSelectedTxForCommission(null);
+                                                  setSelectedLeadForCommission(lead);
+                                                  setAdminCommissionGross("150.00");
+                                                  setAdminCommissionClientName(lead.client_name || "");
+                                                  setAdminTargetAgencyId(lead.agency_id || lead.agency_code || "");
+                                                  setAdminCommissionRate("20");
+                                                  setIsAdminCommissionModalOpen(true);
+                                                }}
+                                                className="px-3 py-1.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm border-none cursor-pointer shadow-xs transition-colors"
+                                              >
+                                                Asignar Comisión (20%)
+                                              </button>
+                                            );
+                                          }
+                                        }
+
+                                        return isCommissionAssigned ? (
+                                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
+                                            <span>✓ Comisión Registrada</span>
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded">
+                                            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                            <span>Pendiente Asignación</span>
+                                          </span>
+                                        );
+                                      })()}
+                                    </td>
+
+                                  </tr>
+                                );
+                              })
+                          ) : (
+                            <tr>
+                              <td colSpan={8} className="py-10 text-center text-text-muted">
+                                No se han registrado prospectos de empresas en la base de datos Supabase.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+
                 {/* TAB: HISTORIAL DE PAGOS (ADMIN) */}
                 {activeTab === "admin_pagos" && user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) && (
+
                   <div className="animate-fadeIn space-y-6 text-left">
                     <div className="mb-6 pb-4 border-b border-border-light flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div>
                         <h2 className="text-lg font-bold text-text-primary">Historial Global de Pagos y Transacciones</h2>
-                        <p className="text-xs text-text-secondary mt-1">Cobros procesados vía PayPal SDK y transferencias registradas.</p>
+                        <p className="text-xs text-text-secondary mt-1">Cobros procesados vía PayPal SDK y asignación manual de comisiones B2B.</p>
                       </div>
+                      <button
+                        onClick={() => {
+                          setSelectedTxForCommission(null);
+                          setAdminCommissionGross("150.00");
+                          setAdminCommissionClientName("");
+                          setAdminCommissionRate("20");
+                          setIsAdminCommissionModalOpen(true);
+                        }}
+                        className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm border-none cursor-pointer flex items-center gap-1.5 shrink-0"
+                      >
+                        <span>+ Asignar Comisión a Empresa (20%)</span>
+                      </button>
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-border-light">
-                      <table className="w-full text-xs text-left text-text-primary">
-                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light">
+                    <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
+                      <table className="w-full min-w-[700px] text-xs text-left text-text-primary">
+                        <thead className="bg-background-main text-text-secondary uppercase text-[10px] font-bold tracking-wider border-b border-border-light whitespace-nowrap">
                           <tr>
-                            <th className="py-3 px-4">ID Transacción</th>
-                            <th className="py-3 px-4">Cliente</th>
-                            <th className="py-3 px-4">Concepto</th>
-                            <th className="py-3 px-4">Monto</th>
-                            <th className="py-3 px-4">Estado</th>
+                            <th className="py-3 px-4 whitespace-nowrap">ID Transacción</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Cliente</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Concepto</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Monto</th>
+                            <th className="py-3 px-4 whitespace-nowrap">Estado</th>
+                            <th className="py-3 px-4 text-right whitespace-nowrap">Acción Admin</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border-light font-sans">
@@ -5723,12 +6203,26 @@ export default function PerfilUsuarioPage() {
                                     <td className="py-3.5 px-4">
                                       <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Completado</span>
                                     </td>
+                                    <td className="py-3.5 px-4 text-right">
+                                      <button
+                                        onClick={() => {
+                                          setSelectedTxForCommission(item);
+                                          setAdminCommissionGross(String(item.amount || 150));
+                                          setAdminCommissionClientName(clientName);
+                                          setAdminCommissionRate("20");
+                                          setIsAdminCommissionModalOpen(true);
+                                        }}
+                                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-bold rounded-sm cursor-pointer transition-colors"
+                                      >
+                                        Asignar 20% a Empresa
+                                      </button>
+                                    </td>
                                   </tr>
                                 );
                               })
                           ) : (
                             <tr>
-                              <td colSpan={5} className="py-8 text-center text-text-muted">
+                              <td colSpan={6} className="py-8 text-center text-text-muted">
                                 No se encontraron transacciones registradas en la base de datos Supabase.
                               </td>
                             </tr>
@@ -5736,6 +6230,7 @@ export default function PerfilUsuarioPage() {
                         </tbody>
                       </table>
                     </div>
+
                   </div>
                 )}
 
@@ -6624,11 +7119,11 @@ export default function PerfilUsuarioPage() {
                       </div>
                       {user.role === ROLES.AGENCY ? (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+                          Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada proceso consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
                         </p>
                       ) : (
                         <p className="text-xs text-text-secondary leading-relaxed">
-                          Como Asesor Certificado de la red TodoVisa, recibes el <strong>{getSystemConfig().agentCommissionRate}% del importe bruto</strong> de cada trámite consular asignado. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+                          Como Asesor Certificado de la red TodoVisa, recibes el <strong>{getSystemConfig().agentCommissionRate}% del importe bruto</strong> de cada proceso consular asignado. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
                         </p>
                       )}
                     </div>
@@ -6666,30 +7161,40 @@ export default function PerfilUsuarioPage() {
                             commission_amount: agentCommissionAmount,
                             status: isCompleted ? 'paid' : 'processing',
                             paid_at: isCompleted ? new Date().toISOString() : null,
-                            notes: 'Comisión de trámite en curso',
+                            notes: 'Comisión de proceso en curso',
                             created_at: client.created_at || new Date().toISOString()
                           });
                         }
                       });
 
-                      const totalClients = assignedClients.length;
-                      const pendingBalance = mergedCommissions.filter(c => c.status === 'pending' || c.status === 'processing').reduce((sum, c) => sum + c.commission_amount, 0);
-                      const availableBalance = mergedCommissions.filter(c => c.status === 'paid').reduce((sum, c) => sum + c.commission_amount, 0);
-                      const totalEarned = mergedCommissions.reduce((sum, c) => sum + c.commission_amount, 0);
+                      const calcAmt = (c: any) => {
+                        if (typeof c.commission_amount === "number" && !isNaN(c.commission_amount) && c.commission_amount > 0) {
+                          return c.commission_amount;
+                        }
+                        const gross = Number(c.gross_amount || c.sale_amount || 0);
+                        let rate = Number(c.commission_rate || (user?.role === ROLES.AGENCY ? 20 : 80));
+                        if (rate > 0 && rate <= 1) rate = rate * 100;
+                        return gross * (rate / 100);
+                      };
+
+                      const totalClients = assignedClients.length + mergedCommissions.length;
+                      const pendingBalance = mergedCommissions.filter(c => c.status === 'pending' || c.status === 'processing').reduce((sum, c) => sum + calcAmt(c), 0);
+                      const availableBalance = mergedCommissions.filter(c => c.status === 'paid' || c.status === 'completed').reduce((sum, c) => sum + calcAmt(c), 0);
+                      const totalEarned = mergedCommissions.reduce((sum, c) => sum + calcAmt(c), 0);
 
                       return (
                         <>
                           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 text-left">
                             <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Clientes Activos</span>
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Expedientes / Leads</span>
                               <p className="text-lg font-bold text-text-primary font-mono mt-1">{totalClients}</p>
                             </div>
                             <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Saldo en Trámite</span>
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Saldo en Proceso</span>
                               <p className="text-lg font-bold text-amber-600 font-mono mt-1">${pendingBalance.toFixed(2)} USD</p>
                             </div>
                             <div className="p-4 bg-background-main border border-border-light rounded-sm">
-                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Líquido por Retirar</span>
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wider font-bold block">Líquido / Acreditar</span>
                               <p className="text-lg font-bold text-emerald-600 font-mono mt-1">${availableBalance.toFixed(2)} USD</p>
                             </div>
                             <div className="p-4 bg-brand-light border border-brand-primary/20 rounded-sm">
@@ -6700,7 +7205,7 @@ export default function PerfilUsuarioPage() {
 
                           {/* Table */}
                           <div className="border border-border-light rounded-sm p-5 bg-white text-left">
-                            <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes</h3>
+                            <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Listado de Expedientes y Comisiones</h3>
                             {isLoadingCommissions ? (
                               <div className="flex justify-center py-8">
                                 <div className="w-6 h-6 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin" />
@@ -6710,36 +7215,43 @@ export default function PerfilUsuarioPage() {
                                 No se han encontrado registros de comisiones aprobadas para tu cuenta.
                               </div>
                             ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs border-collapse">
+                              <div className="w-full max-w-full overflow-x-auto table-scroll-container">
+                                <table className="w-full min-w-[600px] text-left text-xs border-collapse">
                                   <thead>
-                                    <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
-                                      <th className="py-2.5">Fecha</th>
-                                      <th className="py-2.5">Cliente</th>
-                                      <th className="py-2.5">Trámite</th>
-                                      <th className="py-2.5">Importe</th>
-                                      <th className="py-2.5">Estado</th>
+                                    <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold whitespace-nowrap">
+                                      <th className="py-2.5 whitespace-nowrap">Fecha</th>
+                                      <th className="py-2.5 whitespace-nowrap">Cliente Solicitante</th>
+                                      <th className="py-2.5 whitespace-nowrap">Proceso / Servicio</th>
+                                      <th className="py-2.5 whitespace-nowrap">Tasa Comisión</th>
+                                      <th className="py-2.5 whitespace-nowrap">Monto Comisión</th>
+                                      <th className="py-2.5 whitespace-nowrap">Estado</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-border-light">
-                                    {mergedCommissions.map((c) => (
-                                      <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
-                                        <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
-                                        <td className="py-3 font-semibold">{c.client_name}</td>
-                                        <td className="py-3 text-text-secondary">{c.service_type === 'full_service' ? 'Asesoría Consular Completa' : c.service_type}</td>
-                                        <td className="py-3 font-bold font-mono">${c.commission_amount.toFixed(2)} USD</td>
-                                        <td className="py-3">
-                                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid"
-                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                            : c.status === "processing" || c.status === "pending"
-                                              ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                              : "bg-gray-100 text-gray-500"
-                                            }`}>
-                                            {c.status === "paid" ? "Pagado" : (c.status === "processing" || c.status === "pending") ? "En Proceso" : "Pendiente"}
-                                          </span>
-                                        </td>
-                                      </tr>
-                                    ))}
+                                    {mergedCommissions.map((c) => {
+                                      const amt = calcAmt(c);
+                                      const rateDisplay = typeof c.commission_rate === 'number' ? (c.commission_rate <= 1 ? (c.commission_rate * 100) : c.commission_rate) : 20;
+
+                                      return (
+                                        <tr key={c.id} className="hover:bg-background-main/50 transition-colors">
+                                          <td className="py-3 font-mono">{new Date(c.created_at).toLocaleDateString()}</td>
+                                          <td className="py-3 font-semibold">{c.client_name}</td>
+                                          <td className="py-3 text-text-secondary">{c.service_type === 'full_service' ? 'Asesoría Consular Completa' : c.service_type}</td>
+                                          <td className="py-3 font-mono text-slate-600">{rateDisplay}%</td>
+                                          <td className="py-3 font-bold font-mono text-brand-primary">${amt.toFixed(2)} USD</td>
+                                          <td className="py-3">
+                                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${c.status === "paid" || c.status === "completed"
+                                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                              : c.status === "processing" || c.status === "pending"
+                                                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                                : "bg-gray-100 text-gray-500"
+                                              }`}>
+                                              {c.status === "paid" || c.status === "completed" ? "Pagado / Acreditado" : (c.status === "processing" || c.status === "pending") ? "En Proceso" : "Pendiente"}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -6747,6 +7259,7 @@ export default function PerfilUsuarioPage() {
                           </div>
                         </>
                       );
+
                     })()}
                   </div>
                 )}
@@ -6915,7 +7428,7 @@ export default function PerfilUsuarioPage() {
                     <div className="animate-fadeIn">
                       <div className="mb-6 pb-4 border-b border-border-light text-left">
                         <h2 className="text-lg font-bold text-text-primary">Programa de Recomendaciones de Agencia</h2>
-                        <p className="text-xs text-text-secondary mt-1">Genera y comparte tu enlace único de recomendación. Obtén el **30% de comisión** de cada compra de visado realizada por tus clientes.</p>
+                        <p className="text-xs text-text-secondary mt-1">Genera y comparte tu enlace único de recomendación. Obtén el **20% de comisión** de cada compra de visado realizada por tus clientes.</p>
                       </div>
 
                       {/* Banner alert */}
@@ -6929,17 +7442,18 @@ export default function PerfilUsuarioPage() {
                           <div>
                             <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Nueva Modalidad por Recomendación</h3>
                             <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                              Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>30% del valor del trámite</strong> a tu cuenta de agencia (70% para TodoVisa).
+                              Las agencias ya no registran sub-agentes en la plataforma. Al enviar tu enlace de referido al cliente final, el sistema acreditará automáticamente el <strong>20% del valor del proceso</strong> a tu cuenta de agencia (80% para TodoVisa).
                             </p>
                           </div>
                         </div>
                       </div>
 
+
                       {/* Referral Link Box */}
                       <div className="bg-white border border-border-light rounded-sm p-6 text-left shadow-xs space-y-4">
                         <div>
                           <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted mb-1">Enlace de Referido Exclusivo</h3>
-                          <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su trámite con tu código de agencia.</p>
+                          <p className="text-xs text-text-secondary">Envía este enlace a tus clientes finales para que inicien su proceso con tu código de agencia.</p>
                         </div>
 
                         <div className="flex flex-col sm:flex-row gap-3 pt-2">
@@ -6952,18 +7466,19 @@ export default function PerfilUsuarioPage() {
                             <input
                               type="text"
                               readOnly
-                              value={`${typeof window !== "undefined" ? `${window.location.origin}/agents` : "https://todovisa.com/agents"}?ref=${user?.id || ""}`}
+                              value={`${typeof window !== "undefined" ? `${window.location.origin}/referral` : "https://todovisa.com/referral"}?ref=${user?.id || ""}`}
                               className="w-full pl-9 pr-3 py-2.5 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
                             />
                           </div>
                           <button
                             onClick={() => {
                               if (typeof window !== "undefined" && user?.id) {
-                                navigator.clipboard.writeText(`${window.location.origin}/agents?ref=${user.id}`);
+                                navigator.clipboard.writeText(`${window.location.origin}/referral?ref=${user.id}`);
                                 setCopiedReferral(true);
                                 setTimeout(() => setCopiedReferral(false), 3000);
                               }
                             }}
+
                             className="px-5 py-2.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2 shrink-0"
                           >
                             {copiedReferral ? (
@@ -7015,7 +7530,7 @@ export default function PerfilUsuarioPage() {
               router.push("/vipro-form");
             } else {
               setActiveTab("proceso"); // Redirect to tracking so they see Step 4 workspace
-              showToast("¡Asesor contratado y expediente de trámite activado con éxito!", "success");
+              showToast("¡Asesor contratado y expediente de proceso activado con éxito!", "success");
             }
           }}
         />
@@ -7320,7 +7835,130 @@ export default function PerfilUsuarioPage() {
 
 
 
+      {/* MODAL ADMIN: ASIGNACIÓN MANUAL DE COMISIÓN A EMPRESA (20%) */}
+      {isAdminCommissionModalOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white border border-border-light rounded-sm max-w-md w-full overflow-hidden shadow-xl text-left">
+            <div className="bg-brand-primary p-4 text-white flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-white/15 px-2 py-0.5 rounded-xs">
+                  Módulo Admin TodoVisa
+                </span>
+                <h3 className="text-sm font-bold text-white mt-1">
+                  Asignar Comisión a Empresa (20%)
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsAdminCommissionModalOpen(false)}
+                className="text-white/80 hover:text-white text-base font-bold bg-transparent border-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAssignCommissionSubmit} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-text-muted mb-1 text-[10px]">
+                  Empresa / Agencia Aliada (ID o Código) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. B2B-SAN-SALVADOR o UUID de Agencia"
+                  value={adminTargetAgencyId}
+                  onChange={(e) => setAdminTargetAgencyId(e.target.value)}
+                  className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:outline-none focus:border-brand-primary font-mono uppercase"
+                />
+                {dbProfilesMap && Object.values(dbProfilesMap).filter((p: any) => p?.role === ROLES.AGENCY).length > 0 && (
+                  <select
+                    onChange={(e) => setAdminTargetAgencyId(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-background-main border border-border-light rounded-sm text-xs text-text-secondary mt-1.5 focus:outline-none focus:border-brand-primary font-sans"
+                  >
+                    <option value="">-- Seleccionar de Agencias Registradas --</option>
+                    {Object.values(dbProfilesMap)
+                      .filter((p: any) => p?.role === ROLES.AGENCY)
+                      .map((ag: any) => (
+                        <option key={ag.id} value={ag.id}>
+                          {ag.first_name || ag.last_name ? `${ag.first_name || ""} ${ag.last_name || ""}`.trim() : ag.id} ({ag.email || ag.id})
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
+
+
+              <div>
+                <label className="block font-bold uppercase tracking-wider text-text-muted mb-1 text-[10px]">
+                  Cliente Referido
+                </label>
+                <input
+                  type="text"
+                  value={adminCommissionClientName}
+                  onChange={(e) => setAdminCommissionClientName(e.target.value)}
+                  placeholder="Ej. Juan Pérez"
+                  className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary focus:outline-none focus:border-brand-primary"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-text-muted mb-1 text-[10px]">
+                    Monto Bruto ($ USD) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={adminCommissionGross}
+                    onChange={(e) => setAdminCommissionGross(e.target.value)}
+                    placeholder="150.00"
+                    className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs text-text-primary font-mono focus:outline-none focus:border-brand-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold uppercase tracking-wider text-text-muted mb-1 text-[10px]">
+                    Porcentaje de Comisión
+                  </label>
+                  <input
+                    type="number"
+                    value={adminCommissionRate}
+                    onChange={(e) => setAdminCommissionRate(e.target.value)}
+                    className="w-full px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs font-bold text-emerald-700 font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-sm text-emerald-900 flex justify-between items-center font-semibold">
+                <span>Monto a acreditar a la empresa:</span>
+                <span className="text-sm font-extrabold font-mono text-emerald-700">
+                  ${((Number(adminCommissionGross) || 0) * ((Number(adminCommissionRate) || 20) / 100)).toFixed(2)} USD
+                </span>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAdminCommissionModalOpen(false)}
+                  className="px-4 py-2 bg-white border border-border-light text-text-secondary text-xs font-semibold rounded-sm cursor-pointer hover:bg-background-hover"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAssigningCommission}
+                  className="px-5 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm border-none cursor-pointer disabled:opacity-50"
+                >
+                  {isAssigningCommission ? "Asignando..." : "Asignar Comisión"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Toast Alert Component */}
+
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[400] flex items-center gap-3 px-5 py-4 rounded-lg shadow-2xl border animate-in slide-in-from-bottom-4 duration-300 max-w-sm ${toast.type === 'success'
           ? 'bg-white border-emerald-200'

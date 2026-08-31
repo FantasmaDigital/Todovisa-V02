@@ -138,11 +138,11 @@ export default function ComisionesPage() {
           </div>
           {user.role === ROLES.AGENCY ? (
             <p className="text-xs text-text-secondary leading-relaxed">
-              Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada trámite consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
+              Como Agencia/Socio Comercial, recibes el <strong>{getSystemConfig().agencyReferralRate}% del importe bruto</strong> de cada proceso consular realizado por los clientes que ingresen a la plataforma mediante tu <strong>Link de Referido Exclusivo</strong>. TodoVisa administra la plataforma y el soporte operativo. Los cortes se realizan de forma semanal y las liquidaciones se transfieren a tu cuenta bancaria o PayPal registrada todos los viernes.
             </p>
           ) : (
             <p className="text-xs text-text-secondary leading-relaxed">
-              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>{getSystemConfig().agentCommissionRate}%</strong> por cada trámite/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
+              Como Asesor Certificado de la red TodoVisa, comisionas un porcentaje directo de <strong>{getSystemConfig().agentCommissionRate}%</strong> por cada proceso/expediente asignado y auditado con éxito. El procesamiento de liquidaciones se realiza semanalmente y los pagos netos acumulados se depositan en tu método de cobro configurado cada viernes.
             </p>
           )}
         </div>
@@ -189,16 +189,16 @@ export default function ComisionesPage() {
               No se han encontrado registros de comisiones aprobadas para tu cuenta.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            <div className="w-full max-w-full overflow-x-auto table-scroll-container">
+              <table className="w-full min-w-[600px] text-left text-xs border-collapse">
                 <thead>
-                  <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold">
-                    <th className="py-2.5">Fecha</th>
-                    <th className="py-2.5">Cliente</th>
-                    {user.role === ROLES.AGENCY && <th className="py-2.5">Asesor</th>}
-                    <th className="py-2.5">Trámite</th>
-                    <th className="py-2.5">Importe</th>
-                    <th className="py-2.5">Estado</th>
+                  <tr className="border-b border-border-light text-text-secondary uppercase tracking-wider text-[9px] font-bold whitespace-nowrap">
+                    <th className="py-2.5 whitespace-nowrap">Fecha</th>
+                    <th className="py-2.5 whitespace-nowrap">Cliente</th>
+                    {user.role === ROLES.AGENCY && <th className="py-2.5 whitespace-nowrap">Asesor</th>}
+                    <th className="py-2.5 whitespace-nowrap">Proceso</th>
+                    <th className="py-2.5 whitespace-nowrap">Importe</th>
+                    <th className="py-2.5 whitespace-nowrap">Estado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-light text-text-primary">

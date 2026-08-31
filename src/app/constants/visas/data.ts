@@ -185,7 +185,7 @@ export const countryVisaData: Record<string, CountryVisaInfo> = {
         ],
         additionalInfo: [
             "La visa de turista estándar mexicana permite estancias continuas de hasta 180 días.",
-            "Poseer visa estadounidense o canadiense vigente exime del trámite de visa mexicana."
+            "Poseer visa estadounidense o canadiense vigente exime del proceso de visa mexicana."
         ],
         sources: [
             { label: "SRE México - Visas de Visitante", url: "https://www.gob.mx/sre" }
@@ -197,7 +197,7 @@ export const countryVisaData: Record<string, CountryVisaInfo> = {
         flag: "/images/flag_aus.png",
         flagEmoji: null,
         available: true,
-        heroDescription: "Guía completa para la solicitud de la Visa de Visitante a Australia (Subclass 600): trámite 100% digital vía ImmiAccount, solvencia y biométricos.",
+        heroDescription: "Guía completa para la solicitud de la Visa de Visitante a Australia (Subclass 600): proceso 100% digital vía ImmiAccount, solvencia y biométricos.",
         requiringCountries: [
             {
                 region: "Global",

@@ -301,24 +301,117 @@ export class AgentRepository {
       rate = rate * 100;
     }
 
+    const grossAmt = Number(commissionData.sale_amount || commissionData.gross_amount || 0);
+    const commAmt = Number(commissionData.commission_amount || (grossAmt * (rate / 100)));
+
+    let targetAgentId = commissionData.agent_id;
+    const isUuidCheck = (str: string) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+
+    const dbClientForLookup = supabaseAdmin || supabase;
+    let resolvedUuid: string | null = null;
+
+    if (targetAgentId && isUuidCheck(targetAgentId)) {
+      resolvedUuid = targetAgentId;
+    }
+
+    if (targetAgentId) {
+      // 1. Check agent_applications by id, application_id, user_id, agency_id, or email
+      const { data: appData } = await dbClientForLookup
+        .from("agent_applications")
+        .select("id, user_id, application_id, email, agency_id")
+        .or(`id.eq.${targetAgentId},application_id.eq.${targetAgentId},user_id.eq.${targetAgentId},agency_id.eq.${targetAgentId},email.eq.${targetAgentId}`)
+        .maybeSingle();
+
+      if (appData) {
+        if (appData.user_id && isUuidCheck(appData.user_id)) {
+          resolvedUuid = appData.user_id;
+        } else if (appData.agency_id && isUuidCheck(appData.agency_id)) {
+          resolvedUuid = appData.agency_id;
+        } else if (appData.id && isUuidCheck(appData.id)) {
+          resolvedUuid = appData.id;
+        } else if (appData.email) {
+          const { data: profByEmail } = await dbClientForLookup
+            .from("profiles")
+            .select("id")
+            .eq("email", appData.email)
+            .maybeSingle();
+          if (profByEmail?.id && isUuidCheck(profByEmail.id)) {
+            resolvedUuid = profByEmail.id;
+          }
+        }
+      }
+
+      // 2. Check profiles directly by id or email
+      if (!resolvedUuid) {
+        const { data: profData } = await dbClientForLookup
+          .from("profiles")
+          .select("id, email")
+          .or(`id.eq.${targetAgentId},email.eq.${targetAgentId}`)
+          .maybeSingle();
+
+        if (profData?.id && isUuidCheck(profData.id)) {
+          resolvedUuid = profData.id;
+        }
+      }
+
+      // 3. Check agency_referral_leads by agency_code, agency_id, or id
+      if (!resolvedUuid) {
+        const { data: leadData } = await dbClientForLookup
+          .from("agency_referral_leads")
+          .select("id, agency_id, agency_code")
+          .or(`agency_code.eq.${targetAgentId},agency_id.eq.${targetAgentId},id.eq.${targetAgentId}`)
+          .maybeSingle();
+
+        if (leadData?.agency_id && isUuidCheck(leadData.agency_id)) {
+          resolvedUuid = leadData.agency_id;
+        }
+      }
+    }
+
     const payload: Record<string, any> = {
-      agent_id: commissionData.agent_id,
+      agent_id: resolvedUuid,
       client_folio: folio,
       client_name: commissionData.client_name || "Cliente TodoVisa",
       service_type: serviceType,
-      gross_amount: Number(commissionData.sale_amount || commissionData.gross_amount || 0),
+      gross_amount: grossAmt,
       commission_rate: rate,
       status: commissionData.status || "pending",
       created_at: new Date().toISOString()
     };
 
     // Store rich metadata in notes column (PayPal Tx ID, Client Email, Rates breakdown, etc.)
-    if (commissionData.notes) {
-      payload.notes = typeof commissionData.notes === "object" ? JSON.stringify(commissionData.notes) : String(commissionData.notes);
+    const notesObj = typeof commissionData.notes === "object" && commissionData.notes !== null
+      ? { ...commissionData.notes }
+      : { raw_notes: String(commissionData.notes || "") };
+
+    notesObj.original_agent_id = commissionData.agent_id || "";
+    notesObj.agency_code = commissionData.agent_id || "";
+    if (resolvedUuid) {
+      notesObj.resolved_agent_id = resolvedUuid;
     }
 
+    payload.notes = JSON.stringify(notesObj);
+
     const dbClient = supabaseAdmin || supabase;
-    const { data, error } = await dbClient.from("agent_commissions").insert(payload).select();
+    let { data, error } = await dbClient.from("agent_commissions").insert({
+      ...payload,
+      commission_amount: commAmt
+    }).select();
+
+    // If error occurs on commission_amount (e.g. GENERATED ALWAYS column or schema mismatch), fallback without supplying commission_amount
+    if (error) {
+      console.warn("Attempting fallback insert into agent_commissions without commission_amount:", error.message);
+      const fallbackResult = await dbClient.from("agent_commissions").insert(payload).select();
+      if (!fallbackResult.error) {
+        data = fallbackResult.data;
+        error = null;
+      }
+    }
+
+    if (error) {
+      console.error("Final error in AgentRepository.createAgentCommission:", error);
+    }
+
     return { data, error };
   }
 

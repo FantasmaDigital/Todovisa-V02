@@ -399,7 +399,7 @@ export default function AgentApplyPage() {
                           <div className="flex items-center justify-between mb-3">
                             <span className="text-3xl">🏢</span>
                             <span className="bg-amber-100 text-amber-900 text-[11px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
-                              30% Referidos
+                              20% Referidos
                             </span>
                           </div>
                           <h3 className="font-bold text-text-primary text-base">Agencia de Viajes / Empresa B2B</h3>
@@ -436,11 +436,12 @@ export default function AgentApplyPage() {
                         <span className="w-5 h-5 rounded-full bg-brand-light flex items-center justify-center text-brand-primary text-xs font-bold flex-shrink-0 mt-0.5">✓</span>
                         <div>
                           <h4 className="text-sm font-bold text-text-primary">Ganancias Transparentes</h4>
-                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Comisiones claras (60% para Asesores, 30% para Agencias Referidoras). Sin sorpresas.</p>
+                          <p className="text-xs text-text-secondary mt-1 leading-relaxed">Comisiones claras (60% para Asesores, 20% para Agencias Referidoras). Sin sorpresas.</p>
                         </div>
                       </div>
                     </div>
                   </div>
+
                 </div>
               )}
 
@@ -529,7 +530,7 @@ export default function AgentApplyPage() {
                   <h3 className="text-lg font-bold text-text-primary border-b border-border-light pb-2">Perfil Profesional</h3>
 
                   <div>
-                    <label htmlFor="experienceYears" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Experiencia en Trámites Consulares</label>
+                    <label htmlFor="experienceYears" className="block text-xs font-bold text-text-secondary uppercase mb-2">Años de Experiencia en Procesos Consulares</label>
                     <select
                       name="experienceYears"
                       id="experienceYears"
@@ -1000,8 +1001,9 @@ export default function AgentApplyPage() {
                     <strong>Comisión Base para Asesores Independientes:</strong> El agente percibirá el <strong>60% del valor neto</strong> cobrado al cliente por la asesoría de visado.
                   </li>
                   <li>
-                    <strong>Comisión para Agencias B2B (Referidos):</strong> La agencia aliada percibirá el <strong>30% de comisión directa</strong> sobre todas las ventas generadas a través de su Enlace Exclusivo de Referido.
+                    <strong>Comisión para Agencias B2B (Referidos):</strong> La agencia aliada percibirá el <strong>20% de comisión directa</strong> sobre todas las ventas generadas a través de su Enlace Exclusivo de Referido.
                   </li>
+
                 </ul>
               </div>
 

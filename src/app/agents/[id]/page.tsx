@@ -447,10 +447,16 @@ export default function AgentProfilePage() {
             {/* Right Action/Checkout Sidebar */}
             <div className="lg:col-span-1 sticky top-28 bg-white border border-border-light rounded-lg p-6 space-y-5 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
               <div>
-                <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold block mb-1">Servicio Premium con Asesor</span>
-                <p className="text-2xl font-bold text-text-primary">$100.00 USD</p>
-                <p className="text-[10px] text-text-muted mt-1 leading-normal">Pago único por perfilamiento, formularios y simulacro de entrevista.</p>
+                <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold block mb-1">Servicio de Asesoría Personalizada</span>
+                <p className="text-2xl font-bold text-text-primary">$49.99 USD</p>
+                <p className="text-[10px] text-text-muted mt-1 leading-normal">
+                  Honorarios por perfilamiento, llenado de formulario DS-160 y simulacros de entrevista.
+                </p>
+                <p className="text-[10px] text-blue-900 font-medium mt-1.5 p-2 bg-blue-50/80 rounded border border-blue-200/60 leading-tight">
+                  ℹ️ <strong>Nota:</strong> No incluye la tasa MRV consular gubernamental ni aranceles de embajada.
+                </p>
               </div>
+
 
               <div className="border-t border-border-light pt-4 space-y-3.5">
                 <div className="flex items-start gap-2 text-xs">

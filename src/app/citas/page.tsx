@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { Header } from "../components/shared/Header";
 import { Footer } from "../components/shared/Footer";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/app/store/authStore";
 import supabase from "@/app/lib/supabase";
 import { AuthService } from "../service/AuthService";
@@ -77,6 +77,7 @@ function validate(data: FormData): Errors {
 const TODAY = new Date().toISOString().split("T")[0];
 
 function CitasPageContent() {
+  const router = useRouter();
   const headerRef = useRef(null);
   const proposalBannerRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -87,6 +88,13 @@ function CitasPageContent() {
   const targetProcessId = processIdFromUrl || user?.id || null;
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  // Automatically redirect to Home if unauthorized or no valid process
+  useEffect(() => {
+    if (isAuthorized === false) {
+      router.replace("/");
+    }
+  }, [isAuthorized, router]);
   const [targetProfileData, setTargetProfileData] = useState<any>(null);
 
   const [formData, setFormData] = useState<FormData>({
@@ -400,35 +408,9 @@ function CitasPageContent() {
 
   const selectedOffice = OFFICE_LOCATIONS.find((o) => o.id === formData.officeId);
 
-  // Render Authorization Restriction screen if invalid processId or unauthorized
+  // Redirect to home if invalid processId or unauthorized
   if (isAuthorized === false) {
-    return (
-      <div className="min-h-screen w-full flex flex-col bg-background-main">
-        <Header headerRef={headerRef} />
-        <main className="w-full max-w-xl mx-auto px-4 py-16 flex-1 flex flex-col items-center justify-center text-center">
-          <div className="bg-white border border-red-200 rounded-3xl p-8 shadow-xl space-y-5 animate-in fade-in zoom-in duration-200">
-            <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center text-3xl mx-auto border border-red-100">
-              🔒
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-slate-800 font-serif mb-2">Acceso Restringido al Trámite</h2>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                El agendamiento de citas está disponible únicamente para clientes con un proceso consular activo en su cuenta. No tienes permisos para consultar o modificar este expediente.
-              </p>
-            </div>
-            <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
-              <Link
-                href="/profile"
-                className="px-6 py-3 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-xl shadow-md transition-all no-underline"
-              >
-                👤 Ir a Mi Panel de Usuario
-              </Link>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -442,7 +424,7 @@ function CitasPageContent() {
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div>
               <p className="text-xs font-bold tracking-[0.2em] uppercase text-white/70 mb-2">
-                Trámite ID: {targetProcessId ? targetProcessId.substring(0, 8) : "Activo"} • Asesoría Virtual
+                Proceso ID: {targetProcessId ? targetProcessId.substring(0, 8) : "Activo"} • Asesoría Virtual
               </p>
               <h1 className="text-3xl md:text-5xl text-white leading-tight mb-2 font-semibold font-serif italic">
                 Agenda tu asesoría virtual
@@ -477,7 +459,7 @@ function CitasPageContent() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-white p-4 rounded-xl border border-emerald-200">
                   <div>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Trámite</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Proceso</span>
                     <span className="font-semibold text-slate-800 block mt-0.5">{appointmentRequest.appointment_type}</span>
                   </div>
                   <div>
@@ -671,7 +653,7 @@ function CitasPageContent() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                 </svg>
                 <p className="text-[11px] text-text-secondary leading-relaxed">
-                  Trámite auditado para el expediente ID <strong className="text-text-primary">{targetProcessId?.substring(0, 8)}</strong> con sincronización en tiempo real.
+                  Proceso auditado para el expediente ID <strong className="text-text-primary">{targetProcessId?.substring(0, 8)}</strong> con sincronización en tiempo real.
                 </p>
               </div>
             </aside>

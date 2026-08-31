@@ -156,7 +156,7 @@ export default function MiEquipoPage() {
         <div className="mb-8 pb-4 border-b border-border-light text-left">
           <h1 className="text-2xl font-bold text-text-primary">Programa de Recomendaciones y Referidos</h1>
           <p className="text-xs text-text-secondary mt-1">
-            La modalidad de adición de sub-agentes ha sido actualizada. Las agencias asociadas generan y comparten su **Link de Referidos** para recibir el **30% de comisión por cada compra**.
+            La modalidad de adición de sub-agentes ha sido actualizada. Las agencias asociadas generan y comparten su **Link de Referidos** para recibir el **20% de comisión por cada compra**.
           </p>
         </div>
 
@@ -167,7 +167,7 @@ export default function MiEquipoPage() {
             <div>
               <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">Actualización de Funcionalidad de Agencia</h3>
               <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                Las agencias registradas en TodoVisa ya no agregan agentes directamente a su equipo. En su lugar, cada agencia cuenta con un <strong>enlace de referidos exclusivo</strong>. Al compartir este enlace con tus clientes finales, obtendrás el <strong>30% de la compra</strong> de cada proceso de visado realizado con TodoVisa (70% para TodoVisa).
+                Las agencias registradas en TodoVisa ya no agregan agentes directamente a su equipo. En su lugar, cada agencia cuenta con un <strong>enlace de referidos exclusivo</strong>. Al compartir este enlace con tus clientes finales, obtendrás el <strong>20% de la compra</strong> de cada proceso de visado realizado con TodoVisa (80% para TodoVisa).
               </p>
             </div>
           </div>
@@ -177,23 +177,25 @@ export default function MiEquipoPage() {
         <div className="max-w-2xl border border-border-light rounded-sm p-6 bg-white space-y-4 text-left shadow-xs">
           <div>
             <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-1">Tu Link de Referido de Agencia</h3>
-            <p className="text-xs text-text-secondary">Comparte este enlace con tus clientes para atribuir automáticamente la comisión del 30% a tu cuenta.</p>
+            <p className="text-xs text-text-secondary">Comparte este enlace con tus clientes para atribuir automáticamente la comisión del 20% a tu cuenta.</p>
           </div>
+
 
           <div className="flex items-center gap-2 pt-2">
             <input
               type="text"
               readOnly
-              value={`${typeof window !== "undefined" ? window.location.origin : "https://todovisa.com"}?ref=${user.id}`}
+              value={`${typeof window !== "undefined" ? `${window.location.origin}/referral` : "https://todovisa.com/referral"}?ref=${user.id}`}
               className="flex-1 px-3 py-2 bg-background-main border border-border-light rounded-sm text-xs font-mono text-text-primary select-all focus:outline-none"
             />
             <button
               onClick={() => {
                 if (typeof window !== "undefined") {
-                  navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
+                  navigator.clipboard.writeText(`${window.location.origin}/referral?ref=${user.id}`);
                   showToast("¡Link de referido copiado al portapapeles!", "success");
                 }
               }}
+
               className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm transition-colors cursor-pointer border-none flex items-center gap-1.5"
             >
               📋 Copiar Link

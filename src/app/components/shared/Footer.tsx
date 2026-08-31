@@ -5,7 +5,7 @@ import Link from "next/link";
 
 const footerLinks = {
   Servicios: [
-    { label: "Asesoría Virtual", href: "/citas" },
+    { label: "Contratar Asesor", href: "/agents" },
     { label: "Evaluación VIPRO", href: "/vipro-form" },
     { label: "Solicitar acompañamiento para mi Visa", href: "/visas" },
     { label: "Cómo Funciona", href: "/#como-funciona" },
@@ -17,6 +17,7 @@ const footerLinks = {
     { label: "Preguntas Frecuentes", href: "/sobre-todovisa" },
   ],
   Legal: [
+    { label: "Términos y Condiciones VIPRO", href: "/vipro-form/terminos" },
     { label: "Política de Privacidad", href: "/about-us#privacidad" },
     { label: "Términos de Uso", href: "/about-us#terminos" },
     { label: "Aviso de Cookies", href: "/about-us#cookies" },

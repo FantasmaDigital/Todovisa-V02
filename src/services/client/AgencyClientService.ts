@@ -1,4 +1,5 @@
 import { AuthService } from "@/app/service/AuthService";
+import { getAuthHeaders } from "./AuthClientService";
 
 export class AgencyClientService {
   static async validateAgencyCode(code: string): Promise<{
@@ -122,4 +123,88 @@ export class AgencyClientService {
       }
     }
   }
+
+  /**
+   * Envía el formulario de contacto cuando el cliente ingresa mediante un código de referido de empresa.
+   * Al ser procesado, un asesor propio de TodoVisa contactará al cliente para finalizar el proceso.
+   */
+  static async submitReferralLead(data: {
+    client_name: string;
+    client_email?: string;
+    client_phone?: string;
+    visa_type?: string;
+    destination_country?: string;
+    agency_code: string;
+    notes?: string;
+  }): Promise<{
+    success: boolean;
+    message?: string;
+    agencyName?: string;
+    advisorNote?: string;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch("/api/agency/referral-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      return result;
+    } catch (err: any) {
+      console.error("Error enviando lead de referido de empresa:", err);
+      return {
+        success: false,
+        error: "Ocurrió un error al enviar tus datos. Inténtalo nuevamente o contáctanos por WhatsApp.",
+      };
+    }
+  }
+
+  static async getReferralLeads(): Promise<any[]> {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/agency/referral-lead?_t=${Date.now()}`, {
+        method: "GET",
+        headers: {
+          ...headers,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+        },
+        cache: "no-store",
+      });
+      const data = await res.json();
+      return data.leads || [];
+    } catch (err: any) {
+      console.error("Error obteniendo leads de referidos:", err);
+      return [];
+    }
+  }
+
+  static async updateReferralLead(payload: {
+    id: string;
+    status?: string;
+    commission_assigned?: boolean;
+    notes?: string;
+  }): Promise<any> {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/agency/referral-lead", {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+        },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      console.error("Error actualizando lead de referido:", err);
+      return { success: false, error: err.message };
+    }
+  }
 }
+
+

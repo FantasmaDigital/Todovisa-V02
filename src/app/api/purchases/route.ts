@@ -2,6 +2,8 @@ import { AgentRepository } from "@/lib/repositories/agent.repository";
 import { NextResponse } from "next/server";
 import supabaseAdmin from "@/lib/supabaseAdmin";
 import supabase from "@/app/lib/supabase";
+import { sendEmail } from "@/lib/emailService";
+import { createViproPurchaseEmail } from "@/lib/emailTemplates";
 
 export async function GET(request: Request) {
   try {
@@ -32,6 +34,20 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    // Trigger VIPRO purchase confirmation email if product_type is vipro
+    if (purchaseData.product_type === 'vipro' && (purchaseData.email || purchaseData.user_email)) {
+      const emailToUse = purchaseData.email || purchaseData.user_email;
+      const clientName = purchaseData.user_name || purchaseData.first_name || "Cliente";
+      const referenceId = purchaseData.reference_id || `TV-VIPRO-${Date.now().toString().slice(-6)}`;
+      const amount = Number(purchaseData.amount || 19.99);
+
+      sendEmail({
+        to: emailToUse,
+        subject: "🎉 Confirmación de Compra - Evaluación VIPRO TodoVisa",
+        html: createViproPurchaseEmail(clientName, referenceId, amount),
+      }).catch((e) => console.error("Error sending VIPRO purchase email:", e));
     }
 
     return NextResponse.json({ success: true, data }, { status: 200 });

@@ -92,28 +92,32 @@ export default function SignUpForm() {
             });
 
 
-            if (result.data?.user) {
-                const userObj = result.data.user;
-                const metadata = userObj.user_metadata || {};
-
-                // Sync/merge local agency referral code to Supabase metadata upon signup
-                AgencyClientService.syncReferralOnLogin(userObj);
-
-                setUser({
-                    id: userObj.id,
-                    email: userObj.email || '',
-                    firstName: metadata.first_name || '',
-                    lastName: metadata.last_name || '',
-                    phone: metadata.phone || '',
-                    country: metadata.country || '',
-                    viproScore: metadata.vipro_score || null,
-                    viproCompleted: metadata.vipro_completed || false,
-                    viproDestination: metadata.vipro_destination || null,
-                    hasPaidVipro: Boolean(metadata.has_paid_vipro),
-                    hasPaidAdvisor: metadata.has_paid_advisor || false,
-                    assignedAgentId: metadata.assigned_agent_id || null
-                });
+            if (result.error || !result.data?.user) {
+                setAuthError(result.error || 'Error al crear la cuenta. Intente nuevamente.');
+                setIsLoading(false);
+                return;
             }
+
+            const userObj = result.data.user;
+            const metadata = userObj.user_metadata || {};
+
+            // Sync/merge local agency referral code to Supabase metadata upon signup
+            AgencyClientService.syncReferralOnLogin(userObj);
+
+            setUser({
+                id: userObj.id,
+                email: userObj.email || '',
+                firstName: metadata.first_name || '',
+                lastName: metadata.last_name || '',
+                phone: metadata.phone || '',
+                country: metadata.country || '',
+                viproScore: metadata.vipro_score || null,
+                viproCompleted: metadata.vipro_completed || false,
+                viproDestination: metadata.vipro_destination || null,
+                hasPaidVipro: Boolean(metadata.has_paid_vipro),
+                hasPaidAdvisor: metadata.has_paid_advisor || false,
+                assignedAgentId: metadata.assigned_agent_id || null
+            });
 
             // Clean up guest VIPRO localStorage keys on signup
             if (typeof window !== "undefined") {
