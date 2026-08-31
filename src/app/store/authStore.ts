@@ -9,12 +9,12 @@ export interface UserData {
   phone: string;
   country: string;
   hasPaidAdvisor?: boolean;
-  hasPaidVipro?: boolean;
   assignedAgentId?: string | null;
-  hasCompletedVipro?: boolean;
+  assignedAgencyName?: string | null;
   viproScore?: number | null;
   viproCompleted?: boolean;
   viproDestination?: string | null;
+  hasPaidVipro?: boolean;
   photoUrl?: string | null;
   avatarChangesThisMonth?: number;
   lastAvatarChangeMonth?: string;
@@ -25,6 +25,11 @@ export interface UserData {
   ds160HasAssets?: boolean;
   ds160Confirmed?: boolean;
   expedienteStatus?: 'draft' | 'submitted' | 'approved';
+  role?: string;
+  hasCompletedVipro?: boolean;
+  clientDocs?: Record<string, string>;
+  documentReviews?: Record<string, any>;
+  appointmentRequest?: any;
 }
 
 interface AuthState {
@@ -38,18 +43,26 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       setUser: (user) => set({ user }),
-      clearUser: () => set({ user: null }),
+      clearUser: () => {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("vipro_completed");
+          localStorage.removeItem("vipro_score");
+          localStorage.removeItem("vipro_destination");
+          localStorage.removeItem("vipro_evaluation");
+          localStorage.removeItem("vipro_answers");
+          localStorage.removeItem("vipro_answers_US");
+          localStorage.removeItem("vipro_answers_CA");
+          localStorage.removeItem("vipro_answers_AU");
+          localStorage.removeItem("vipro_answers_UK");
+          localStorage.removeItem("vipro_saved_progress");
+          localStorage.removeItem("user_agent_application");
+          localStorage.removeItem("todovisa_guest_application");
+        }
+        set({ user: null });
+      },
     }),
     {
       name: 'auth-storage', // Nombre para el localStorage
-      partialize: (state) => ({
-        user: state.user
-          ? {
-              ...state.user,
-              photoUrl: null, // Exclude heavy image from localStorage to prevent QuotaExceededError
-            }
-          : null,
-      }),
     }
   )
 );

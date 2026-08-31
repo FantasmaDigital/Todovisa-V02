@@ -1,45 +1,59 @@
-import { NextResponse } from 'next/server';
-import supabase from '@/app/lib/supabase';
+import { AuthRepository } from "@/lib/repositories/auth.repository";
+import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-    let email = '';
-    try {
-        const body = await request.json();
-        email = body.email || body.Email || '';
-        const password = body.password || body.Password || '';
+  try {
+    const { email, password } = await request.json();
 
-        const { data, error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
+    const sanitizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    const sanitizedPassword = typeof password === "string" ? password : "";
 
-        if (error) {
-            return NextResponse.json({ error: error.message }, { status: 401 });
-        }
-
-        return NextResponse.json({ data }, { status: 200 });
-    } catch (err: unknown) {
-        console.error("Sign-in server catch error:", err);
-        const errMessage = err instanceof Error ? err.message : String(err);
-        const isOffline = errMessage.includes('fetch failed') || errMessage.includes('ENOTFOUND') || errMessage.includes('fetch');
-        if (isOffline) {
-            console.log("⚠️ Conexión de red no disponible en Supabase. Iniciando sesión en MODO DEMO local.");
-            return NextResponse.json({
-                data: {
-                    user: {
-                        id: "demo-user-123",
-                        email: email,
-                        user_metadata: {
-                            first_name: "Juan (Modo Demo)",
-                            last_name: "Pérez",
-                            phone: "+503 7000 0000",
-                            country: "El Salvador"
-                        }
-                    }
-                },
-                is_demo: true
-            }, { status: 200 });
-        }
-        return NextResponse.json({ error: errMessage || 'Error interno del servidor' }, { status: 500 });
+    if (!sanitizedEmail || !sanitizedPassword) {
+      return NextResponse.json({ error: "Email y contraseña son requeridos" }, { status: 400 });
     }
+
+    const { data, error } = await AuthRepository.signIn(sanitizedEmail, sanitizedPassword);
+
+    if (error) {
+      // Prevención de enumeración de usuarios: mensaje de error genérico para autenticación fallida
+      return NextResponse.json({ error: "Credenciales de acceso no válidas" }, { status: 401 });
+    }
+
+    console.log("ℹ️ [Server Auth] Usuario inició sesión exitosamente (Email/Password):", {
+      id: data?.user?.id,
+      email: data?.user?.email,
+      metadata: data?.user?.user_metadata,
+    });
+
+    return NextResponse.json({ data }, { status: 200 });
+  } catch (err: any) {
+    console.error("SignIn catch error:", err);
+    const isOffline =
+      err.message?.includes("fetch failed") ||
+      err.message?.includes("ENOTFOUND") ||
+      err.message?.includes("fetch");
+    if (isOffline) {
+      console.log("⚠️ Conexión de red no disponible en Supabase. Iniciando sesión en MODO DEMO local.");
+      return NextResponse.json(
+        {
+          data: {
+            user: {
+              id: "demo-user-123",
+              email: "demo@todovisa.com",
+              user_metadata: {
+                first_name: "Juan (Modo Demo)",
+                last_name: "Pérez",
+                phone: "+503 7000 0000",
+                country: "El Salvador",
+              },
+            },
+            session: { access_token: "demo-token" },
+          },
+          is_demo: true,
+        },
+        { status: 200 }
+      );
+    }
+    return NextResponse.json({ error: err.message || "Error interno del servidor" }, { status: 500 });
+  }
 }

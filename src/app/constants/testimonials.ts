@@ -6,7 +6,7 @@ export type Testimonials = {
 
 export const testimonials: Testimonials[] = [
     {
-        quote: "El trámite de mi visa americana se sentía abrumador al inicio, pero el equipo de TODOVISA me dio la claridad y la confianza que necesitaba.",
+        quote: "El proceso de mi visa americana se sentía abrumador al inicio, pero el equipo de TODOVISA me dio la claridad y la confianza que necesitaba.",
         author: "Sofía Hernández",
         role: "Cliente con Visa de Turismo Aprobada"
     },

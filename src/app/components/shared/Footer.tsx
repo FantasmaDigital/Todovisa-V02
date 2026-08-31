@@ -1,24 +1,26 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 const footerLinks = {
   Servicios: [
-    { label: "Asesoría Virtual", href: "#asesoria-virtual" },
-    { label: "Evaluación VIPRO", href: "#evaluacion-vipro" },
-    { label: "Cita Presencial", href: "#cita-presencial" },
-    { label: "Cómo Funciona", href: "#como-funciona" },
+    { label: "Contratar Asesor", href: "/agents" },
+    { label: "Evaluación VIPRO", href: "/vipro-form" },
+    { label: "Solicitar acompañamiento para mi Visa", href: "/visas" },
+    { label: "Cómo Funciona", href: "/#como-funciona" },
   ],
   Compañía: [
-    { label: "Sobre Nosotros", href: "#" },
-    { label: "Red de Agentes", href: "#" },
-    { label: "Preguntas Frecuentes", href: "#" },
-    { label: "Blog de Viajes", href: "#" },
+    { label: "Sobre Nosotros", href: "/about-us" },
+    { label: "Red de Asesores", href: "/agents" },
+    { label: "Únete a la Red", href: "/agents/apply" },
+    { label: "Preguntas Frecuentes", href: "/sobre-todovisa" },
   ],
   Legal: [
-    { label: "Política de Privacidad", href: "#" },
-    { label: "Términos de Uso", href: "#" },
-    { label: "Aviso de Cookies", href: "#" },
+    { label: "Términos y Condiciones VIPRO", href: "/vipro-form/terminos" },
+    { label: "Política de Privacidad", href: "/about-us#privacidad" },
+    { label: "Términos de Uso", href: "/about-us#terminos" },
+    { label: "Aviso de Cookies", href: "/about-us#cookies" },
   ],
 };
 
@@ -26,7 +28,7 @@ export function Footer() {
   return (
     <footer className="w-full bg-[#0A2540] text-white">
       {/* Top bar */}
-      <div className="w-[88%] max-w-7xl mx-auto py-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 border-b border-white/10">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 border-b border-white/10">
 
         {/* Brand column */}
         <div className="lg:col-span-2 flex flex-col gap-5">
@@ -75,6 +77,8 @@ export function Footer() {
                 key={label}
                 href={href}
                 aria-label={label}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-9 h-9 rounded-full bg-white/10 hover:bg-brand-primary flex items-center justify-center text-white/70 hover:text-white transition-all duration-200"
               >
                 {icon}
@@ -90,12 +94,12 @@ export function Footer() {
             <ul className="flex flex-col gap-3">
               {links.map(({ label, href }) => (
                 <li key={label}>
-                  <a
+                  <Link
                     href={href}
                     className="text-sm text-white/60 hover:text-white transition-colors duration-200"
                   >
                     {label}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -104,7 +108,7 @@ export function Footer() {
       </div>
 
       {/* Bottom bar */}
-      <div className="w-[88%] max-w-7xl mx-auto py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/30">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/30">
         <span>© {new Date().getFullYear()} TODOVISA. Todos los derechos reservados.</span>
       </div>
     </footer>

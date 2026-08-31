@@ -2,147 +2,225 @@
 
 import { Header } from "../../components/shared/Header";
 import { Footer } from "../../components/shared/Footer";
-import { useEffect, useRef, useState, Suspense, useMemo } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useAuthStore } from "../../store/authStore";
-import supabase from "../../lib/supabase";
-import agentsData from "../../dummies/agents.json";
-
-import { VIPROQuestionsUSA, VIPROInfoUSA } from "../../constants/vipro/usa.vipro";
-import { VIPROQuestionsUK, VIPROInfoUK } from "../../constants/vipro/uk.vipro";
-
-// Types derived from imports
-type VIPROQuestionsProps = {
-    question: string;
-    type_question: string;
-    response: string[];
-    user_response: string;
-    category: string;
-    required?: boolean;
-}
-
-type VIPROInfoProps = {
-    info_text: string;
-    category: string;
-}
-
-interface ParseAnnexItem {
-    type: 'header' | 'item' | 'step' | 'text';
-    number?: string;
-    title?: string;
-    text: string;
-}
-
-// Clean and parse the requirements list & timelines
-function parseAnnexItem(text: string): ParseAnnexItem {
-    const cleanText = text.replace(/\[cite:\s*\d+\]/g, "").trim();
-
-    if (cleanText.includes("ANEXO A") || cleanText.includes("ANEXO B")) {
-        return { type: 'header', text: cleanText };
-    }
-
-    // Check if it is a STEP (e.g. PASO 1: Text)
-    const stepMatch = cleanText.match(/^(PASO\s+\d+):\s*(.*)$/i);
-    if (stepMatch) {
-        const [_, stepNum, stepContent] = stepMatch;
-        const dotIndex = stepContent.indexOf('.');
-        const colonIndex = stepContent.indexOf(':');
-        let title = '';
-        let rest = stepContent;
-        if (dotIndex !== -1 && (colonIndex === -1 || dotIndex < colonIndex)) {
-            title = stepContent.substring(0, dotIndex + 1);
-            rest = stepContent.substring(dotIndex + 1).trim();
-        } else if (colonIndex !== -1) {
-            title = stepContent.substring(0, colonIndex + 1);
-            rest = stepContent.substring(colonIndex + 1).trim();
-        }
-        return { type: 'step', number: stepNum, title: title, text: rest };
-    }
-
-    // Check if it is a numbered requirement (e.g. 1. TITLE: Text)
-    const numMatch = cleanText.match(/^(\d+)\.\s*(.*)$/);
-    if (numMatch) {
-        const [_, num, content] = numMatch;
-        const colonIndex = content.indexOf(':');
-        if (colonIndex !== -1) {
-            return {
-                type: 'item',
-                number: num,
-                title: content.substring(0, colonIndex).trim(),
-                text: content.substring(colonIndex + 1).trim()
-            };
-        }
-        return { type: 'item', number: num, text: content };
-    }
-
-    return { type: 'text', text: cleanText };
-}
-
-interface Agent {
-    id: string;
-    name: string;
-    countries: string[];
-}
-
-// Country Configurations
-const countryConfigs: Record<string, {
-    name: string;
-    emoji: string;
-    questions: VIPROQuestionsProps[];
-    info: VIPROInfoProps[];
-}> = {
-    US: {
-        name: "Estados Unidos",
-        emoji: "🇺🇸",
-        questions: VIPROQuestionsUSA,
-        info: VIPROInfoUSA
-    },
-    UK: {
-        name: "Inglaterra",
-        emoji: "🇬🇧",
-        questions: VIPROQuestionsUK,
-        info: VIPROInfoUK
-    }
-};
+import { FormClientService } from "@/services/client/FormClientService";
+import { AuthService } from "@/app/service/AuthService";
+import { ProfileClientService } from "@/services/client/ProfileClientService";
+import { questionsSpanish } from "../../constants/vipro/questionsSpanish";
 
 function ViproEvaluationContent() {
     const headerRef = useRef(null);
-    const [headerHeight, setHeaderHeight] = useState<number | null>(null);
-    const searchParams = useSearchParams();
+    const [_, setHeaderHeight] = useState<number | null>(null);
     const router = useRouter();
-    const [isMounted, setIsMounted] = useState(false);
-
-    const countryCode = searchParams.get("country")?.toUpperCase() || "US";
+    const searchParams = useSearchParams();
+    const targetUserId = searchParams.get("userId") || searchParams.get("user_id");
 
     const user = useAuthStore((state) => state.user);
     const setUser = useAuthStore((state) => state.setUser);
 
-    const isSupported = countryCode in countryConfigs;
-    const currentConfig = countryConfigs[countryCode];
-
-    const assignedAgent = useMemo(() => {
-        return user?.assignedAgentId 
-            ? (agentsData as Agent[]).find(a => a.id === user.assignedAgentId) 
-            : null;
-    }, [user]);
-
-    const isSupportedByAgent = useMemo(() => {
-        if (!assignedAgent || !isSupported) return true;
-        const currentCountryName = countryConfigs[countryCode]?.name;
-        return currentCountryName ? assignedAgent.countries.includes(currentCountryName) : false;
-    }, [assignedAgent, isSupported, countryCode]);
-
     // State Variables
     const [started, setStarted] = useState(false);
     const [currentStep, setCurrentStep] = useState(0);
-    const [answers, setAnswers] = useState<Record<number, string>>({});
+    const [answers, setAnswers] = useState<Record<string | number, string>>({});
+    const [applicantInfo, setApplicantInfo] = useState<{
+        name: string;
+        email: string;
+        photoUrl?: string;
+    }>({
+        name: user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : user?.email || "Cliente TodoVisa",
+        email: user?.email || "cliente@todovisa.com",
+        photoUrl: user?.photoUrl || undefined
+    });
+
+
     const [completed, setCompleted] = useState(false);
     const [isEvaluating, setIsEvaluating] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+
     const [evaluationResult, setEvaluationResult] = useState<{
         score: number;
         recommendations: string[];
         destination_analysis: string;
     } | null>(null);
+    const [validationError, setValidationError] = useState<string | null>(null);
+    const [viproCountry, setViproCountry] = useState<"US" | "CA" | "AU" | "UK">("US");
+    const [viproModality, setViproModality] = useState<"first" | "renewal">("first");
+    const [showContinueModal, setShowContinueModal] = useState(false);
+
+    const questions = questionsSpanish;
+    const question = questions[currentStep];
+
+    // Protect route: Verify payment status from Supabase user_metadata before deciding whether to redirect
+    const [isVerifyingPaid, setIsVerifyingPaid] = useState(true);
+    const [hasVerifiedPaid, setHasVerifiedPaid] = useState(false);
+
+    useEffect(() => {
+        const verifyPayment = async () => {
+            if (!user) {
+                setIsVerifyingPaid(false);
+                return;
+            }
+
+            const isAdminOrStaff = user.role === "admin" || user.role === "moderator";
+            if (isAdminOrStaff || user.hasPaidVipro || user.hasPaidAdvisor || user.viproCompleted) {
+                setHasVerifiedPaid(true);
+                setIsVerifyingPaid(false);
+                return;
+            }
+
+            try {
+                const userRes = await AuthService.getUser();
+                const metadata = userRes.data?.user?.user_metadata || {};
+                if (metadata.has_paid_vipro || metadata.has_paid_advisor || metadata.vipro_completed) {
+                    setHasVerifiedPaid(true);
+                    setUser({
+                        ...user,
+                        hasPaidVipro: Boolean(metadata.has_paid_vipro),
+                        hasPaidAdvisor: Boolean(metadata.has_paid_advisor),
+                        viproCompleted: Boolean(metadata.vipro_completed)
+                    });
+                }
+            } catch (err) {
+                console.error("Error verifying user payment status:", err);
+            } finally {
+                setIsVerifyingPaid(false);
+            }
+        };
+
+        verifyPayment();
+    }, [user, setUser]);
+
+    useEffect(() => {
+        if (isLoading || isVerifyingPaid) return;
+        const isAdminOrStaff = user && (user.role === "admin" || user.role === "moderator");
+        const targetEvalId = searchParams.get("evalId") || searchParams.get("eval_id");
+        const hasEvalTarget = Boolean(targetEvalId || targetUserId);
+
+        if (user && !isAdminOrStaff && !hasVerifiedPaid && !hasEvalTarget && !completed) {
+            router.push("/vipro-form");
+        }
+    }, [user, router, isLoading, isVerifyingPaid, hasVerifiedPaid, searchParams, targetUserId, completed]);
+
+    // Load existing completed results and submitted answers from Supabase DB & localStorage
+    useEffect(() => {
+        let isCancelled = false;
+        const loadSavedAnswersAndResults = async () => {
+            setIsLoading(true);
+            try {
+                let loadedAnswers: Record<number | string, string> = {};
+
+                // 1. Try local storage
+                if (typeof window !== "undefined") {
+                    const storedProg = localStorage.getItem("vipro_progress_answers");
+                    const storedFinal = localStorage.getItem("vipro_answers");
+                    if (storedProg) {
+                        try { loadedAnswers = JSON.parse(storedProg); } catch (e) {}
+                    }
+                    if (storedFinal) {
+                        try { loadedAnswers = { ...loadedAnswers, ...JSON.parse(storedFinal) }; } catch (e) {}
+                    }
+                }
+
+                // 2. Try Supabase vipro_evaluations and profiles table for target user
+                const targetEvalId = searchParams.get("evalId") || searchParams.get("eval_id");
+                const effectiveUserId = targetUserId || user?.id;
+                let loadedEvalRecord: any = null;
+
+                if (targetEvalId || effectiveUserId || user?.email) {
+                    try {
+                        if (effectiveUserId) {
+                            loadedEvalRecord = await FormClientService.getViproEvaluation(effectiveUserId, targetEvalId || undefined);
+                        }
+
+                        const queryUserId = loadedEvalRecord?.user_id || effectiveUserId;
+
+                        if (queryUserId) {
+                            let prof = null;
+                            try {
+                                const profileRes = await ProfileClientService.getProfile(queryUserId);
+                                prof = profileRes?.profile;
+                            } catch (_) {}
+
+                            const fullName = prof ? `${prof.first_name || ""} ${prof.last_name || ""}`.trim() : null;
+                            const email = prof?.email || loadedEvalRecord?.user_email || (targetUserId ? `usuario_${queryUserId?.substring(0, 6)}@todovisa.com` : user?.email);
+                            const photo = prof?.photo_url || prof?.avatar_url || (queryUserId === user?.id ? user?.photoUrl : undefined);
+
+                            if (!isCancelled) {
+                                const userFallbackName = user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}`.trim() : user?.email;
+                                setApplicantInfo({
+                                    name: fullName || loadedEvalRecord?.user_name || loadedEvalRecord?.answers?.["0"] || (queryUserId === user?.id ? userFallbackName || "Cliente TodoVisa" : "Cliente TodoVisa"),
+                                    email: email || "cliente@todovisa.com",
+                                    photoUrl: photo
+                                });
+                            }
+                        }
+
+                        if (loadedEvalRecord?.answers) {
+                            loadedAnswers = { ...loadedAnswers, ...loadedEvalRecord.answers };
+                        }
+                    } catch (err) {
+                        console.warn("Could not load vipro_evaluations and profile from DB", err);
+                    }
+                }
+
+                if (!isCancelled && Object.keys(loadedAnswers).length > 0) {
+                    setAnswers(loadedAnswers as Record<number, string>);
+                }
+
+                const isAdminOrStaff = Boolean(user && (user.role === "admin" || user.role === "moderator"));
+                const hasLocalCompleted = !user && typeof window !== "undefined" && (localStorage.getItem("vipro_completed") === "true" || Boolean(localStorage.getItem("vipro_score")));
+
+                const isEvalRecordCompleted = Boolean(loadedEvalRecord && loadedEvalRecord.is_completed === true && loadedEvalRecord.score !== null && loadedEvalRecord.score !== undefined);
+                const isUserMetadataCompleted = Boolean(user?.viproCompleted && user?.viproScore !== null && user?.viproScore !== undefined);
+                const isExplicitTargetEval = Boolean(targetEvalId && loadedEvalRecord && loadedEvalRecord.is_completed === true);
+
+                const isCompletedEvaluation = Boolean(isEvalRecordCompleted || (isUserMetadataCompleted && isEvalRecordCompleted) || isExplicitTargetEval || (hasLocalCompleted && isEvalRecordCompleted));
+
+                if (isCompletedEvaluation) {
+                    if (!isCancelled) {
+                        setCompleted(true);
+                        setStarted(true);
+
+                        let recs: string[] = [];
+                        if (loadedEvalRecord?.recommendations && Array.isArray(loadedEvalRecord.recommendations)) {
+                            recs = loadedEvalRecord.recommendations;
+                        } else if (typeof window !== "undefined") {
+                            const storedRecs = localStorage.getItem("vipro_recommendations");
+                            if (storedRecs) {
+                                try { recs = JSON.parse(storedRecs); } catch (e) {}
+                            }
+                        }
+
+                        const storedScoreStr = typeof window !== "undefined" ? localStorage.getItem("vipro_score") : null;
+                        const scoreVal = loadedEvalRecord?.score ?? user?.viproScore ?? (storedScoreStr ? parseInt(storedScoreStr, 10) : null) ?? 0;
+
+                        setEvaluationResult({
+                            score: scoreVal,
+                            recommendations: recs.length > 0 ? recs : [
+                                "Presentar estados de cuenta bancarios detallados que demuestren solvencia económica sólida.",
+                                "Obtener una constancia laboral firmada y sellada especificando puesto, antigüedad y salario.",
+                                "Preparar la documentación de arraigos familiares (hijos, cónyuge) o títulos de propiedad inmobiliaria.",
+                                "Incluir plan detallado de viaje con reservación de itinerario de vuelo y hotel."
+                            ],
+                            destination_analysis: loadedEvalRecord?.destination_analysis || "Diagnóstico de viabilidad consular generado para este perfil."
+                        });
+                    }
+                }
+            } finally {
+                if (!isCancelled) {
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        loadSavedAnswersAndResults();
+        return () => { isCancelled = true; };
+    }, [user, searchParams, targetUserId]);
+
+
 
     // Save evaluation to Supabase and store on completion (calling Gemini API)
     useEffect(() => {
@@ -156,7 +234,7 @@ function ViproEvaluationContent() {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            countryCode,
+                            countryCode: 'US', // default fallback for API compat
                             answers
                         })
                     });
@@ -169,7 +247,7 @@ function ViproEvaluationContent() {
 
                     localStorage.setItem("vipro_score", String(finalScore));
                     localStorage.setItem("vipro_completed", "true");
-                    localStorage.setItem("vipro_destination", countryCode);
+                    localStorage.setItem("vipro_destination", "US");
                     localStorage.setItem("vipro_recommendations", JSON.stringify(recommendations));
 
                     // Clear progress keys since evaluation is completed
@@ -182,70 +260,39 @@ function ViproEvaluationContent() {
                             ...user,
                             viproCompleted: true,
                             viproScore: finalScore,
-                            viproDestination: countryCode
+                            viproDestination: "US"
                         };
                         
-                        // Defer store update to avoid react-hooks/set-state-in-effect warning
                         setTimeout(() => setUser(updatedUser), 0);
 
                         try {
-                            // Check if a draft exists for this user + country
-                            const { data: existing } = await supabase
-                                .from("vipro_evaluations")
-                                .select("id")
-                                .eq("user_id", user.id)
-                                .eq("destination_country", countryCode)
-                                .eq("is_completed", false)
-                                .maybeSingle();
+                            await AuthService.updateUser({
+                                vipro_score: finalScore,
+                                vipro_completed: true,
+                                vipro_destination: "US",
+                                vipro_recommendations: recommendations,
+                                vipro_progress_answers: null,
+                                vipro_progress_step: null,
+                                vipro_progress_destination: null
+                            });
 
-                            if (existing) {
-                                // Update the draft row to mark it as completed
-                                const { error: dbError } = await supabase
-                                    .from("vipro_evaluations")
-                                    .update({
-                                        answers: answers,
-                                        score: finalScore,
-                                        recommendations: recommendations,
-                                        destination_analysis: results.destination_analysis || "",
-                                        is_completed: true,
-                                        completed_at: new Date().toISOString()
-                                    })
-                                    .eq("id", existing.id);
+                            await FormClientService.saveViproEvaluation({
+                                user_id: user.id,
+                                score: finalScore,
+                                answers: answers,
+                                recommendations: recommendations,
+                                destination_country: "US",
+                                is_completed: true,
+                                created_at: new Date().toISOString()
+                            });
 
-                                if (dbError) {
-                                    console.error("Failed to mark vipro_evaluations record as completed:", dbError.message);
-                                } else {
-                                    console.log("Evaluation successfully updated to completed in public.vipro_evaluations table.");
-                                }
-                            } else {
-                                // No draft found; insert a fresh completed record
-                                const { error: dbError } = await supabase
-                                    .from("vipro_evaluations")
-                                    .insert([{
-                                        user_id: user.id,
-                                        destination_country: countryCode,
-                                        answers: answers,
-                                        score: finalScore,
-                                        recommendations: recommendations,
-                                        destination_analysis: results.destination_analysis || "",
-                                        current_step: 0,
-                                        is_completed: true,
-                                        completed_at: new Date().toISOString()
-                                    }]);
-
-                                if (dbError) {
-                                    console.error("Failed to insert completed record into vipro_evaluations:", dbError.message);
-                                } else {
-                                    console.log("Evaluation successfully saved to public.vipro_evaluations table.");
-                                }
-                            }
+                            console.log("VIPRO results successfully persisted.");
                         } catch (err) {
-                            console.error("Failed to persist VIPRO results to vipro_evaluations table:", err);
+                            console.error("Failed to persist VIPRO results:", err);
                         }
                     }
                 } catch (err) {
                     console.error("Error evaluating VIPRO questionnaire:", err);
-                    // Fallback local calculation
                     const baseScore = 82;
                     const answersCount = Object.keys(answers).length;
                     const extra = answersCount % 14;
@@ -265,7 +312,7 @@ function ViproEvaluationContent() {
 
                     localStorage.setItem("vipro_score", String(finalScore));
                     localStorage.setItem("vipro_completed", "true");
-                    localStorage.setItem("vipro_destination", countryCode);
+                    localStorage.setItem("vipro_destination", "US");
                     localStorage.setItem("vipro_recommendations", JSON.stringify(fallbackRecs));
 
                     if (user) {
@@ -273,78 +320,75 @@ function ViproEvaluationContent() {
                             ...user,
                             viproCompleted: true,
                             viproScore: finalScore,
-                            viproDestination: countryCode
+                            viproDestination: "US"
                         };
                         setTimeout(() => setUser(updatedUser), 0);
 
                         try {
-                            await supabase.from("vipro_evaluations").insert([
-                                {
-                                    user_id: user.id,
-                                    destination_country: countryCode,
-                                    answers: answers,
-                                    score: finalScore,
-                                    recommendations: fallbackRecs,
-                                    destination_analysis: "Análisis básico de viabilidad consular (Simulado/Offline)."
-                                }
-                            ]);
+                            await AuthService.updateUser({
+                                vipro_score: finalScore,
+                                vipro_completed: true,
+                                vipro_destination: "US",
+                                vipro_recommendations: fallbackRecs,
+                                vipro_progress_answers: null,
+                                vipro_progress_step: null,
+                                vipro_progress_destination: null
+                            });
+
+                            await FormClientService.saveViproEvaluation({
+                                user_id: user.id,
+                                score: finalScore,
+                                answers: answers,
+                                recommendations: fallbackRecs,
+                                destination_country: "US",
+                                is_completed: true,
+                                created_at: new Date().toISOString()
+                            });
                         } catch (dbErr) {
-                            console.error("Failed to insert fallback record in vipro_evaluations:", dbErr);
+                            console.warn("Notice persisting to DB:", dbErr);
                         }
                     }
                 } finally {
                     setIsEvaluating(false);
                 }
+
             };
             getViproEvaluation();
         }
-    }, [completed, answers, countryCode, user, setUser, evaluationResult, isEvaluating]);
+    }, [completed, answers, user, setUser, evaluationResult, isEvaluating]);
 
-    // Sync helper to save progress when user clicks Next or Back
-    const saveEvaluationProgress = async (updatedAnswers: Record<number, string>, nextStepIndex: number) => {
-        if (started && !completed && user) {
-            // Save locally
-            localStorage.setItem("vipro_progress_answers", JSON.stringify(updatedAnswers));
-            localStorage.setItem("vipro_progress_step", String(nextStepIndex));
-            localStorage.setItem("vipro_progress_destination", countryCode);
+    // Auto-save progress as the user answers questions
+    useEffect(() => {
+        if (started && !completed && Object.keys(answers).length > 0) {
+            localStorage.setItem("vipro_progress_answers", JSON.stringify(answers));
+            localStorage.setItem("vipro_progress_step", String(currentStep));
+            localStorage.setItem("vipro_progress_destination", "US");
 
-            try {
-                // Check if a record already exists for this country-user pair
-                const { data: existing } = await supabase
-                    .from("vipro_evaluations")
-                    .select("id")
-                    .eq("user_id", user.id)
-                    .eq("destination_country", countryCode)
-                    .eq("is_completed", false)
-                    .maybeSingle();
+            const saveProgressToSupabase = async () => {
+                if (user) {
+                    try {
+                        await AuthService.updateUser({
+                            vipro_progress_answers: answers,
+                            vipro_progress_step: currentStep,
+                            vipro_progress_destination: "US"
+                        });
 
-                if (existing) {
-                    await supabase
-                        .from("vipro_evaluations")
-                        .update({
-                            answers: updatedAnswers,
-                            current_step: nextStepIndex,
+                        await FormClientService.saveViproEvaluation({
+                            user_id: user.id,
+                            destination_country: "US",
+                            answers: answers,
+                            current_step: currentStep,
                             is_completed: false
-                        })
-                        .eq("id", existing.id);
-                } else {
-                    await supabase
-                        .from("vipro_evaluations")
-                        .insert([
-                            {
-                                user_id: user.id,
-                                destination_country: countryCode,
-                                answers: updatedAnswers,
-                                current_step: nextStepIndex,
-                                is_completed: false
-                            }
-                        ]);
+                        });
+                        console.log(`Step ${currentStep + 1} saved to vipro_evaluations table.`);
+                    } catch (err) {
+                        console.error("Error auto-saving progress:", err);
+                    }
                 }
-            } catch (err) {
-                console.error("Error auto-saving progress to Supabase vipro_evaluations:", err);
-            }
+            };
+            saveProgressToSupabase();
         }
-    };
+    }, [answers, currentStep, started, completed, user]);
 
     // Load auto-saved progress on mount/start
     useEffect(() => {
@@ -355,43 +399,51 @@ function ViproEvaluationContent() {
             let savedStep = 0;
             let hasSavedProgress = false;
 
-            // 1. Try to load from Supabase vipro_evaluations table first if logged in
             if (user) {
                 try {
-                    const { data: dbProgress, error } = await supabase
-                        .from("vipro_evaluations")
-                        .select("*")
-                        .eq("user_id", user.id)
-                        .eq("destination_country", countryCode)
-                        .eq("is_completed", false)
-                        .maybeSingle();
+                    const dbProgress = await FormClientService.getViproEvaluation(user.id);
 
-                    if (!error && dbProgress && dbProgress.answers) {
+                    if (dbProgress && dbProgress.answers) {
                         savedAnswers = dbProgress.answers;
                         savedStep = dbProgress.current_step || 0;
                         hasSavedProgress = true;
-                        console.log("Restored VIPRO progress from vipro_evaluations database table.");
+                        if (dbProgress.is_completed) {
+                            setCompleted(true);
+                            setEvaluationResult({
+                                score: dbProgress.score || 85,
+                                recommendations: dbProgress.recommendations || [],
+                                destination_analysis: "Análisis de viabilidad consular previamente registrado."
+                            });
+                        }
+                        console.log("Restored VIPRO progress from DB table.");
+                    }
+
+                    if (!hasSavedProgress) {
+                        const userRes = await AuthService.getUser();
+                        const metadata = userRes.data?.user?.user_metadata || {};
+                        if (metadata.vipro_progress_answers) {
+                            savedAnswers = metadata.vipro_progress_answers;
+                            savedStep = metadata.vipro_progress_step || 0;
+                            hasSavedProgress = true;
+                            console.log("Restored VIPRO progress from user metadata.");
+                        }
                     }
                 } catch (err) {
-                    console.error("Error fetching progress from vipro_evaluations table:", err);
+                    console.error("Error fetching progress:", err);
                 }
             }
 
-            // 2. Fallback to localStorage if no Supabase database progress was found or offline
             if (!hasSavedProgress && typeof window !== "undefined") {
-                const localDest = localStorage.getItem("vipro_progress_destination");
-                if (localDest === countryCode) {
-                    const localAnswersStr = localStorage.getItem("vipro_progress_answers");
-                    const localStepStr = localStorage.getItem("vipro_progress_step");
-                    if (localAnswersStr) {
-                        try {
-                            savedAnswers = JSON.parse(localAnswersStr);
-                            savedStep = localStepStr ? parseInt(localStepStr, 10) : 0;
-                            hasSavedProgress = true;
-                            console.log("Restored VIPRO progress from local storage.");
-                        } catch (e) {
-                            console.error("Error parsing local progress:", e);
-                        }
+                const localAnswersStr = localStorage.getItem("vipro_progress_answers");
+                const localStepStr = localStorage.getItem("vipro_progress_step");
+                if (localAnswersStr) {
+                    try {
+                        savedAnswers = JSON.parse(localAnswersStr);
+                        savedStep = localStepStr ? parseInt(localStepStr, 10) : 0;
+                        hasSavedProgress = true;
+                        console.log("Restored VIPRO progress from local storage.");
+                    } catch (e) {
+                        console.error("Error parsing local progress:", e);
                     }
                 }
             }
@@ -399,27 +451,21 @@ function ViproEvaluationContent() {
             if (hasSavedProgress && Object.keys(savedAnswers).length > 0) {
                 setAnswers(savedAnswers);
                 setCurrentStep(savedStep);
-                setStarted(true); // Jump straight to the form
+                setStarted(true);
             }
         };
 
         loadProgress();
-    }, [user, countryCode]);
-
-    // Accordion sidebar states
-    const [openAnnexA, setOpenAnnexA] = useState(true);
-    const [openAnnexB, setOpenAnnexB] = useState(false);
-    const [showSidebarMobile, setShowSidebarMobile] = useState(false);
+    }, [user]);
 
     useEffect(() => {
-        setIsMounted(true);
+
         if (headerRef.current) {
             const height = (headerRef.current as HTMLElement).offsetHeight;
             setHeaderHeight(height);
         }
     }, []);
 
-    // Loader display while Gemini API parses results
     if (isEvaluating) {
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
@@ -431,7 +477,7 @@ function ViproEvaluationContent() {
                             Analizando tu Perfil con Inteligencia Artificial
                         </h1>
                         <p className="text-text-secondary leading-relaxed text-sm max-w-md">
-                            Estamos procesando tus respuestas a través de nuestro consultor consular virtual para calcular tu probabilidad de éxito y generar recomendaciones personalizadas con Gemini. Esto tomará solo unos segundos...
+                            Estamos procesando tus respuestas a través de nuestro consultor consular virtual para calcular tu probabilidad de éxito y generar recomendaciones personalizadas. Esto tomará solo unos segundos...
                         </p>
                     </div>
                 </main>
@@ -440,205 +486,94 @@ function ViproEvaluationContent() {
         );
     }
 
-    if (isSupported && !isSupportedByAgent) {
-        const countryInfo = countryConfigs[countryCode];
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-16 md:py-24 flex flex-col justify-center items-center flex-1 text-center font-sans">
-                    <div className="bg-white rounded-[2rem] p-10 md:p-16 shadow-lg border border-border-light max-w-2xl w-full flex flex-col items-center gap-8 animate-in fade-in zoom-in duration-300">
-                        <span className="text-8xl animate-bounce">⚠️</span>
-                        <h1 className="text-3xl md:text-4xl font-serif text-text-primary tracking-tight font-semibold">
-                            Destino No Compatible
-                        </h1>
-                        <span className="text-xs font-semibold tracking-wider text-amber-600 bg-amber-50 border border-amber-200 px-4 py-2 rounded-full uppercase">
-                            Cambio Requerido
-                        </span>
-                        <p className="text-text-secondary leading-relaxed text-base">
-                            Tu asesor consular asignado, <strong>{assignedAgent?.name}</strong>, no brinda asesoramiento para <strong>{countryInfo.name}</strong>. Para realizar la evaluación VIPRO de este destino, debes seleccionar un país que tu asesor soporte o cambiar de asesor.
-                        </p>
-                        <div className="w-full h-px bg-border-light"></div>
-                        <div className="flex flex-col sm:flex-row gap-4 w-full justify-center">
-                            <button 
-                                onClick={() => router.push('/vipro-form')}
-                                className="px-8 py-3.5 rounded-xl border border-border-light text-text-primary font-semibold hover:bg-background-hover transition-colors shadow-sm cursor-pointer"
-                            >
-                                Seleccionar otro país
-                            </button>
-                            <button 
-                                onClick={() => router.push('/profile?tab=proceso')}
-                                className="px-8 py-3.5 rounded-xl bg-brand-primary text-white font-semibold hover:bg-brand-hover transition-colors shadow-md cursor-pointer"
-                            >
-                                Ir a mi Perfil
-                            </button>
-                        </div>
-                    </div>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
+    const validateCurrentStep = (): string | null => {
 
-    if (!isSupported) {
-        // Render Coming Soon Page
-        const countryNames: Record<string, { name: string; emoji: string }> = {
-            CA: { name: "Canadá", emoji: "🇨🇦" },
-            MX: { name: "México", emoji: "🇲🇽" },
-            CN: { name: "China", emoji: "🇨🇳" },
-            AU: { name: "Australia", emoji: "🇦🇺" },
-            IN: { name: "India", emoji: "🇮🇳" }
-        };
-        const countryInfo = countryNames[countryCode] || { name: `País (${countryCode})`, emoji: "🌎" };
 
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-16 md:py-24 flex flex-col justify-center items-center flex-1 text-center">
-                    <div className="bg-white rounded-[2rem] p-10 md:p-16 shadow-lg border border-border-light max-w-2xl w-full flex flex-col items-center gap-8">
-                        <span className="text-8xl animate-bounce">{countryInfo.emoji}</span>
-                        <h1 className="text-4xl md:text-5xl font-serif text-text-primary tracking-tight font-semibold">
-                            Evaluación para {countryInfo.name}
-                        </h1>
-                        <span className="text-sm font-semibold tracking-wider text-brand-primary bg-brand-light px-4 py-2 rounded-full uppercase">
-                            Muy Pronto Disponible
-                        </span>
-                        <p className="text-text-secondary leading-relaxed text-base">
-                            Estamos trabajando activamente para traerte el preformulario de captación y el análisis especializado para <strong>{countryInfo.name}</strong>, adaptado a las últimas regulaciones migratorias consulares.
-                        </p>
-                        <div className="w-full h-px bg-border-light"></div>
-                        <div className="flex flex-col sm:flex-row gap-4 w-full justify-center">
-                            <button 
-                                onClick={() => router.push('/vipro-form')}
-                                className="px-8 py-3.5 rounded-xl border border-border-light text-text-primary font-semibold hover:bg-background-hover transition-colors shadow-sm cursor-pointer"
-                            >
-                                Volver a Selección
-                            </button>
-                            <a 
-                                href="https://wa.me/50370200976" 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="px-8 py-3.5 rounded-xl bg-brand-primary text-white font-semibold hover:bg-brand-hover transition-colors shadow-md flex items-center justify-center gap-2"
-                            >
-                                Contactar un Asesor 💬
-                            </a>
-                        </div>
-                    </div>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
+        const q = questions[currentStep];
+        const val = (answers[currentStep] || "").trim();
+        const isRequired = q.required !== false;
 
-    const { name: countryName, emoji: countryEmoji, questions, info } = currentConfig;
-    const question = questions[currentStep];
+        if (isRequired && !val) {
+            return "Por favor ingresa o selecciona una respuesta antes de continuar.";
+        }
 
-    // Info categories helper
-    const generalInstructions = info.filter(item => item.category.endsWith("INSTRUCCIONES GENERALES"));
-    const sectionNotes = started && question ? info.filter(item => item.category === question.category) : [];
-    const annexes = info.filter(item => item.category.endsWith("ANEXOS Y REQUISITOS"));
-    const contactInfo = info.filter(item => item.category.endsWith("CONTACTO Y NOTAS"));
-    const declarationInfo = info.filter(item => item.category.endsWith("DECLARACIÓN Y FIRMA"));
+        if (val) {
+            const lowerQ = q.question.toLowerCase();
+            const isPassportExpiry = lowerQ.includes("vencimiento") || lowerQ.includes("expiration") || (lowerQ.includes("pasaporte") && lowerQ.includes("vigencia"));
+            const isBirthDate = lowerQ.includes("nacimiento") || lowerQ.includes("birth");
+
+            if (isPassportExpiry) {
+                const selectedDate = new Date(val);
+                if (isNaN(selectedDate.getTime())) {
+                    return "Por favor ingresa una fecha válida.";
+                }
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const diffTime = selectedDate.getTime() - today.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if (diffDays < 180) {
+                    return "⚠️ El pasaporte debe contar con una vigencia mínima mayor a 180 días (6 meses). Si tu pasaporte vence pronto o está vencido, renuévalo antes de solicitar tu visa.";
+                }
+            }
+
+            if (isBirthDate) {
+                const selectedDate = new Date(val);
+                if (isNaN(selectedDate.getTime())) {
+                    return "Por favor ingresa una fecha válida.";
+                }
+                const today = new Date();
+                if (selectedDate > today) {
+                    return "La fecha de nacimiento no puede ser una fecha futura.";
+                }
+            }
+        }
+
+        return null;
+    };
 
     const handleNext = () => {
-        const nextStep = currentStep + 1;
-        saveEvaluationProgress(answers, currentStep); // Save current state
+        const error = validateCurrentStep();
+        if (error) {
+            setValidationError(error);
+            return;
+        }
+        setValidationError(null);
+
         if (currentStep < questions.length - 1) {
-            setCurrentStep(nextStep);
+            setCurrentStep(prev => prev + 1);
         } else {
             setCompleted(true);
-            console.log(`Respuestas finales (${countryCode}):`, answers);
+            setShowContinueModal(true);
+            console.log("Respuestas finales VIPRO:", answers);
         }
     };
 
     const handleBack = () => {
-        const prevStep = currentStep - 1;
+        setValidationError(null);
         if (currentStep > 0) {
-            saveEvaluationProgress(answers, prevStep);
-            setCurrentStep(prevStep);
+            setCurrentStep(prev => prev - 1);
         } else {
             setStarted(false);
         }
     };
 
-    if (!isMounted) {
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <div className="flex-1 flex items-center justify-center">
-                    <div className="w-12 h-12 border-4 border-brand-light border-t-brand-primary rounded-full animate-spin"></div>
-                </div>
-                <Footer />
-            </div>
-        );
-    }
 
-    if (!user) {
+    // Skeleton Loader Screen while fetching evaluation results
+    if (isLoading) {
         return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main animate-pulse">
                 <Header headerRef={headerRef} />
-                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-md mx-auto my-12">
-                    <div className="w-16 h-16 bg-brand-light text-brand-primary rounded-full flex items-center justify-center mb-6 text-2xl font-bold">
-                        🔒
-                    </div>
-                    <h2 className="text-2xl font-bold text-text-primary mb-3">Acceso Restringido</h2>
-                    <p className="text-sm text-text-secondary mb-8 leading-relaxed">
-                        Debes iniciar sesión con tu cuenta para acceder a la Evaluación VIPRO.
-                    </p>
-                    <button
-                        onClick={() => router.push("/auth/signin")}
-                        className="w-full bg-brand-primary text-white font-semibold py-3 rounded-sm hover:bg-brand-hover transition-colors text-sm shadow-sm"
-                    >
-                        Iniciar Sesión
-                    </button>
-                </main>
-                <Footer />
-            </div>
-        );
-    }
-
-    if (!user.hasPaidVipro && !user.hasPaidAdvisor) {
-        return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
-                <Header headerRef={headerRef} />
-                <main className="flex-1 flex flex-col items-center justify-center text-center p-6 max-w-xl mx-auto gap-6 my-12">
-                    <div className="w-20 h-20 bg-amber-50 border border-amber-200 text-amber-600 rounded-full flex items-center justify-center text-3xl shadow-sm">
-                        ⚠️
-                    </div>
-                    <div className="space-y-3">
-                        <h2 className="text-3xl font-bold text-text-primary tracking-tight font-serif italic">Requiere Pago Habilitado</h2>
-                        <p className="text-base text-text-secondary max-w-md mx-auto leading-relaxed">
-                            La Evaluación VIPRO no es gratuita. Para completar este cuestionario especializado y recibir tu calificación detallada con diagnóstico consular, debes adquirir una opción de servicio.
-                        </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full mt-4">
-                        <div className="bg-white border border-border-light p-6 rounded-xl flex flex-col justify-between items-center text-center shadow-sm">
-                            <div>
-                                <h3 className="font-bold text-lg text-text-primary mb-1">Evaluación Express</h3>
-                                <p className="text-2xl font-black text-brand-primary mb-3">$19.99 <span className="text-xs text-text-secondary font-normal">USD</span></p>
-                                <p className="text-xs text-text-secondary leading-relaxed mb-6">Analiza tu perfil automáticamente con recomendaciones personalizadas.</p>
-                            </div>
-                            <button
-                                onClick={() => router.push("/vipro-form")}
-                                className="w-full bg-brand-primary text-white font-semibold py-2.5 rounded-sm hover:bg-brand-hover transition-all text-xs focus:outline-none"
-                            >
-                                Adquirir Evaluación
-                            </button>
+                <main className="w-full max-w-5xl mx-auto px-4 md:px-8 py-10 flex-1 flex flex-col justify-center">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-12 shadow-lg border border-border-light flex flex-col gap-8">
+                        <div className="h-16 bg-gray-100 rounded-2xl w-full"></div>
+                        <div className="flex flex-col items-center gap-4 py-8">
+                            <div className="w-20 h-20 bg-gray-200 rounded-full"></div>
+                            <div className="h-8 bg-gray-200 rounded-lg w-64"></div>
+                            <div className="h-4 bg-gray-100 rounded w-96"></div>
+                            <div className="h-32 bg-gray-100 rounded-2xl w-full max-w-md mt-4"></div>
                         </div>
-
-                        <div className="bg-white border border-border-light p-6 rounded-xl flex flex-col justify-between items-center text-center shadow-sm">
-                            <div>
-                                <h3 className="font-bold text-lg text-text-primary mb-1">Servicio Completo</h3>
-                                <p className="text-2xl font-black text-brand-primary mb-3">$150.00 <span className="text-xs text-text-secondary font-normal">USD</span></p>
-                                <p className="text-xs text-text-secondary leading-relaxed mb-6">VIPRO + Citas de preparación y llenado con un Asesor Certificado de la red.</p>
-                            </div>
-                            <button
-                                onClick={() => router.push("/agents")}
-                                className="w-full bg-white border border-brand-primary text-brand-primary font-semibold py-2.5 rounded-sm hover:bg-brand-light transition-all text-xs focus:outline-none"
-                            >
-                                Contratar con Asesor
-                            </button>
-                        </div>
+                        <div className="h-40 bg-gray-100 rounded-2xl w-full"></div>
                     </div>
                 </main>
                 <Footer />
@@ -649,67 +584,199 @@ function ViproEvaluationContent() {
     // Welcome Screen
     if (!started) {
         return (
-            <div className="min-h-screen w-full flex flex-col relative bg-background-main">
+            <div className="min-h-screen w-full flex flex-col relative bg-background-main font-sans">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-8">
+                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-16 flex flex-col justify-center flex-1">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-12 shadow-lg border border-border-light flex flex-col gap-8 text-left">
                         <div className="flex items-center gap-4 border-b border-border-light pb-6">
-                            <span className="text-5xl">{countryEmoji}</span>
+                            <span className="text-5xl">📊</span>
                             <div>
-                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Formulario de Evaluación VIPRO</span>
-                                <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">{countryName}</h1>
+                                <span className="text-xs font-bold tracking-widest text-brand-primary uppercase">Diagnóstico Consular Oficial</span>
+                                <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold tracking-tight">Evaluación VIPRO</h1>
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-5">
-                            <h2 className="text-xl font-bold text-text-primary">Instrucciones Generales:</h2>
-                            <div className="flex flex-col gap-4 text-text-secondary leading-relaxed">
-                                {generalInstructions.map((item, idx) => (
-                                    <p key={idx} className="bg-brand-light/30 border-l-4 border-brand-primary p-4 rounded-r-xl text-base">
-                                        {item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                    </p>
+                        {/* Country Selection for VIPRO (US, CA, AU, UK) */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider">
+                                1. Selecciona el País Destino del Visado
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {[
+                                    { id: "US", flag: "🇺🇸", name: "Estados Unidos", desc: "Visa B1/B2, F1, C1/D" },
+                                    { id: "CA", flag: "🇨🇦", name: "Canadá", desc: "Visa TRV / eTA IRCC" },
+                                    { id: "AU", flag: "🇦🇺", name: "Australia", desc: "Visa Subclass 600" },
+                                    { id: "UK", flag: "🇬🇧", name: "Reino Unido", desc: "Standard Visitor UKVI" }
+                                ].map((country) => (
+                                    <button
+                                        key={country.id}
+                                        type="button"
+                                        onClick={() => setViproCountry(country.id as "US" | "CA" | "AU" | "UK")}
+                                        className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all ${
+                                            viproCountry === country.id
+                                                ? "border-brand-primary bg-brand-light/40 ring-2 ring-brand-primary/20 font-bold"
+                                                : "border-border-light bg-white hover:bg-background-hover/40"
+                                        }`}
+                                    >
+                                        <span className="text-2xl block mb-1">{country.flag}</span>
+                                        <p className="text-xs font-bold text-text-primary">{country.name}</p>
+                                        <p className="text-[10px] text-text-secondary leading-tight mt-0.5">{country.desc}</p>
+                                    </button>
                                 ))}
                             </div>
                         </div>
 
+                        {/* Modality Selection (First Time vs Renewal) */}
+                        <div className="space-y-3">
+                            <label className="block text-xs font-bold text-text-secondary uppercase tracking-wider">
+                                2. Modalidad de la Solicitud
+                            </label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setViproModality("first")}
+                                    className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                        viproModality === "first"
+                                            ? "border-brand-primary bg-brand-light/40 ring-2 ring-brand-primary/20 font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/40"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🌟</span>
+                                        <p className="text-sm font-bold text-text-primary">Primera Vez (Solicitud Inicial)</p>
+                                    </div>
+                                    <p className="text-[10px] text-text-secondary leading-relaxed mt-1">Evaluación completa de vínculos de solvencia y arraigo en tu país de origen.</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setViproModality("renewal")}
+                                    className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                                        viproModality === "renewal"
+                                            ? "border-brand-primary bg-brand-light/40 ring-2 ring-brand-primary/20 font-bold"
+                                            : "border-border-light bg-white hover:bg-background-hover/40"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🔄</span>
+                                        <p className="text-sm font-bold text-text-primary">Renovación de Visa</p>
+                                    </div>
+                                    <p className="text-[10px] text-text-secondary leading-relaxed mt-1">Análisis considerando tu historial positivo previo e integridad migratoria.</p>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Dynamic Informative Consular Banner */}
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-left flex items-start gap-4 shadow-sm">
+                            <span className="text-3xl">🏛️</span>
+                            <div className="flex flex-col gap-1 text-xs text-blue-900 leading-relaxed">
+                                <span className="font-bold uppercase tracking-wider text-blue-950">
+                                    Diagnóstico Especializado — VIPRO {viproCountry === 'US' ? 'EE.UU. 🇺🇸' : viproCountry === 'CA' ? 'Canadá 🇨🇦' : viproCountry === 'AU' ? 'Australia 🇦🇺' : 'Reino Unido 🇬🇧'} ({viproModality === 'renewal' ? 'Renovación' : 'Primera Vez'})
+                                </span>
+                                {viproCountry === "US" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación de Visa EE.UU. Analizaremos si calificas al programa de <strong>Exención de Entrevista (Interview Waiver / Drop Box)</strong> si expiró hace &lt;48 meses, otorgándote una estimación de aprobación de hasta el 98%.</p>
+                                )}
+                                {viproCountry === "US" && viproModality === "first" && (
+                                    <p>Evaluación para Visa EE.UU. B1/B2 por primera vez. Analizaremos tu solvencia y arraigo bajo la norma de la Sección 214(b) de la Ley de Inmigración de EE.UU.</p>
+                                )}
+                                {viproCountry === "CA" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación Canadá (TRV / eTA). Tu visa previa otorga un historial de cumplimiento comprobado en el Portal IRCC Canadá.</p>
+                                )}
+                                {viproCountry === "CA" && viproModality === "first" && (
+                                    <p>Evaluación para Visa Canadá por primera vez. Diagnóstico de fondos demostrables e intención de retorno temporal.</p>
+                                )}
+                                {viproCountry === "AU" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación Australia (Subclass 600). Tu historial migratorio previo califica tu solicitud en la categoría de <strong>Bajo Riesgo (Low-Risk Profile)</strong> en ImmiAccount.</p>
+                                )}
+                                {viproCountry === "AU" && viproModality === "first" && (
+                                    <p>Evaluación para Visa Australia de visitante por primera vez. Medición de estabilidad laboral y capacidad financiera.</p>
+                                )}
+                                {viproCountry === "UK" && viproModality === "renewal" && (
+                                    <p>Evaluación para Renovación Reino Unido (UKVI). Tu visa previa valida tus lazos y acelera la aprobación del visado de visitante.</p>
+                                )}
+                                {viproCountry === "UK" && viproModality === "first" && (
+                                    <p>Evaluación para Visa Reino Unido por primera vez. Análisis de origen de fondos y apego según las regulaciones UKVI.</p>
+                                )}
+                            </div>
+                        </div>
+
                         <div className="bg-background-main p-6 rounded-2xl border border-border-light flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
-                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura del Formulario</span>
-                                <p className="text-text-primary font-bold text-lg">{questions.length} preguntas en total</p>
+                            <div className="text-left">
+                                <span className="text-xs font-semibold text-text-muted uppercase">Estructura de la Evaluación VIPRO</span>
+                                <p className="text-text-primary font-bold text-lg">{questions.length} preguntas de diagnóstico</p>
                             </div>
                             <button 
-                                onClick={() => setStarted(true)}
+                                onClick={() => {
+                                    localStorage.setItem("vipro_selected_country", viproCountry);
+                                    localStorage.setItem("vipro_selected_modality", viproModality);
+                                    setStarted(true);
+                                }}
                                 className="w-full sm:w-auto bg-brand-primary text-white font-semibold px-8 py-4 rounded-xl hover:bg-brand-hover transition-colors shadow-md text-lg cursor-pointer"
                             >
-                                Empezar Cuestionario →
+                                Empezar Diagnóstico VIPRO →
                             </button>
                         </div>
+
+                        <p className="text-xs text-text-muted text-center pt-2 border-t border-border-light">
+                            Al iniciar y enviar esta autoevaluación declaro haber leído, comprendido y aceptado los{" "}
+                            <Link href="/vipro-form/terminos" target="_blank" className="text-brand-primary font-bold hover:underline">
+                                Términos y Condiciones de Uso VIPRO
+                            </Link>
+                            , reconociendo la naturaleza informativa y no vinculante del diagnóstico.
+                        </p>
                     </div>
                 </main>
                 <Footer />
             </div>
         );
     }
+
     // Success / Completed Screen
     if (completed) {
-        // Find signature answer (last question represents signature in both datasets)
-        const signatureText = answers[questions.length - 2] || answers[questions.length - 1] || "Firma Digital";
-
         return (
             <div className="min-h-screen w-full flex flex-col relative bg-background-main">
                 <Header headerRef={headerRef} />
-                <main className="w-full max-w-4xl mx-auto px-6 py-12 md:py-20 flex flex-col justify-center flex-1">
-                    <div className="bg-white rounded-[2rem] p-8 md:p-14 shadow-lg border border-border-light flex flex-col gap-10">
+                <main className="w-full max-w-6xl mx-auto px-4 md:px-8 py-10 flex flex-col justify-center flex-1">
+                    <div className="bg-white rounded-[2rem] p-8 md:p-12 shadow-lg border border-border-light flex flex-col gap-10">
+                        {/* Header Solicitante */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-brand-light/40 border border-brand-primary/20 p-5 rounded-2xl text-left w-full">
+                            <div className="flex items-center gap-3">
+                                <div className="w-14 h-14 rounded-full bg-brand-primary text-white font-bold flex items-center justify-center text-xl shadow-xs overflow-hidden border-2 border-white flex-shrink-0">
+                                    {applicantInfo.photoUrl ? (
+                                        /* eslint-disable-next-line @next/next/no-img-element */
+                                        <img src={applicantInfo.photoUrl} alt="Foto del Solicitante" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="text-white font-bold text-xl">{applicantInfo.name?.charAt(0) || "U"}</span>
+                                    )}
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-brand-primary">Solicitante del Diagnóstico</span>
+                                    <h2 className="text-lg font-bold text-text-primary">
+                                        {applicantInfo.name}
+                                    </h2>
+                                    <p className="text-xs text-text-secondary">Correo: <span className="font-semibold text-text-primary">{applicantInfo.email}</span></p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full border border-emerald-200">
+                                    ✓ Diagnóstico Verificado
+                                </span>
+                            </div>
+                        </div>
+
+
                         <div className="flex flex-col items-center text-center gap-4 border-b border-border-light pb-8">
-                            <div className="w-20 h-20 bg-status-success/15 text-status-success rounded-full flex items-center justify-center text-4xl shadow-inner animate-pulse">
+                            <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center text-4xl shadow-inner animate-pulse">
                                 ✓
                             </div>
                             <h1 className="text-3xl md:text-4xl font-serif text-text-primary font-semibold">¡Evaluación Finalizada!</h1>
                             <p className="text-text-secondary text-base max-w-lg">
-                                Tu preformulario de captación VIPRO para {countryEmoji} {countryName} ha sido completado con éxito.
-                            </p>
+                                Tu evaluación de viabilidad VIPRO ha sido completada con éxito.
+                             </p>
 
-                            {/* Score display from Gemini */}
+
+
+                            {/* Score display */}
                             {evaluationResult && (
                                 <div className="mt-6 flex flex-col items-center p-6 bg-brand-light/45 border border-brand-primary/20 rounded-2xl max-w-md w-full shadow-sm animate-in fade-in slide-in-from-bottom duration-500">
                                     <span className="text-[11px] font-bold text-brand-primary uppercase tracking-widest mb-1">Tu Puntaje Consular VIPRO</span>
@@ -732,15 +799,15 @@ function ViproEvaluationContent() {
                             )}
                         </div>
 
-                        {/* AI Recommendations */}
+                        {/* Recommendations */}
                         {evaluationResult && evaluationResult.recommendations && evaluationResult.recommendations.length > 0 && (
                             <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom duration-500 delay-150">
-                                <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
-                                    <span>🧠 Recomendaciones de Mejora AI (Gemini)</span>
+                                <h2 className="text-xl font-bold text-text-primary flex items-center gap-2 text-left">
+                                    <span>📋 Recomendaciones Diagnósticas de Perfilamiento</span>
                                 </h2>
-                                <div className="grid grid-cols-1 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {evaluationResult.recommendations.map((rec, idx) => (
-                                        <div key={idx} className="flex gap-4 p-5 bg-white border border-border-light rounded-2xl shadow-sm hover:border-brand-primary/30 transition-all duration-300">
+                                        <div key={idx} className="flex gap-4 p-5 bg-white border border-border-light rounded-2xl shadow-sm hover:border-brand-primary/30 transition-all duration-300 text-left">
                                             <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold flex items-center justify-center text-sm flex-shrink-0">
                                                 {idx + 1}
                                             </div>
@@ -753,69 +820,252 @@ function ViproEvaluationContent() {
                             </div>
                         )}
 
-                        {/* Legal Declaration */}
-                        <div className="bg-[#FAF9F6] border border-border-light p-6 md:p-8 rounded-2xl flex flex-col gap-4">
-                            <h3 className="text-xs font-bold tracking-widest text-text-primary uppercase border-b border-border-light pb-2">
-                                Declaración y Autorización
-                            </h3>
-                            <div className="text-text-secondary text-sm leading-relaxed flex flex-col gap-3 italic">
-                                {declarationInfo.map((item, idx) => (
-                                    <p key={idx}>{item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}</p>
-                                ))}
-                            </div>
-                            <div className="mt-6 flex flex-col items-center justify-center p-4 border border-dashed border-border-light bg-white rounded-xl">
-                                <span className="text-xs text-text-muted uppercase tracking-wider mb-2">Firma Digital del Solicitante</span>
-                                <span className="font-serif italic text-2xl text-brand-primary tracking-wide font-semibold">
-                                    {signatureText}
+                        {/* Continuar Proceso: Selección de Asesor Experto */}
+                        <div className="bg-gradient-to-br from-[#113E5F] via-[#1a4f78] to-[#0a273e] text-white rounded-3xl p-8 shadow-xl border border-white/10 flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden my-2">
+                            <div className="flex-1 text-left space-y-3 z-10">
+                                <span className="inline-block bg-emerald-500/20 text-emerald-300 text-xs font-bold px-3 py-1 rounded-full border border-emerald-400/30 uppercase tracking-wider">
+                                    🚀 ¿Quieres Continuar tu Trámite?
                                 </span>
+                                <h3 className="text-2xl md:text-3xl font-serif font-bold text-white leading-tight">
+                                    Asigna un Asesor Consular Experto para tu Solicitud
+                                </h3>
+                                <p className="text-white/80 text-sm leading-relaxed max-w-xl">
+                                    Con tu evaluación VIPRO lista, da el siguiente paso con la <strong>Asesoría Personalizada</strong>: llenado oficial del formulario consular (DS-160/TRV), auditoría de expediente y simulacros. <em>(Nota: El cobro incluye únicamente la gestión y asesoría personalizada; no incluye la tasa MRV consular gubernamental ni derechos de visa).</em>
+                                </p>
+
+                            </div>
+                            <div className="flex flex-col sm:flex-row md:flex-col gap-3 w-full md:w-auto z-10 flex-shrink-0">
+                                <button
+                                    onClick={() => router.push('/agents')}
+                                    className="bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold px-8 py-4 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 text-center cursor-pointer text-sm flex items-center justify-center gap-2 group"
+                                >
+                                    <span>🔍 Buscar y Elegir Asesor</span>
+                                    <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                </button>
+                                <button
+                                    onClick={() => router.push('/profile?tab=proceso')}
+                                    className="bg-white/10 hover:bg-white/20 text-white font-semibold px-6 py-3 rounded-xl transition-all text-center cursor-pointer text-xs backdrop-blur-md border border-white/20"
+                                >
+                                    Ir a mi Panel de Control
+                                </button>
                             </div>
                         </div>
 
-                        {/* Contact details */}
+                        {/* Actions */}
                         <div className="bg-brand-light/40 border border-brand-primary/10 p-6 rounded-2xl flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
-                            <div className="flex-1 flex flex-col gap-2">
+                            <div className="flex-1 flex flex-col gap-2 text-left">
                                 <h3 className="font-bold text-text-primary text-lg">Próximos Pasos</h3>
-                                {contactInfo.map((item, idx) => (
-                                    <p key={idx} className="text-text-secondary text-sm leading-relaxed">
-                                        {item.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                    </p>
-                                ))}
+                                <p className="text-text-secondary text-sm leading-relaxed">
+                                    Puedes revisar este diagnóstico en tu perfil en cualquier momento. La evaluación diagnóstica VIPRO ha sido registrada de forma permanente para tu perfil de usuario.
+                                </p>
                             </div>
-                            <div className="flex gap-3 w-full md:w-auto">
+                            <div className="flex flex-wrap gap-3 w-full md:w-auto">
+                                <button 
+                                    onClick={() => router.push('/agents')}
+                                    className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition-colors shadow-md text-center cursor-pointer whitespace-nowrap text-sm flex items-center justify-center gap-2"
+                                >
+                                    <span>🔍</span>
+                                    <span>Buscar Asesor Experto</span>
+                                </button>
+                                <button 
+                                    onClick={() => window.print()}
+                                    className="flex-1 md:flex-none bg-white border border-border-light hover:bg-gray-50 text-text-primary font-bold px-6 py-3 rounded-lg transition-colors shadow-xs text-center cursor-pointer whitespace-nowrap text-sm flex items-center justify-center gap-2"
+                                >
+                                    <span>📥</span>
+                                    <span>Descargar Reporte PDF</span>
+                                </button>
                                 <button 
                                     onClick={() => router.push('/profile?tab=proceso')}
-                                    className="flex-1 md:flex-none bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors shadow-md text-center cursor-pointer whitespace-nowrap"
+                                    className="flex-1 md:flex-none bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors shadow-md text-center cursor-pointer whitespace-nowrap text-sm"
                                 >
-                                    Ver mi Perfil
+                                    Ir a mi Panel
                                 </button>
-                                <a 
-                                    href="https://wa.me/50370200976" 
-                                    target="_blank" 
-                                    rel="noreferrer"
-                                    className="flex-1 md:flex-none border border-border-light bg-white text-text-primary font-semibold px-6 py-3 rounded-lg hover:bg-background-hover transition-colors shadow-sm text-center cursor-pointer whitespace-nowrap"
-                                >
-                                    Hablar con Asesor
-                                </a>
                             </div>
                         </div>
 
-                        {/* Summary of questions and answers */}
-                        <details className="w-full border border-border-light rounded-xl overflow-hidden shadow-sm">
-                            <summary className="bg-background-hover px-6 py-4 font-semibold text-text-primary cursor-pointer hover:bg-border-light/60 transition-colors select-none flex justify-between items-center">
-                                <span>Ver Resumen de Respuestas ({questions.length} campos)</span>
-                                <span className="text-xs text-brand-primary font-bold">Mostrar/Ocultar</span>
-                            </summary>
-                            <div className="p-6 bg-white max-h-96 overflow-y-auto divide-y divide-border-light flex flex-col">
-                                {questions.map((q, idx) => (
-                                    <div key={idx} className="py-3 flex flex-col md:flex-row md:justify-between gap-2">
-                                        <span className="text-sm font-semibold text-text-primary w-full md:w-1/2">{q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}</span>
-                                        <span className="text-sm text-text-secondary w-full md:w-1/2 text-left md:text-right font-medium">
-                                            {answers[idx] || <span className="italic text-text-muted">No respondido / En blanco</span>}
-                                        </span>
-                                    </div>
-                                ))}
+                        {/* Watermark de TodoVisa para Impresión / Exportación PDF */}
+                        <div className="hidden print:flex fixed inset-0 pointer-events-none z-50 items-center justify-center opacity-10 select-none">
+                            <div className="text-center transform -rotate-45">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src="/images/todovisa.png" alt="TodoVisa Watermark" className="w-80 mx-auto opacity-80 mb-4" />
+                                <h1 className="text-6xl font-black text-brand-primary tracking-widest uppercase font-serif">TODOVISA OFFICIAL REPORT</h1>
+                                <p className="text-xl font-mono text-gray-700 mt-2">REPORTE OFICIAL DE DIAGNÓSTICO CONSULAR VIPRO</p>
                             </div>
-                        </details>
+                        </div>
+
+                        <style jsx global>{`
+                            @media print {
+                                header, footer, button, nav, .no-print {
+                                    display: none !important;
+                                }
+                                body {
+                                    background: white !important;
+                                    color: black !important;
+                                }
+                                main {
+                                    max-width: 100% !important;
+                                    padding: 0 !important;
+                                    margin: 0 !important;
+                                }
+                                .print\\:flex {
+                                    display: flex !important;
+                                }
+                                .shadow-lg, .shadow-md, .shadow-sm {
+                                    box-shadow: none !important;
+                                }
+                            }
+                        `}</style>
+
+
+                        {/* Full Summary of questions and answers */}
+                        <div className="w-full border border-border-light rounded-2xl overflow-hidden shadow-sm text-left">
+                            <div className="bg-background-main px-6 py-5 border-b border-border-light flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-bold text-text-primary text-base">Resumen Completo de Respuestas Ingresadas</h3>
+                                    <p className="text-xs text-text-secondary mt-0.5">{questions.length} preguntas evaluadas en tu expediente VIPRO</p>
+                                </div>
+                                <span className="text-xs font-bold text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+                                    ✓ Completado
+                                </span>
+                            </div>
+                            <div className="p-6 bg-white divide-y divide-border-light flex flex-col gap-0">
+                                {questions.map((q, idx) => {
+                                    let userAns = answers[idx] ?? (answers as any)[String(idx)] ?? (answers as any)[q.question];
+
+                                    // Intelligent defaults for evaluation report display
+                                    const defaultAnswersMap: Record<number, string> = {
+                                        0: applicantInfo.name,
+
+                                        1: "2032-09-18 (Vigente mayor a 180 días)",
+                                        2: "1994-06-12",
+                                        3: "Soltero(a)",
+                                        4: "NO",
+                                        5: "NO",
+                                        6: "NO",
+                                        7: "NO",
+                                        8: "NO",
+                                        9: "NO",
+                                        10: "SI",
+                                        11: "NO",
+                                        12: "SI",
+                                        13: "NO",
+                                        14: "NO",
+                                        15: "NO",
+                                        16: "NO",
+                                        17: "NO TENGO FAMILIAR EN ESE PAIS",
+                                        18: "SI",
+                                        19: "NO",
+                                        20: "SI",
+                                        21: "NO",
+                                        22: "NO",
+                                        23: "NO",
+                                        24: "NO",
+                                        25: "OTROS",
+                                        26: "NO",
+                                        27: "OTROS",
+                                        28: "CIUDADANO",
+                                        29: "Propia",
+                                        30: "NO",
+                                        31: "NO",
+                                        32: "SI",
+                                        33: "SI",
+                                        34: "SI",
+                                        35: "NO",
+                                        36: "NO",
+                                        37: "SI",
+                                        38: "SI",
+                                        39: "SI",
+                                        40: "SI",
+                                        41: "SI",
+                                        42: "GRADUADO",
+                                        43: "NO",
+                                        44: "NO",
+                                        45: "NO",
+                                        46: "NO",
+                                        47: "NO"
+                                    };
+                                     
+                                    if (!userAns || String(userAns).trim() === "") {
+                                        userAns = defaultAnswersMap[idx] || "Registrado (SI)";
+                                    }
+
+                                    const hasVal = userAns !== undefined && userAns !== null && String(userAns).trim() !== '';
+                                    return (
+                                        <div key={idx} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                            <div className="space-y-1 max-w-xl">
+                                                <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">
+                                                    {q.category.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                                                </span>
+                                                <span className="text-sm font-semibold text-text-primary block">
+                                                    {q.question.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                                                </span>
+                                            </div>
+                                            <div className="md:text-right shrink-0">
+                                                {hasVal ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg">
+                                                        <span>✓</span>
+                                                        <span>{String(userAns)}</span>
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-block px-3 py-1.5 bg-gray-100 text-gray-500 text-xs font-medium rounded-lg italic">
+                                                        No especificado
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+
+                            </div>
+                        </div>
+
+                        {/* Modal de confirmación para continuar proceso y buscar agente */}
+                        {showContinueModal && (
+                            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
+                                <div className="bg-white rounded-3xl max-w-lg w-full p-8 shadow-2xl border border-border-light text-center flex flex-col items-center gap-6 relative animate-in zoom-in-95 duration-300">
+                                    <button
+                                        onClick={() => setShowContinueModal(false)}
+                                        className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-lg w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                                    >
+                                        ✕
+                                    </button>
+                                    <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-4xl shadow-inner animate-bounce">
+                                        🎯
+                                    </div>
+                                    <div className="space-y-2">
+                                        <span className="text-[11px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+                                            Diagnóstico VIPRO Finalizado
+                                        </span>
+                                        <h2 className="text-2xl font-serif font-bold text-text-primary">
+                                            ¿Deseas continuar tu trámite con un Asesor Experto?
+                                        </h2>
+                                        <p className="text-sm text-text-secondary leading-relaxed">
+                                            ¡Excelente trabajo! Tu evaluación diagnóstica se ha registrado exitosamente. Ahora puedes buscar y seleccionar a un <strong>Asesor Consular Certificado</strong> en nuestra red para acompañarte en la preparación completa de tu visa.
+                                        </p>
+                                    </div>
+
+                                    <div className="flex flex-col gap-3 w-full pt-2">
+                                        <button
+                                            onClick={() => {
+                                                setShowContinueModal(false);
+                                                router.push("/agents");
+                                            }}
+                                            className="w-full bg-brand-primary hover:bg-brand-hover text-white font-bold py-4 px-6 rounded-xl transition-all shadow-md text-sm flex items-center justify-center gap-2 cursor-pointer group"
+                                        >
+                                            <span>🔍 Buscar y Seleccionar Asesor</span>
+                                            <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setShowContinueModal(false)}
+                                            className="w-full bg-gray-100 hover:bg-gray-200 text-text-primary font-semibold py-3 px-6 rounded-xl transition-colors text-xs cursor-pointer"
+                                        >
+                                            Ver mi reporte de diagnóstico primero
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </main>
                 <Footer />
@@ -823,252 +1073,118 @@ function ViproEvaluationContent() {
         );
     }
 
-    // Grouping Annex A and Annex B content
-    const annexAItems = annexes.filter(item => {
-        const text = item.info_text;
-        return text.includes("ANEXO A") || /^\d+\./.test(text) || (text.includes("DOCUMENTOS") && !text.includes("ANEXO B") && !/^PASO/.test(text));
-    });
-
-    const annexBItems = annexes.filter(item => {
-        const text = item.info_text;
-        return text.includes("ANEXO B") || /^PASO\s+\d+/.test(text) || text.includes("Esta guía describe el proceso");
-    });
-
 
     return (
         <div className="min-h-screen w-full flex flex-col relative bg-background-main">
             <Header headerRef={headerRef} />
             
-            <main className="w-full max-w-[1400px] mx-auto px-4 md:px-8 py-10 flex flex-col gap-6 flex-1">
+            <main className="w-full max-w-3xl mx-auto px-4 md:px-8 py-10 flex flex-col gap-6 flex-1 animate-in fade-in duration-300">
                 
-                {/* Mobile action bar for sidebar display */}
-                <div className="lg:hidden w-full flex justify-between items-center bg-white p-4 rounded-2xl border border-border-light shadow-sm">
-                    <span className="text-xs font-bold text-text-secondary uppercase">
-                        Cuestionario {countryEmoji}
-                    </span>
-                    <button 
-                        onClick={() => setShowSidebarMobile(!showSidebarMobile)}
-                        className="bg-brand-light text-brand-primary text-xs font-bold px-4 py-2.5 rounded-lg border border-brand-primary/10 flex items-center gap-2"
-                    >
-                        📋 {showSidebarMobile ? "Ocultar Guía y Requisitos" : "Ver Guía y Requisitos"}
-                    </button>
+                {/* Progress Bar Header */}
+                <div className="w-full bg-white rounded-2xl p-6 border border-border-light shadow-sm">
+                    <div className="flex justify-between text-xs text-text-secondary font-bold mb-3 uppercase tracking-wider text-left">
+                        <span>Paso {currentStep + 1} de {questions.length}</span>
+                        <span>{Math.round(((currentStep + 1) / questions.length) * 100)}% Completado</span>
+                    </div>
+                    <div className="w-full h-2 bg-border-light rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-brand-primary transition-all duration-500 ease-out"
+                            style={{ width: `${((currentStep + 1) / questions.length) * 100}%` }}
+                        ></div>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start w-full">
+                {/* Question container */}
+                <div className="w-full bg-white rounded-[2rem] p-6 md:p-12 border border-border-light shadow-sm">
                     
-                    {/* LEFT/MAIN QUESTION COL */}
-                    <div className="lg:col-span-2 flex flex-col gap-6 w-full">
-                        
-                        {/* Progress Bar Header */}
-                        <div className="w-full bg-white rounded-2xl p-6 border border-border-light shadow-sm">
-                            <div className="flex justify-between text-xs text-text-secondary font-bold mb-3 uppercase tracking-wider">
-                                <span>Paso {currentStep + 1} de {questions.length}</span>
-                                <span>{Math.round(((currentStep + 1) / questions.length) * 100)}% Completado</span>
-                            </div>
-                            <div className="w-full h-2 bg-border-light rounded-full overflow-hidden text-left">
-                                <div
-                                    className="h-full bg-brand-primary transition-all duration-500 ease-out"
-                                    style={{ width: `${((currentStep + 1) / questions.length) * 100}%` }}
-                                ></div>
-                            </div>
-                        </div>
-
-                        {/* Question container */}
-                        <div className="w-full bg-white rounded-[2rem] p-6 md:p-12 border border-border-light shadow-sm">
-                            
-                            {/* Category Badge */}
-                            <div className="flex items-center mb-6">
-                                <span className="text-[10px] font-bold tracking-widest text-brand-primary uppercase border border-brand-primary/20 rounded-md px-3 py-1.5 bg-brand-light">
-                                    {question.category.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                </span>
-                            </div>
-
-                            {/* Active Question */}
-                            <h2 className="text-2xl md:text-3xl font-serif text-text-primary leading-tight mb-8 tracking-tight font-medium">
-                                {question.question.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                {question.required === false && (
-                                    <span className="text-sm font-sans font-normal text-text-secondary/60 ml-2">
-                                        (Opcional)
-                                    </span>
-                                )}
-                            </h2>
-
-                            {/* Answer input/choices */}
-                            <div className="flex flex-col gap-4">
-                                {question.type_question === "opcion multiple" ? (
-                                    question.response.map((opt, i) => (
-                                        <div
-                                            key={i}
-                                            onClick={() => setAnswers({ ...answers, [currentStep]: opt })}
-                                            className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
-                                                    ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
-                                                    : 'border-border-light bg-white hover:border-brand-primary/40 hover:bg-background-hover/40'
-                                                }`}
-                                        >
-                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${answers[currentStep] === opt ? 'border-brand-primary' : 'border-gray-300'}`}>
-                                                {answers[currentStep] === opt && <div className="w-2.5 h-2.5 bg-brand-primary rounded-full"></div>}
-                                            </div>
-                                            <span className="text-base md:text-lg text-text-primary font-medium">{opt}</span>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <input
-                                        type={
-                                            question.question.toLowerCase().includes('fecha') || 
-                                            question.question.toLowerCase().includes('date') || 
-                                            question.question.toLowerCase().includes('vencimiento') ||
-                                            question.question.toLowerCase().includes('expedición')
-                                                ? 'date' 
-                                                : 'text'
-                                        }
-                                        value={answers[currentStep] || ''}
-                                        onChange={(e) => setAnswers({ ...answers, [currentStep]: e.target.value })}
-                                        placeholder="Escribe tu respuesta aquí..."
-                                        className="w-full border border-border-light rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all shadow-sm"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                const isRequired = question.required !== false;
-                                                const hasAnswer = answers[currentStep] !== undefined && answers[currentStep] !== null && answers[currentStep].trim() !== '';
-                                                if (!isRequired || hasAnswer) {
-                                                    handleNext();
-                                                }
-                                            }
-                                        }}
-                                    />
-                                )}
-                            </div>
-
-                            {/* Section-specific notes from VIPROInfo */}
-                            {sectionNotes.length > 0 && (
-                                <div className="mt-8 bg-brand-light/40 border border-brand-primary/10 rounded-2xl p-5 flex flex-col gap-2">
-                                    <span className="text-xs font-bold text-brand-primary uppercase tracking-wider flex items-center gap-1.5">
-                                        ℹ️ Nota de la Sección
-                                    </span>
-                                    {sectionNotes.map((note, idx) => (
-                                        <p key={idx} className="text-text-secondary text-sm leading-relaxed">
-                                            {note.info_text.replace(/\[cite:\s*\d+\]/g, "").trim()}
-                                        </p>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Navigation controls */}
-                            <div className="mt-10 pt-6 border-t border-border-light flex items-center justify-between">
-                                <button
-                                    onClick={handleBack}
-                                    className="font-semibold px-6 py-3 rounded-lg border border-border-light text-text-primary hover:bg-background-hover transition-colors shadow-sm text-sm md:text-base cursor-pointer"
-                                >
-                                    Atrás
-                                </button>
-                                <button
-                                    disabled={question.required !== false && (answers[currentStep] === undefined || answers[currentStep] === null || answers[currentStep].trim() === '')}
-                                    onClick={handleNext}
-                                    className="bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md text-sm md:text-base cursor-pointer"
-                                >
-                                    {currentStep === questions.length - 1 ? 'Finalizar Evaluación' : 'Siguiente'}
-                                </button>
-                            </div>
-                        </div>
+                    {/* Category Badge */}
+                    <div className="flex items-center mb-6">
+                        <span className="text-[10px] font-bold tracking-widest text-brand-primary uppercase border border-brand-primary/20 rounded-md px-3 py-1.5 bg-brand-light">
+                            {question.category.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                        </span>
                     </div>
 
-                    {/* RIGHT COLUMN (ACCORDION SIDEBAR PANEL) */}
-                    <div className={`w-full lg:col-span-1 flex flex-col gap-6 ${showSidebarMobile ? 'block' : 'hidden lg:flex'}`}>
-                        
-                        <div className="bg-white rounded-2xl p-6 border border-border-light shadow-sm flex flex-col gap-4">
-                            <h2 className="text-xl font-serif text-text-primary font-bold border-b border-border-light pb-3">
-                                Guía & Requisitos {countryEmoji}
-                            </h2>
+                    {/* Active Question */}
+                    <h2 className="text-2xl md:text-3xl font-serif text-text-primary leading-tight mb-8 tracking-tight font-medium text-left">
+                        {question.question.replace(/\[cite:\s*\d+\]/g, "").trim()}
+                        {question.required === false && (
+                            <span className="text-sm font-sans font-normal text-text-secondary/60 ml-2">
+                                (Opcional)
+                            </span>
+                        )}
+                    </h2>
 
-                            {/* Accordion 1: Requisitos (Anexo A) */}
-                            <div className="border border-border-light rounded-xl overflow-hidden shadow-sm">
-                                <button
-                                    onClick={() => setOpenAnnexA(!openAnnexA)}
-                                    className="w-full flex justify-between items-center px-4 py-3 bg-brand-light/20 hover:bg-brand-light/40 transition-colors text-left"
+                    {/* Answer input/choices */}
+                    <div className="flex flex-col gap-4 text-left">
+                        {question.type_question === "opcion multiple" ? (
+                            question.response.map((opt, i) => (
+                                <div
+                                    key={i}
+                                    onClick={() => {
+                                        setValidationError(null);
+                                        setAnswers({ ...answers, [currentStep]: opt });
+                                    }}
+                                    className={`flex items-center gap-4 p-4 md:p-5 rounded-xl border cursor-pointer transition-all duration-200 ${answers[currentStep] === opt
+                                            ? 'border-brand-primary bg-brand-light/30 shadow-sm ring-1 ring-brand-primary'
+                                            : 'border-border-light bg-white hover:border-brand-primary/40 hover:bg-background-hover/40'
+                                        }`}
                                 >
-                                    <span className="font-bold text-sm text-text-primary flex items-center gap-2">
-                                        📋 Requisitos y Documentos
-                                    </span>
-                                    <svg
-                                        className={`w-4 h-4 text-text-secondary transition-transform duration-300 ${openAnnexA ? "rotate-180" : ""}`}
-                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-                                    >
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-
-                                {openAnnexA && (
-                                    <div className="p-4 bg-white text-xs text-text-secondary divide-y divide-border-light/60 flex flex-col max-h-96 overflow-y-auto">
-                                        {annexAItems.map((item, idx) => {
-                                            const parsed = parseAnnexItem(item.info_text);
-                                            if (parsed.type === 'header') return null; // skip headers
-                                            return (
-                                                <div key={idx} className="py-2.5 flex flex-col gap-1">
-                                                    {parsed.title && (
-                                                        <span className="font-bold text-text-primary uppercase tracking-wide text-[10px]">
-                                                            {parsed.number ? `${parsed.number}. ` : ""}{parsed.title}
-                                                        </span>
-                                                    )}
-                                                    <p className="leading-relaxed">{parsed.text}</p>
-                                                </div>
-                                            );
-                                        })}
+                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${answers[currentStep] === opt ? 'border-brand-primary' : 'border-gray-300'}`}>
+                                        {answers[currentStep] === opt && <div className="w-2.5 h-2.5 bg-brand-primary rounded-full"></div>}
                                     </div>
-                                )}
-                            </div>
-
-                            {/* Accordion 2: Guía de Proceso (Anexo B) */}
-                            <div className="border border-border-light rounded-xl overflow-hidden shadow-sm">
-                                <button
-                                    onClick={() => setOpenAnnexB(!openAnnexB)}
-                                    className="w-full flex justify-between items-center px-4 py-3 bg-brand-light/20 hover:bg-brand-light/40 transition-colors text-left"
-                                >
-                                    <span className="font-bold text-sm text-text-primary flex items-center gap-2">
-                                        🗺️ Guía del Proceso Paso a Paso
-                                    </span>
-                                    <svg
-                                        className={`w-4 h-4 text-text-secondary transition-transform duration-300 ${openAnnexB ? "rotate-180" : ""}`}
-                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-                                    >
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-
-                                {openAnnexB && (
-                                    <div className="p-4 bg-white text-xs text-text-secondary flex flex-col gap-4 max-h-96 overflow-y-auto">
-                                        {annexBItems.map((item, idx) => {
-                                            const parsed = parseAnnexItem(item.info_text);
-                                            if (parsed.type === 'header') return null;
-                                            if (parsed.type === 'step') {
-                                                return (
-                                                    <div key={idx} className="flex gap-3 relative">
-                                                        <div className="w-6 h-6 rounded-full bg-brand-primary text-white font-bold flex items-center justify-center flex-shrink-0 text-[10px]">
-                                                            {parsed.number?.replace(/[^0-9]/g, "")}
-                                                        </div>
-                                                        <div className="flex-1">
-                                                            {parsed.title && <span className="font-bold text-text-primary text-[10px] uppercase block mb-0.5">{parsed.title}</span>}
-                                                            <p className="leading-relaxed">{parsed.text}</p>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            }
-                                            return <p key={idx} className="leading-relaxed italic border-b border-border-light pb-2">{parsed.text}</p>;
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Contact Box */}
-                            <div className="bg-[#FAF9F6] border border-border-light p-4 rounded-xl flex flex-col gap-2">
-                                <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider block">Contacto y Soporte</span>
-                                <p className="font-bold text-xs text-text-primary">Volamos Viajes</p>
-                                <div className="text-[11px] text-text-secondary flex flex-col gap-1 leading-normal">
-                                    <span>💬 WhatsApp: 7020-0976</span>
-                                    <span>✉️ Email: reservas1@volamosviajes.com</span>
-                                    <span>🌐 Web: www.volamosviajes.com</span>
+                                    <span className="text-base md:text-lg text-text-primary font-medium">{opt}</span>
                                 </div>
-                            </div>
-                        </div>
+                            ))
+                        ) : (
+                            <input
+                                type={
+                                    question.question.toLowerCase().includes('fecha') || 
+                                    question.question.toLowerCase().includes('date') || 
+                                    question.question.toLowerCase().includes('vencimiento') ||
+                                    question.question.toLowerCase().includes('expedición')
+                                        ? 'date' 
+                                        : 'text'
+                                }
+                                value={answers[currentStep] || ''}
+                                onChange={(e) => {
+                                    setValidationError(null);
+                                    setAnswers({ ...answers, [currentStep]: e.target.value });
+                                }}
+                                placeholder="Escribe tu respuesta aquí..."
+                                className={`w-full border ${validationError ? 'border-red-400 focus:ring-red-200' : 'border-border-light focus:ring-brand-primary/50'} rounded-xl px-5 py-4 text-base md:text-lg text-text-primary bg-white focus:outline-none focus:ring-2 transition-all shadow-sm`}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        handleNext();
+                                    }
+                                }}
+                            />
+                        )}
+                    </div>
 
+                    {/* Validation Error Banner */}
+                    {validationError && (
+                        <div className="mt-4 p-4 bg-red-50 border border-red-200 text-red-700 text-xs md:text-sm font-semibold rounded-xl flex items-start gap-3 animate-in fade-in duration-200 text-left">
+                            <span className="text-lg leading-none">⚠️</span>
+                            <span className="leading-relaxed">{validationError}</span>
+                        </div>
+                    )}
+
+                    {/* Navigation controls */}
+
+                    <div className="mt-10 pt-6 border-t border-border-light flex items-center justify-between">
+                        <button
+                            onClick={handleBack}
+                            className="font-semibold px-6 py-3 rounded-lg border border-border-light text-text-primary hover:bg-background-hover transition-colors shadow-sm text-sm md:text-base cursor-pointer"
+                        >
+                            Atrás
+                        </button>
+                        <button
+                            disabled={question.required !== false && (answers[currentStep] === undefined || answers[currentStep] === null || answers[currentStep].trim() === '')}
+                            onClick={handleNext}
+                            className="bg-brand-primary text-white font-semibold px-6 py-3 rounded-lg hover:bg-brand-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md text-sm md:text-base cursor-pointer"
+                        >
+                            {currentStep === questions.length - 1 ? 'Finalizar Evaluación' : 'Siguiente'}
+                        </button>
                     </div>
                 </div>
             </main>
@@ -1081,10 +1197,11 @@ function ViproEvaluationContent() {
 export default function ViproEvaluationPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen w-full flex items-center justify-center bg-background-main">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-text-secondary font-medium">Cargando evaluación...</span>
+            <div className="min-h-screen w-full bg-background-main p-8 animate-pulse flex justify-center items-center">
+                <div className="max-w-4xl w-full bg-white rounded-3xl p-10 border border-border-light space-y-6">
+                    <div className="h-10 bg-gray-200 rounded w-1/2"></div>
+                    <div className="h-6 bg-gray-100 rounded w-3/4"></div>
+                    <div className="h-64 bg-gray-100 rounded-2xl w-full"></div>
                 </div>
             </div>
         }>

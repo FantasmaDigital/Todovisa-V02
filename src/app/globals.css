@@ -44,6 +44,10 @@
    RESETEO BASE
    ========================================= */
 @layer base {
+  *, ::before, ::after {
+    border-color: var(--color-border-light);
+  }
+
   body {
     background-color: var(--color-background-main);
     color: var(--color-text-primary);
@@ -54,9 +58,65 @@
     padding: 0;
   }
 
-  /* Eliminar outlines por defecto y usar el borde de focus personalizado sin volumen */
-  input:focus, button:focus, textarea:focus, select:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--color-background-main), 0 0 0 4px var(--color-border-focus);
+  /* Eliminar líneas azules / outlines al hacer clic en todo el sitio */
+  input:focus, button:focus, textarea:focus, select:focus, a:focus,
+  input:focus-visible, button:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
   }
 }
+
+/* =========================================
+   UTILIDADES RESPONSIVAS Y TÁCTILES
+   ========================================= */
+.responsive-container {
+  width: 100%;
+  max-width: 80rem; /* 1280px */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .responsive-container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .responsive-container {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+/* Scrollbar suave horizontal para tablas responsivas */
+.table-scroll-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #003087 #E2E8F0;
+}
+
+.table-scroll-container::-webkit-scrollbar {
+  height: 12px;
+}
+
+.table-scroll-container::-webkit-scrollbar-track {
+  background: #F1F5F9;
+  border-radius: 6px;
+  border-top: 1px solid #CBD5E1;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb {
+  background: #003087;
+  border-radius: 6px;
+  border: 2px solid #F1F5F9;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #001A4D;
+}

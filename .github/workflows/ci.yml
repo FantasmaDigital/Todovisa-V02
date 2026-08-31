@@ -1,0 +1,56 @@
+name: CI (Integration)
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  verify:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run ESLint
+        # continue-on-error: true prevents existing eslint issues (currently 187 errors) 
+        # from blocking the entire pipeline. Remove this when errors have been corrected.
+        continue-on-error: true
+        run: pnpm run lint
+
+      - name: Run TypeScript Compiler Check (tsc)
+        run: pnpm exec tsc --noEmit
+
+      - name: Run Next.js Production Build
+        # Mocking environment variables to allow production build to succeed on CI
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy' }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_dummy' }}
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID || 'dummy-client-id' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || 'dummy-gemini-key' }}
+          NEXT_PUBLIC_VIPRO_PRICE: ${{ secrets.NEXT_PUBLIC_VIPRO_PRICE || '19.99' }}
+          NEXT_PUBLIC_FULL_SERVICE_PRICE: ${{ secrets.NEXT_PUBLIC_FULL_SERVICE_PRICE || '150' }}
+          NEXT_PUBLIC_PAYPAL_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'test' }}
+          NEXT_PUBLIC_PAYPAL_MODE: ${{ secrets.NEXT_PUBLIC_PAYPAL_MODE || 'sandbox' }}
+        run: pnpm run build
