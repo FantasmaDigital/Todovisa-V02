@@ -3,7 +3,7 @@
 import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import Header from "@/app/components/shared/Header";
+import { Header } from "@/app/components/shared/Header";
 import OtpInputModal from "@/app/components/auth/OtpInputModal";
 import { AuthService } from "@/app/service/AuthService";
 
