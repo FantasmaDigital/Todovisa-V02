@@ -12,15 +12,24 @@ export async function POST(request: Request) {
     phone = body.phone;
     country = body.country;
 
-    if (!email || !password) {
+    const sanitizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    const sanitizedPassword = typeof password === "string" ? password : "";
+    const sanitizedFirstName = typeof first_name === "string" ? first_name.trim() : "";
+    const sanitizedLastName = typeof last_name === "string" ? last_name.trim() : "";
+
+    if (!sanitizedEmail || !sanitizedPassword) {
       return NextResponse.json({ error: "Email y contraseña son requeridos" }, { status: 400 });
     }
 
+    if (sanitizedPassword.length < 6) {
+      return NextResponse.json({ error: "La contraseña debe tener al menos 6 caracteres" }, { status: 400 });
+    }
+
     const { data, error } = await AuthRepository.signUp({
-      email,
-      password,
-      first_name,
-      last_name,
+      email: sanitizedEmail,
+      password: sanitizedPassword,
+      first_name: sanitizedFirstName,
+      last_name: sanitizedLastName,
       phone,
       country,
     });

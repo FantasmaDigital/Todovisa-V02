@@ -176,11 +176,9 @@ export function CompanyReferralModal({
 
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-sm text-left text-xs space-y-2">
                 <p className="text-slate-800 font-semibold leading-relaxed">
-                  ✓ Un <strong>asesor propio de TodoVisa</strong> se pondrá en contacto directo contigo vía teléfono o WhatsApp para dar seguimiento y finalizar tu trámite de visa.
+                  ✓ Un <strong>asesor propio de TodoVisa</strong> se pondrá en contacto directo contigo vía teléfono o WhatsApp para dar seguimiento y finalizar tu proceso de visa.
                 </p>
-                <p className="text-slate-600 font-medium text-[11px] leading-relaxed pt-2 border-t border-slate-200">
-                  ★ La empresa referidora queda registrada en tu expediente y la comisión correspondiente se asignará desde nuestro módulo de administración al completarse el proceso.
-                </p>
+                
               </div>
 
               <button
@@ -278,7 +276,7 @@ export function CompanyReferralModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1">
-                    Tipo de Trámite / Visa
+                    Tipo de Proceso / Visa
                   </label>
                   <select
                     value={visaType}
@@ -290,7 +288,7 @@ export function CompanyReferralModal({
                     <option value="Visa de Trabajo (H1B/H2B/O1)">Visa de Trabajo</option>
                     <option value="Residencia / Petición Familiar">Petición Familiar</option>
                     <option value="Renovación de Visa">Renovación de Visa</option>
-                    <option value="Otro tipo de Trámite">Otro tipo de Trámite</option>
+                    <option value="Otro tipo de Proceso">Otro tipo de Proceso</option>
                   </select>
                 </div>
 

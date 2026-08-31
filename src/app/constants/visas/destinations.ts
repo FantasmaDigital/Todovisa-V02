@@ -42,7 +42,7 @@ export const visaDestinations: VisaDestination[] = [
         description: "Atención por cita en MiConsulado, exención con visa estadounidense o canadiense vigente y estancia de hasta 180 días.",
         enabled: true,
         badge: "Cita Presencial",
-        aboutDesc: "Visas de visitante y trámites consulares con acompañamiento integral."
+        aboutDesc: "Visas de visitante y procesos consulares con acompañamiento integral."
     },
     {
         code: "uk",
@@ -52,7 +52,7 @@ export const visaDestinations: VisaDestination[] = [
         type: "Standard Visitor Visa",
         description: "Solicitud online UKVI, arancel de £115 GBP, comprobante de liquidez bancaria de 6 meses y toma de biométricos.",
         enabled: true,
-        badge: "Trámite Online",
+        badge: "Proceso Online",
         aboutDesc: "Standard Visitor Visa y asesoría para solicitudes oficiales ante la UKVI."
     },
     {
@@ -72,7 +72,7 @@ export const visaDestinations: VisaDestination[] = [
         flag: "🇦🇺",
         flagImage: "/images/flag_aus.png",
         type: "Visitor Visa (Subclass 600)",
-        description: "Trámite 100% digital a través de ImmiAccount ($190 AUD), vinculación electrónica al pasaporte sin viñeta física.",
+        description: "Proceso 100% digital a través de ImmiAccount ($190 AUD), vinculación electrónica al pasaporte sin viñeta física.",
         enabled: true,
         badge: "100% Digital",
         aboutDesc: "Visados de turismo Subclass 600 y procesamiento digital vía ImmiAccount."

@@ -97,7 +97,7 @@ export default function ServicesPage() {
                                         <span className="text-xs text-text-muted font-sans">USD / pago único</span>
                                     </div>
                                     <p className="text-xs text-text-secondary leading-relaxed">
-                                        Herramienta de inteligencia consular para diagnosticar la viabilidad de tu perfil antes de iniciar trámites oficiales.
+                                        Herramienta de inteligencia consular para diagnosticar la viabilidad de tu perfil antes de iniciar procesos oficiales.
                                     </p>
                                 </div>
 
@@ -205,7 +205,7 @@ export default function ServicesPage() {
                 </section>
 
                 <div className="text-left space-y-4">
-                    <h2 className="text-2xl font-serif font-bold text-text-primary">Explora Trámites de Visa por País</h2>
+                    <h2 className="text-2xl font-serif font-bold text-text-primary">Explora Procesos de Visa por País</h2>
                     <p className="text-xs text-text-secondary">Selecciona el país de tu interés para conocer la guía oficial de requisitos y tiempos de procesamiento.</p>
                 </div>
 
@@ -244,9 +244,8 @@ export default function ServicesPage() {
                                     <span>Destino</span>
                                 </div>
 
-                                {/* Title */}
                                 <h2 className="text-[22px] font-bold text-gray-900 mb-6 leading-[1.3] tracking-tight">
-                                    Guía de trámite de Visa para {country.name}
+                                    Guía de proceso de Visa para {country.name}
                                 </h2>
 
                                 {/* Spacer to push button to the bottom */}

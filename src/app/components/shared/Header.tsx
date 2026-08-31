@@ -394,7 +394,7 @@ export const Header = ({ headerRef }: { headerRef?: any }) => {
                                                 </span>
                                                 <div className="flex flex-col text-left">
                                                     <span className="font-semibold text-xs leading-none">Mi perfil</span>
-                                                    <span className="text-[10px] text-text-secondary mt-1">Gestiona tu cuenta y trámites</span>
+                                                    <span className="text-[10px] text-text-secondary mt-1">Gestiona tu cuenta y procesos</span>
                                                 </div>
                                             </Link>
                                             <button

@@ -7,7 +7,7 @@ const ForgotPasswordPage = () => {
                 <div className="max-w-md flex flex-col gap-10 text-center">
                     <h2 className="text-5xl font-bold">Empieza tu aventura hoy</h2>
                     <p className="text-lg text-brand-primary-light/90">
-                        Regístrate y descubre cómo podemos ayudarte a gestionar tus trámites de forma rápida y segura.
+                        Regístrate y descubre cómo podemos ayudarte a gestionar tus procesos de forma rápida y segura.
                     </p>
                 </div>
             </div>

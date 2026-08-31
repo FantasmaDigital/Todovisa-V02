@@ -1063,7 +1063,7 @@ function AgentPortalContent() {
                         <div>
                           <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA CUARTA: CONFIDENCIALIDAD DE DATOS</h4>
                           <p>
-                            El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al trámite migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
+                            El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al proceso migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
                           </p>
                         </div>
                       </div>
@@ -1100,14 +1100,14 @@ function AgentPortalContent() {
                         <div>
                           <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA TERCERA: MÉTODOS Y CICLO DE PAGO</h4>
                           <p>
-                            Las comisiones correspondientes a los trámites marcados como &quot;Cerrados y Aprobados por el Cliente&quot; serán acumuladas semanalmente. TodoVisa efectuará el pago al Agente cada día <strong>Viernes hábil</strong> mediante transferencia bancaria (ACH) o el procesador de pagos registrado en su perfil.
+                            Las comisiones correspondientes a los procesos marcados como &quot;Cerrados y Aprobados por el Cliente&quot; serán acumuladas semanalmente. TodoVisa efectuará el pago al Agente cada día <strong>Viernes hábil</strong> mediante transferencia bancaria (ACH) o el procesador de pagos registrado en su perfil.
                           </p>
                         </div>
 
                         <div>
                           <h4 className="font-bold text-text-primary uppercase text-[10px] mb-1">CLÁUSULA CUARTA: CONFIDENCIALIDAD DE DATOS</h4>
                           <p>
-                            El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al trámite migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
+                            El Agente reconoce que tendrá acceso a datos altamente sensibles (números de pasaportes, datos financieros, actas de nacimiento y biografías). Se obliga a no divulgar, guardar copias externas, vender o utilizar estos datos para fines ajenos al proceso migratorio del cliente asignado. Cualquier filtración será causal de baja inmediata y acciones legales según la Ley de Protección de Datos de El Salvador.
                           </p>
                         </div>
                       </div>

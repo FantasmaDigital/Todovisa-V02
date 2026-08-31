@@ -11,6 +11,7 @@ export const questionsSpanish: VIPROQuestionsProps[] = [
     { "question": "Alguna vez ha sido deportado de Estados Unidos?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "DATOS PERSONALES" },
     { "question": "Alguna vez ha estado detenido?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "DATOS PERSONALES" },
     { "question": "Alguna vez le han cancelado una visa americana?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "DATOS PERSONALES" },
+    { "question": "¿Qué tipo de visa solicita o desea obtener?", "type_question": "opcion multiple", "response": ["B1/B2 — Turismo y Negocios", "B1 — Negocios únicamente", "B2 — Turismo / Médica / Familiar", "Visa de Trabajo (H-1B / H-2B / L-1 / O-1)", "Visa de Estudiante (F-1 / J-1)", "Asilo / Protección Internacional", "Otro tipo de visa"], "user_response": "", "category": "DATOS PERSONALES" },
 
     { "question": "Sus padres si tienen visa americana?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "ARRAIGOS FAMILIARES Y FINANCIEROS" },
     { "question": "Desea viajar a estados unidos por visita familiar?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "ARRAIGOS FAMILIARES Y FINANCIEROS" },
@@ -49,7 +50,11 @@ export const questionsSpanish: VIPROQuestionsProps[] = [
     { "question": "Ha pertenecido al servicio militar?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "HISTORIAL DELICTIVO" },
     { "question": "Ha pertenecido a una tribu o secta grupo no reconocido legalmente?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "HISTORIAL DELICTIVO" },
     { "question": "¿Ha estado involucrado en algún delito en su país?", "type_question": "opcion multiple", "response": ["SÍ", "NO"], "user_response": "", "category": "HISTORIAL DELICTIVO" },
-    { "question": "¿Alguna vez ha servido, sido miembro o estado involucrado en una unidad paramilitar, unidad de autodefensa, grupo guerrillero u organización insurgente?", "type_question": "opcion multiple", "response": ["SÍ", "NO"], "user_response": "", "category": "HISTORIAL DELICTIVO" }
+    { "question": "¿Alguna vez ha servido, sido miembro o estado involucrado en una unidad paramilitar, unidad de autodefensa, grupo guerrillero u organización insurgente?", "type_question": "opcion multiple", "response": ["SÍ", "NO"], "user_response": "", "category": "HISTORIAL DELICTIVO" },
+    { "question": "¿Tiene una petición formal o patrocinio de un patrono o empresa en Estados Unidos o el país de destino?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "ARRAIGOS FAMILIARES Y FINANCIEROS" },
+    { "question": "¿Has sufrido daño o maltrato en tu país?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "PROTECCIÓN Y ASILO" },
+    { "question": "¿Temes regresar a tu país?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "PROTECCIÓN Y ASILO" },
+    { "question": "¿Has sido amenazado o planeas pedir asilo?", "type_question": "opcion multiple", "response": ["SI", "NO"], "user_response": "", "category": "PROTECCIÓN Y ASILO" }
 ];
 
 export default questionsSpanish;

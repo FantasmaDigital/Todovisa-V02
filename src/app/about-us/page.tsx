@@ -115,7 +115,7 @@ export default function AboutUsPage() {
             <div className="space-y-6 text-left">
               <span className="text-xs font-bold uppercase tracking-widest text-brand-primary">NUESTRA ESENCIA</span>
               <h2 className="text-3xl md:text-4xl font-bold text-text-primary leading-tight font-serif italic">
-                Nacidos para eliminar la incertidumbre en trámites de visa.
+                Nacidos para eliminar la incertidumbre en procesos de visa.
               </h2>
               <p className="text-sm md:text-base text-text-secondary leading-relaxed">
                 TodoVisa surgió al identificar que miles de solicitudes de visa son rechazadas no por falta de solvencia o lazos de arraigo, sino por errores en el llenado de formularios, expedientes incompletos o falta de preparación previa para la entrevista consular.
@@ -183,7 +183,7 @@ export default function AboutUsPage() {
               Especialistas en {destinations.length} Destinos Internacionales
             </h2>
             <p className="text-sm text-text-secondary max-w-2xl mx-auto">
-              Gestionamos trámites de primera vez y programas de renovación agilizada para los principales destinos del mundo.
+              Gestionamos procesos de primera vez y programas de renovación agilizada para los principales destinos del mundo.
             </p>
           </div>
 

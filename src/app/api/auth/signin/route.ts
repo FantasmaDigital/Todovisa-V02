@@ -5,14 +5,18 @@ export async function POST(request: Request) {
   try {
     const { email, password } = await request.json();
 
-    if (!email || !password) {
+    const sanitizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    const sanitizedPassword = typeof password === "string" ? password : "";
+
+    if (!sanitizedEmail || !sanitizedPassword) {
       return NextResponse.json({ error: "Email y contraseña son requeridos" }, { status: 400 });
     }
 
-    const { data, error } = await AuthRepository.signIn(email, password);
+    const { data, error } = await AuthRepository.signIn(sanitizedEmail, sanitizedPassword);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
+      // Prevención de enumeración de usuarios: mensaje de error genérico para autenticación fallida
+      return NextResponse.json({ error: "Credenciales de acceso no válidas" }, { status: 401 });
     }
 
     console.log("ℹ️ [Server Auth] Usuario inició sesión exitosamente (Email/Password):", {

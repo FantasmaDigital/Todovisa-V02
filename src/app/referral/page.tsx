@@ -59,7 +59,7 @@ function ReferralContent() {
             <p className="text-xs font-semibold text-slate-600 animate-pulse">Cargando datos de la empresa aliada...</p>
           ) : agencyInfo ? (
             <div className="bg-amber-50 border border-amber-300 rounded-sm p-4 text-xs sm:text-sm text-amber-950 leading-relaxed font-semibold mb-5">
-              Has ingresado mediante el código de la empresa aliada: <strong className="font-bold text-amber-950 uppercase">{agencyInfo.agencyName}</strong> (<span className="font-mono font-bold">{referralCode}</span>). Al enviar tus datos de contacto, un <strong>asesor propio de TodoVisa</strong> se pondrá en contacto directo contigo para gestionar tu trámite.
+              Has ingresado mediante el código de la empresa aliada: <strong className="font-bold text-amber-950 uppercase">{agencyInfo.agencyName}</strong> (<span className="font-mono font-bold">{referralCode}</span>). Al enviar tus datos de contacto, un <strong>asesor propio de TodoVisa</strong> se pondrá en contacto directo contigo para gestionar tu proceso.
             </div>
           ) : (
             <p className="text-xs sm:text-sm font-semibold text-slate-700 leading-relaxed mb-5">
