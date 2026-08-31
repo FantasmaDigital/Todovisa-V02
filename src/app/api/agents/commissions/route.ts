@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { AgentRepository } from "@/lib/repositories/agent.repository";
 import { NextResponse } from "next/server";
 import supabaseAdmin from "@/lib/supabaseAdmin";
@@ -8,7 +11,17 @@ export async function GET() {
     const dbClient = supabaseAdmin || supabase;
     const { data, error } = await dbClient.from("agent_commissions").select("*").order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return NextResponse.json({ data: data || [] }, { status: 200 });
+    return NextResponse.json(
+      { data: data || [] },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
+        },
+      }
+    );
   } catch (err: any) {
     console.error("GET /api/agents/commissions error:", err);
     return NextResponse.json({ error: err.message || "Failed to fetch commissions" }, { status: 500 });

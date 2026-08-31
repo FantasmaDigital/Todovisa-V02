@@ -1,4 +1,5 @@
 import { AuthService } from "@/app/service/AuthService";
+import { getAuthHeaders } from "./AuthClientService";
 
 export class AgencyClientService {
   static async validateAgencyCode(code: string): Promise<{
@@ -160,17 +161,48 @@ export class AgencyClientService {
   }
 
   static async getReferralLeads(): Promise<any[]> {
-
     try {
-      const res = await fetch("/api/agency/referral-lead", {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/agency/referral-lead?_t=${Date.now()}`, {
         method: "GET",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          ...headers,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+        },
+        cache: "no-store",
       });
       const data = await res.json();
       return data.leads || [];
     } catch (err: any) {
       console.error("Error obteniendo leads de referidos:", err);
       return [];
+    }
+  }
+
+  static async updateReferralLead(payload: {
+    id: string;
+    status?: string;
+    commission_assigned?: boolean;
+    notes?: string;
+  }): Promise<any> {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/agency/referral-lead", {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+        },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      console.error("Error actualizando lead de referido:", err);
+      return { success: false, error: err.message };
     }
   }
 }

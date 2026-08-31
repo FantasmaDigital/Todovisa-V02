@@ -24,4 +24,13 @@ export class AuthService {
   static async signOut() {
     return AuthClientService.signOut();
   }
+
+  static async sendOtp(email: string, purpose: string = "verification", name?: string) {
+    return AuthClientService.sendOtp(email, purpose, name);
+  }
+
+  static async verifyOtp(email: string, code: string, purpose: string = "verification") {
+    return AuthClientService.verifyOtp(email, code, purpose);
+  }
 }
+

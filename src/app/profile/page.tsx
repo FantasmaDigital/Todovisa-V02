@@ -207,6 +207,7 @@ export default function PerfilUsuarioPage() {
   // Manual Admin Commission Assignment states
   const [isAdminCommissionModalOpen, setIsAdminCommissionModalOpen] = useState(false);
   const [selectedTxForCommission, setSelectedTxForCommission] = useState<any | null>(null);
+  const [selectedLeadForCommission, setSelectedLeadForCommission] = useState<any | null>(null);
   const [adminTargetAgencyId, setAdminTargetAgencyId] = useState("");
   const [adminCommissionAmount, setAdminCommissionAmount] = useState("");
   const [adminCommissionGross, setAdminCommissionGross] = useState("");
@@ -496,7 +497,14 @@ export default function PerfilUsuarioPage() {
   const [countryCode, setCountryCode] = useState("SV");
 
   // Tab State: "datos", "proceso", "asesor", "pagos"
-  const [activeTab, setActiveTab] = useState("datos");
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) return tabParam;
+    }
+    return "datos";
+  });
 
   // Sync tab with URL query parameter ?tab=
   const handleTabChange = (tabId: string) => {
@@ -530,11 +538,7 @@ export default function PerfilUsuarioPage() {
 
         if (isAllowed) {
           setActiveTab(tabParam);
-        } else {
-          setActiveTab("datos");
-          const url = new URL(window.location.href);
-          url.searchParams.delete("tab");
-          window.history.replaceState(null, "", url.toString());
+          return;
         }
       } else if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
         setActiveTab("admin_dashboard");
@@ -1422,13 +1426,7 @@ export default function PerfilUsuarioPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Auto-switch to datos tab when user role is agent/agency
-  useEffect(() => {
-    if (user && (user.role === ROLES.AGENT || user.role === ROLES.AGENCY)) {
-      const t = setTimeout(() => setActiveTab("datos"), 0);
-      return () => clearTimeout(t);
-    }
-  }, [user?.role]);
+
 
   // Fetch agent commissions from API
   const loadCommissions = async () => {
@@ -1782,15 +1780,39 @@ export default function PerfilUsuarioPage() {
 
       setIsAssigningCommission(false);
       if (res && res.success) {
+        if (selectedLeadForCommission?.id) {
+          try {
+            await AgencyClientService.updateReferralLead({
+              id: selectedLeadForCommission.id,
+              status: "completed",
+              commission_assigned: true,
+            });
+
+            // Actualizar inmediatamente la lista local de leads
+            setReferralLeadsList((prevLeads) =>
+              prevLeads.map((l) =>
+                l.id === selectedLeadForCommission.id
+                  ? { ...l, status: "completed", commission_assigned: true }
+                  : l
+              )
+            );
+            await loadReferralLeadsData();
+          } catch (leadErr) {
+            console.error("Error al actualizar estado del lead:", leadErr);
+          }
+        }
         showToast(`✅ Comisión de $${commissionAmt.toFixed(2)} USD (${rate}%) asignada exitosamente a la empresa.`, "success");
         setIsAdminCommissionModalOpen(false);
+        setSelectedLeadForCommission(null);
         loadCommissions();
       } else {
         showToast(res?.error || "Error al asignar la comisión", "error");
       }
     } catch (err: any) {
       setIsAssigningCommission(false);
-      showToast("No se pudo asignar la comisión. Inténtalo nuevamente.", "error");
+      console.error("Error al asignar comisión:", err);
+      const errMsg = err?.message || String(err) || "No se pudo asignar la comisión.";
+      showToast(`No se pudo asignar la comisión: ${errMsg}`, "error");
     }
   };
 
@@ -2671,16 +2693,12 @@ export default function PerfilUsuarioPage() {
                     if (user.role === ROLES.AGENCY) {
                       const agencyTabs: any[] = [
                         { id: "datos", label: "Mis Datos Personales" },
-                        { id: "admin_referidos", label: "Mis Leads Referidos" }
+                        { id: "admin_referidos", label: "Mis Leads Referidos" },
+                        { id: "invitar_agentes", label: "Link de Referidos" },
+                        { id: "comisiones", label: "Comisiones Realizadas" },
+                        { id: "metodos_cobro", label: "Métodos de Cobro" },
+                        { id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" }
                       ];
-                      if (isAccredited) {
-                        agencyTabs.push(
-                          { id: "invitar_agentes", label: "Link de Referidos" },
-                          { id: "comisiones", label: "Comisiones Realizadas" },
-                          { id: "metodos_cobro", label: "Métodos de Cobro" }
-                        );
-                      }
-                      agencyTabs.push({ id: "panel_empresa", label: "Mi Acreditación", isLink: true, url: "/agents/portal" });
                       return agencyTabs.map((t: any) => ({ ...t, svgIcon: svgIcons[t.id] }));
                     }
 
@@ -2710,12 +2728,12 @@ export default function PerfilUsuarioPage() {
                     }
 
                     if (isAccredited) {
-                      agentTabs.push(
-                        { id: "chat_agente", label: "Gestión de Casos" },
-                        { id: "comisiones", label: "Comisiones Realizadas" },
-                        { id: "metodos_cobro", label: "Métodos de Cobro" }
-                      );
+                      agentTabs.push({ id: "chat_agente", label: "Gestión de Casos" });
                     }
+                    agentTabs.push(
+                      { id: "comisiones", label: "Comisiones Realizadas" },
+                      { id: "metodos_cobro", label: "Métodos de Cobro" }
+                    );
 
                     // "Mi Acreditación" always at the very end
                     agentTabs.push({ id: "mi_acreditacion", label: "Mi Acreditación" });
@@ -3248,7 +3266,7 @@ export default function PerfilUsuarioPage() {
                             </button>
                           ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
                             <button
-                              onClick={() => setActiveTab("admin_vipro")}
+                              onClick={() => handleTabChange("admin_vipro")}
                               className="px-3 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-sm hover:bg-purple-200 transition-colors cursor-pointer shadow-xs"
                             >
                               👑 Ver Evaluaciones de Todos los Usuarios &rarr;
@@ -3283,7 +3301,7 @@ export default function PerfilUsuarioPage() {
                                 👤 {assignedAgent?.name || "Asesor Asignado"}
                               </span>
                               <button
-                                onClick={() => setActiveTab("asesor")}
+                                onClick={() => handleTabChange("asesor")}
                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 transition-colors cursor-pointer"
                               >
                                 Chat con Asesor
@@ -3291,7 +3309,7 @@ export default function PerfilUsuarioPage() {
                             </div>
                           ) : user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR ? (
                             <button
-                              onClick={() => setActiveTab("admin_expedientes")}
+                              onClick={() => handleTabChange("admin_expedientes")}
                               className="px-3 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-sm hover:bg-purple-200 transition-colors cursor-pointer shadow-xs"
                             >
                               👑 Monitor de Expedientes Globales &rarr;
@@ -3534,7 +3552,7 @@ export default function PerfilUsuarioPage() {
                                     Has asignado correctamente a tu asesor experto: <span className="font-semibold text-text-primary">{assignedAgent?.name || user.assignedAgencyName || "Tu Asesor Asignado"}</span>.
                                   </p>
                                   <button
-                                    onClick={() => setActiveTab("asesor")}
+                                    onClick={() => handleTabChange("asesor")}
                                     className="mt-3 text-xs text-brand-primary font-bold hover:underline flex items-center gap-1 cursor-pointer"
                                   >
                                     💬 Ir a mi Chat con Asesor
@@ -4632,7 +4650,7 @@ export default function PerfilUsuarioPage() {
                                         </button>
                                       ) : (
                                         <button
-                                          onClick={() => setActiveTab("asesor")}
+                                          onClick={() => handleTabChange("asesor")}
                                           className="text-brand-primary hover:underline font-semibold"
                                         >
                                           Ver Chat
@@ -5331,7 +5349,7 @@ export default function PerfilUsuarioPage() {
                     {/* Direct Action Hub */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                       <button
-                        onClick={() => setActiveTab("admin_socios")}
+                        onClick={() => handleTabChange("admin_socios")}
                         className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                       >
                         <div className="flex items-center justify-between mb-3">
@@ -5351,7 +5369,7 @@ export default function PerfilUsuarioPage() {
                       </button>
 
                       <button
-                        onClick={() => setActiveTab("admin_usuarios")}
+                        onClick={() => handleTabChange("admin_usuarios")}
                         className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                       >
                         <div className="flex items-center justify-between mb-3">
@@ -5371,7 +5389,7 @@ export default function PerfilUsuarioPage() {
                       </button>
 
                       <button
-                        onClick={() => setActiveTab("admin_expedientes")}
+                        onClick={() => handleTabChange("admin_expedientes")}
                         className="p-5 border border-border-light bg-white rounded-2xl text-left hover:border-[#113E5F] hover:shadow-md transition-all cursor-pointer group"
                       >
                         <div className="flex items-center justify-between mb-3">
@@ -5989,12 +6007,54 @@ export default function PerfilUsuarioPage() {
                                         onChange={async (e) => {
                                           const newStatus = e.target.value;
                                           try {
-                                            await supabase
-                                              .from("agency_referral_leads")
-                                              .update({ status: newStatus })
-                                              .eq("id", lead.id);
-                                            showToast("Estado actualizado correctamente", "success");
-                                            loadReferralLeadsData();
+                                            const isCompleted = newStatus === "completed";
+                                            let autoCommAssigned = lead.commission_assigned;
+
+                                            if (isCompleted && !lead.commission_assigned) {
+                                              const targetAgency = lead.agency_id || lead.agency_code;
+                                              if (targetAgency) {
+                                                const gross = 150;
+                                                const rate = 20;
+                                                const commissionAmt = gross * (rate / 100);
+                                                const commRes = await AgentClientService.createCommission({
+                                                  agent_id: targetAgency,
+                                                  client_name: lead.client_name || "Cliente Referido",
+                                                  gross_amount: gross,
+                                                  commission_rate: rate,
+                                                  commission_amount: commissionAmt,
+                                                  service_type: `Proceso de Visa (${lead.visa_type || "Referido Empresa"})`,
+                                                  status: "pending",
+                                                  notes: {
+                                                    manual_admin_assignment: true,
+                                                    assigned_by: user?.email || "Admin Status Change",
+                                                    lead_id: lead.id,
+                                                    date: new Date().toISOString()
+                                                  }
+                                                });
+                                                if (commRes && commRes.success) {
+                                                  autoCommAssigned = true;
+                                                  showToast(`✅ Comisión de $${commissionAmt.toFixed(2)} USD generada automáticamente para la empresa.`, "success");
+                                                }
+                                              }
+                                            }
+
+                                            await AgencyClientService.updateReferralLead({
+                                              id: lead.id,
+                                              status: newStatus,
+                                              commission_assigned: autoCommAssigned,
+                                            });
+
+                                            setReferralLeadsList((prevLeads) =>
+                                              prevLeads.map((l) =>
+                                                l.id === lead.id
+                                                  ? { ...l, status: newStatus, commission_assigned: autoCommAssigned }
+                                                  : l
+                                              )
+                                            );
+
+                                            showToast("Estado de prospecto actualizado", "success");
+                                            await loadReferralLeadsData();
+                                            if (typeof loadCommissions === 'function') loadCommissions();
                                           } catch (err) {
                                             showToast("No se pudo actualizar el estado", "error");
                                           }
@@ -6010,26 +6070,60 @@ export default function PerfilUsuarioPage() {
 
                                     {/* Acciones Admin */}
                                     <td className="py-4 px-4 align-top text-right whitespace-nowrap">
-                                      {user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR) ? (
-                                        <button
-                                          onClick={() => {
-                                            setSelectedTxForCommission(null);
-                                            setAdminCommissionGross("150.00");
-                                            setAdminCommissionClientName(lead.client_name || "");
-                                            setAdminTargetAgencyId(lead.agency_id || lead.agency_code || "");
-                                            setAdminCommissionRate("20");
-                                            setIsAdminCommissionModalOpen(true);
-                                          }}
-                                          className="px-3 py-1.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm border-none cursor-pointer shadow-xs transition-colors"
-                                        >
-                                          Asignar Comisión (20%)
-                                        </button>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded">
-                                          <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                                          <span>Pendiente Asignación</span>
-                                        </span>
-                                      )}
+                                      {(() => {
+                                        const isCommissionAssigned = Boolean(
+                                          lead.commission_assigned ||
+                                          agentCommissions.some((c: any) => {
+                                            const notesStr = typeof c.notes === "string" ? c.notes : JSON.stringify(c.notes || {});
+                                            return (
+                                              (lead.id && notesStr.includes(String(lead.id))) ||
+                                              (lead.client_name && c.client_name && c.client_name.trim().toLowerCase() === lead.client_name.trim().toLowerCase())
+                                            );
+                                          })
+                                        );
+
+                                        if (user && (user.role === ROLES.ADMIN || user.role === ROLES.MODERATOR)) {
+                                          if (isCommissionAssigned) {
+                                            return (
+                                              <button
+                                                disabled={true}
+                                                className="px-3 py-1.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-sm cursor-not-allowed opacity-90 shadow-2xs flex items-center gap-1.5 ml-auto"
+                                              >
+                                                <span>✓</span>
+                                                <span>Comisión Asignada</span>
+                                              </button>
+                                            );
+                                          } else {
+                                            return (
+                                              <button
+                                                onClick={() => {
+                                                  setSelectedTxForCommission(null);
+                                                  setSelectedLeadForCommission(lead);
+                                                  setAdminCommissionGross("150.00");
+                                                  setAdminCommissionClientName(lead.client_name || "");
+                                                  setAdminTargetAgencyId(lead.agency_id || lead.agency_code || "");
+                                                  setAdminCommissionRate("20");
+                                                  setIsAdminCommissionModalOpen(true);
+                                                }}
+                                                className="px-3 py-1.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm border-none cursor-pointer shadow-xs transition-colors"
+                                              >
+                                                Asignar Comisión (20%)
+                                              </button>
+                                            );
+                                          }
+                                        }
+
+                                        return isCommissionAssigned ? (
+                                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
+                                            <span>✓ Comisión Registrada</span>
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded">
+                                            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                            <span>Pendiente Asignación</span>
+                                          </span>
+                                        );
+                                      })()}
                                     </td>
 
                                   </tr>

@@ -1,5 +1,7 @@
 import { AuthRepository } from "@/lib/repositories/auth.repository";
 import { NextResponse } from "next/server";
+import { sendEmail } from "@/lib/emailService";
+import { createAccountWelcomeEmail } from "@/lib/emailTemplates";
 
 export async function POST(request: Request) {
   let email = "", password = "", first_name = "", last_name = "", phone = "", country = "";
@@ -37,6 +39,14 @@ export async function POST(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
+
+    // Trigger Welcome Email (non-blocking)
+    const displayName = [sanitizedFirstName, sanitizedLastName].filter(Boolean).join(" ") || "Cliente";
+    sendEmail({
+      to: sanitizedEmail,
+      subject: "¡Bienvenido a TodoVisa! Tu cuenta ha sido creada",
+      html: createAccountWelcomeEmail(displayName, sanitizedEmail),
+    }).catch((e) => console.error("Error sending welcome email:", e));
 
     return NextResponse.json({ data }, { status: 200 });
   } catch (err: any) {

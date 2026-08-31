@@ -85,10 +85,11 @@ export const ProcessSection = () => {
     servicioCompleto: {
       price: user?.hasPaidVipro ? formattedDiscount : formattedPrice,
       promo: user?.hasPaidVipro ? "¡Descuento VIPRO del 25% aplicado!" : "Obtén acompañamiento integral",
-      description: "La solución completa que incluye el llenado guiado de tu formulario oficial DS-160, asesoramiento integral y simulacros de entrevista virtual con un asesor asignado.",
+      description: "Servicio de acompañamiento y asesoría personalizada que incluye el llenado guiado de tu formulario oficial DS-160, revisión de expedientes y simulacros de entrevista con un asesor asignado. (No incluye aranceles ni derechos de visado consulares MRV).",
       buttonText: "Explorar Agentes y Contratar →",
       action: () => router.push("/agents")
     },
+
     autonomia: {
       price: formattedViproPrice,
       promo: "25% de reembolso si contratas Asesoría VIP después",

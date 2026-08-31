@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { NextResponse } from "next/server";
 import supabaseAdmin from "@/lib/supabaseAdmin";
 import supabase from "@/app/lib/supabase";
@@ -244,8 +247,106 @@ export async function GET(request: Request) {
       });
     }
 
-    return NextResponse.json({ success: true, leads: resultLeads }, { status: 200 });
+    // Cross-reference with agent_commissions table to ensure commission_assigned is accurate
+    try {
+      const { data: allCommissions } = await dbClient
+        .from("agent_commissions")
+        .select("id, client_name, notes");
+
+      if (allCommissions && allCommissions.length > 0 && resultLeads.length > 0) {
+        resultLeads = resultLeads.map((l: any) => {
+          const hasComm = allCommissions.some((c: any) => {
+            const notesStr = typeof c.notes === "string" ? c.notes : JSON.stringify(c.notes || {});
+            return (
+              (l.id && notesStr.includes(String(l.id))) ||
+              (l.client_name && c.client_name && c.client_name.trim().toLowerCase() === l.client_name.trim().toLowerCase())
+            );
+          });
+          return {
+            ...l,
+            commission_assigned: Boolean(l.commission_assigned || hasComm),
+          };
+        });
+      }
+    } catch (crossErr) {
+      console.warn("[referral-lead GET] Notice on cross-referencing commissions:", crossErr);
+    }
+
+    return NextResponse.json(
+      { success: true, leads: resultLeads },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
+        },
+      }
+    );
   } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const authHeader = request.headers.get("authorization");
+    let userId: string | null = null;
+    let userRole: string | null = null;
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split("Bearer ")[1];
+      const { data: userData } = await supabase.auth.getUser(token);
+      if (userData?.user) {
+        userId = userData.user.id;
+        const { data: profile } = await (supabaseAdmin || supabase)
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .maybeSingle();
+        userRole = profile?.role || null;
+      }
+    }
+
+    // Permitir actualización si la petición es autenticada por admin/moderador o interna
+    const body = await request.json();
+    const { id, status, commission_assigned, notes } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: "ID de prospecto es requerido." }, { status: 400 });
+    }
+
+    const dbClient = supabaseAdmin || supabase;
+    const updates: Record<string, any> = {};
+    if (status !== undefined) updates.status = status;
+    if (commission_assigned !== undefined) updates.commission_assigned = Boolean(commission_assigned);
+    if (notes !== undefined) updates.notes = notes;
+
+    const { data, error } = await dbClient
+      .from("agency_referral_leads")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("[referral-lead PATCH] Error actualizando DB:", error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { success: true, lead: data },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
+        },
+      }
+    );
+  } catch (err: any) {
+    console.error("[referral-lead PATCH] Error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
