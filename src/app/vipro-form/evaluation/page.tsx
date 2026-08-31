@@ -48,6 +48,7 @@ function ViproEvaluationContent() {
     const [validationError, setValidationError] = useState<string | null>(null);
     const [viproCountry, setViproCountry] = useState<"US" | "CA" | "AU" | "UK">("US");
     const [viproModality, setViproModality] = useState<"first" | "renewal">("first");
+    const [showContinueModal, setShowContinueModal] = useState(false);
 
     const questions = questionsSpanish;
     const question = questions[currentStep];
@@ -543,6 +544,7 @@ function ViproEvaluationContent() {
             setCurrentStep(prev => prev + 1);
         } else {
             setCompleted(true);
+            setShowContinueModal(true);
             console.log("Respuestas finales VIPRO:", answers);
         }
     };
@@ -818,6 +820,37 @@ function ViproEvaluationContent() {
                             </div>
                         )}
 
+                        {/* Continuar Proceso: Selección de Asesor Experto */}
+                        <div className="bg-gradient-to-br from-[#113E5F] via-[#1a4f78] to-[#0a273e] text-white rounded-3xl p-8 shadow-xl border border-white/10 flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden my-2">
+                            <div className="flex-1 text-left space-y-3 z-10">
+                                <span className="inline-block bg-emerald-500/20 text-emerald-300 text-xs font-bold px-3 py-1 rounded-full border border-emerald-400/30 uppercase tracking-wider">
+                                    🚀 ¿Quieres Continuar tu Trámite?
+                                </span>
+                                <h3 className="text-2xl md:text-3xl font-serif font-bold text-white leading-tight">
+                                    Asigna un Asesor Consular Experto para tu Solicitud
+                                </h3>
+                                <p className="text-white/80 text-sm leading-relaxed max-w-xl">
+                                    Con tu evaluación VIPRO lista, da el siguiente paso con la <strong>Asesoría Personalizada</strong>: llenado oficial del formulario consular (DS-160/TRV), auditoría de expediente y simulacros. <em>(Nota: El cobro incluye únicamente la gestión y asesoría personalizada; no incluye la tasa MRV consular gubernamental ni derechos de visa).</em>
+                                </p>
+
+                            </div>
+                            <div className="flex flex-col sm:flex-row md:flex-col gap-3 w-full md:w-auto z-10 flex-shrink-0">
+                                <button
+                                    onClick={() => router.push('/agents')}
+                                    className="bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold px-8 py-4 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 text-center cursor-pointer text-sm flex items-center justify-center gap-2 group"
+                                >
+                                    <span>🔍 Buscar y Elegir Asesor</span>
+                                    <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                </button>
+                                <button
+                                    onClick={() => router.push('/profile?tab=proceso')}
+                                    className="bg-white/10 hover:bg-white/20 text-white font-semibold px-6 py-3 rounded-xl transition-all text-center cursor-pointer text-xs backdrop-blur-md border border-white/20"
+                                >
+                                    Ir a mi Panel de Control
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Actions */}
                         <div className="bg-brand-light/40 border border-brand-primary/10 p-6 rounded-2xl flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
                             <div className="flex-1 flex flex-col gap-2 text-left">
@@ -828,8 +861,15 @@ function ViproEvaluationContent() {
                             </div>
                             <div className="flex flex-wrap gap-3 w-full md:w-auto">
                                 <button 
-                                    onClick={() => window.print()}
+                                    onClick={() => router.push('/agents')}
                                     className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition-colors shadow-md text-center cursor-pointer whitespace-nowrap text-sm flex items-center justify-center gap-2"
+                                >
+                                    <span>🔍</span>
+                                    <span>Buscar Asesor Experto</span>
+                                </button>
+                                <button 
+                                    onClick={() => window.print()}
+                                    className="flex-1 md:flex-none bg-white border border-border-light hover:bg-gray-50 text-text-primary font-bold px-6 py-3 rounded-lg transition-colors shadow-xs text-center cursor-pointer whitespace-nowrap text-sm flex items-center justify-center gap-2"
                                 >
                                     <span>📥</span>
                                     <span>Descargar Reporte PDF</span>
@@ -979,6 +1019,53 @@ function ViproEvaluationContent() {
 
                             </div>
                         </div>
+
+                        {/* Modal de confirmación para continuar proceso y buscar agente */}
+                        {showContinueModal && (
+                            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
+                                <div className="bg-white rounded-3xl max-w-lg w-full p-8 shadow-2xl border border-border-light text-center flex flex-col items-center gap-6 relative animate-in zoom-in-95 duration-300">
+                                    <button
+                                        onClick={() => setShowContinueModal(false)}
+                                        className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-lg w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                                    >
+                                        ✕
+                                    </button>
+                                    <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-4xl shadow-inner animate-bounce">
+                                        🎯
+                                    </div>
+                                    <div className="space-y-2">
+                                        <span className="text-[11px] font-extrabold uppercase tracking-widest text-brand-primary bg-brand-light px-3 py-1 rounded-full">
+                                            Diagnóstico VIPRO Finalizado
+                                        </span>
+                                        <h2 className="text-2xl font-serif font-bold text-text-primary">
+                                            ¿Deseas continuar tu trámite con un Asesor Experto?
+                                        </h2>
+                                        <p className="text-sm text-text-secondary leading-relaxed">
+                                            ¡Excelente trabajo! Tu evaluación diagnóstica se ha registrado exitosamente. Ahora puedes buscar y seleccionar a un <strong>Asesor Consular Certificado</strong> en nuestra red para acompañarte en la preparación completa de tu visa.
+                                        </p>
+                                    </div>
+
+                                    <div className="flex flex-col gap-3 w-full pt-2">
+                                        <button
+                                            onClick={() => {
+                                                setShowContinueModal(false);
+                                                router.push("/agents");
+                                            }}
+                                            className="w-full bg-brand-primary hover:bg-brand-hover text-white font-bold py-4 px-6 rounded-xl transition-all shadow-md text-sm flex items-center justify-center gap-2 cursor-pointer group"
+                                        >
+                                            <span>🔍 Buscar y Seleccionar Asesor</span>
+                                            <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setShowContinueModal(false)}
+                                            className="w-full bg-gray-100 hover:bg-gray-200 text-text-primary font-semibold py-3 px-6 rounded-xl transition-colors text-xs cursor-pointer"
+                                        >
+                                            Ver mi reporte de diagnóstico primero
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </main>
                 <Footer />

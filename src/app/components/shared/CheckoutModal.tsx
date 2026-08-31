@@ -44,7 +44,15 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
         }
       }
     }
-  }, []);
+
+    // Record checkout intent for abandoned checkout tracking
+    if (user?.id) {
+      AuthService.updateUser({
+        last_checkout_viewed_at: new Date().toISOString(),
+        last_checkout_product: product
+      }).catch((e) => console.warn("Notice: could not record checkout intent:", e));
+    }
+  }, [user?.id, product]);
 
   // Automatic activation and redirection after payment confirmation
   useEffect(() => {
@@ -559,7 +567,7 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
               ) : (
                 <>
                   <div className="flex justify-between text-xs text-text-secondary">
-                    <span>Asesoría Consular Completa</span>
+                    <span>Asesoría Consular Personalizada</span>
                     <span>${basePrice.toFixed(2)} USD</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-text-primary pt-2 border-t border-dashed border-border-light">
@@ -568,7 +576,21 @@ export function CheckoutModal({ agent, product = "advisor", onClose, onSuccess }
                   </div>
                 </>
               )}
+
+              {/* Informational Disclaimer Banner */}
+              <div className="mt-3 p-3 bg-blue-50/70 border border-blue-200/80 rounded-lg text-[11px] text-blue-900 leading-relaxed">
+                <p className="font-bold flex items-center gap-1.5 mb-0.5 text-blue-950">
+                  <span>ℹ️ Claridad de Cobertura:</span>
+                </p>
+                <p className="text-blue-900/90">
+                  {product === "vipro"
+                    ? "Este pago cubre exclusivamente la evaluación diagnóstica algorítmica de viabilidad consular de TodoVisa."
+                    : `El valor de $${basePrice.toFixed(2)} USD corresponde únicamente a los honorarios por servicio de acompañamiento y asesoría personalizada de tu experto (llenado de DS-160, revisión de documentos y simulacros). `}
+                  <strong className="text-blue-950 font-bold"> No incluye tasas de visado gubernamentales (ej. tasa MRV del consulado), aranceles de embajada ni gastos de terceros.</strong>
+                </p>
+              </div>
             </div>
+
 
             {/* PayPal Action Box */}
             <div className="p-6 space-y-4 text-center">

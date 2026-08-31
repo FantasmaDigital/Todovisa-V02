@@ -6,3 +6,7 @@ import './auth_flows.test.js';
 import './pricing_commissions.test.js';
 import './menu_navigation.test.js';
 import './preformulario.test.js';
+import './abandoned_checkout.test.js';
+import './otp.test.js';
+
+

@@ -107,6 +107,25 @@ export class AuthClientService {
     return handleResponse(res);
   }
 
+  static async sendOtp(email: string, purpose: string = "verification", name?: string) {
+    const res = await fetch("/api/auth/send-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, purpose, name }),
+    });
+    return handleResponse(res);
+  }
+
+  static async verifyOtp(email: string, code: string, purpose: string = "verification") {
+    const res = await fetch("/api/auth/verify-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, purpose }),
+    });
+    return handleResponse(res);
+  }
+
+
   // Duración máxima de inactividad de sesión: 24 Horas (86,400,000 milisegundos)
   static SESSION_INACTIVITY_LIMIT_MS = 24 * 60 * 60 * 1000;
   static LAST_ACTIVITY_KEY = "todovisa_last_activity_ts";
