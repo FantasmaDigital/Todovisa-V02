@@ -42,7 +42,11 @@ export async function sendEmail({ to, subject, html }: EmailOptions) {
     console.log(`[Email Service - SENT] MessageId: ${info.messageId} to ${to}`);
     return { success: true, messageId: info.messageId };
   } catch (error: any) {
-    console.error(`[Email Service - ERROR] Failed to send email to ${to}:`, error);
-    throw error;
+    const errorMsg = error?.response || error?.message || "Error desconocido al enviar correo";
+    console.error(`[Email Service - ERROR] Failed to send email to ${to}:`, errorMsg);
+    if (error?.code === 'EAUTH' || errorMsg.includes('554')) {
+      console.warn(`[Email Service - WARNING] Error de autenticación SMTP (Zoho Mail 554). Verifica SMTP_USER / Contraseña de Aplicación en .env.local.`);
+    }
+    return { success: false, error: errorMsg, code: error?.code };
   }
 }

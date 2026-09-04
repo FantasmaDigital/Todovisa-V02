@@ -5,29 +5,45 @@ import { createPasswordResetEmail } from "@/lib/emailTemplates";
 
 export async function POST(request: Request) {
   try {
-    const { email } = await request.json();
+    const body = await request.json();
+    const emailInput = body.email || body.Email;
 
-    if (!email) {
+    if (!emailInput || typeof emailInput !== "string") {
       return NextResponse.json({ error: "El correo electrónico es requerido" }, { status: 400 });
     }
 
-    const { data, error } = await AuthRepository.resetPasswordForEmail(email);
+    const email = emailInput.trim().toLowerCase();
+
+    if (!/^\S+@\S+\.\S+$/i.test(email)) {
+      return NextResponse.json({ error: "El formato del correo no es válido" }, { status: 400 });
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://todovisa.com';
+    const resetUrl = `${appUrl}/auth/reset-password?email=${encodeURIComponent(email)}`;
+
+    const { error } = await AuthRepository.resetPasswordForEmail(email, { redirectTo: resetUrl });
 
     if (error) {
       console.error("Supabase Password Reset Error:", error);
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ error: error.message || "Error al solicitar el restablecimiento en Supabase" }, { status: 400 });
     }
 
-    // Trigger custom branded email (non-blocking)
-    const resetUrl = (data as any)?.url || `${process.env.NEXT_PUBLIC_APP_URL || 'https://todovisa.com'}/auth/reset-password?email=${encodeURIComponent(email)}`;
-    sendEmail({
+    // Trigger branded email with custom template via SMTP
+    const emailResult = await sendEmail({
       to: email,
       subject: "Restablecer tu contraseña - TodoVisa",
       html: createPasswordResetEmail("", resetUrl),
-    }).catch((e) => console.error("Error sending password reset email:", e));
+    });
+
+    if (!emailResult.success) {
+      console.warn("Correo SMTP no enviado (verifique credenciales), pero solicitud registrada:", emailResult.error);
+    }
 
     return NextResponse.json(
-      { message: "Se ha enviado un correo con instrucciones para restablecer tu contraseña." },
+      {
+        message: "Se ha enviado un correo con las instrucciones para restablecer tu contraseña.",
+        resetUrl: process.env.NODE_ENV === 'development' ? resetUrl : undefined,
+      },
       { status: 200 }
     );
   } catch (err: any) {

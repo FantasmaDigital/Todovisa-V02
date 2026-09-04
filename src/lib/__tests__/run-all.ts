@@ -8,5 +8,6 @@ import './menu_navigation.test.js';
 import './preformulario.test.js';
 import './abandoned_checkout.test.js';
 import './otp.test.js';
+import './email.test.js';
 
 

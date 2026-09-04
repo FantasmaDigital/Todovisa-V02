@@ -38,8 +38,12 @@ export class AuthRepository {
     });
   }
 
-  static async resetPasswordForEmail(email: string) {
-    return await supabase.auth.resetPasswordForEmail(email);
+  static async resetPasswordForEmail(email: string, options?: { redirectTo?: string }) {
+    const siteUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://todovisa.com";
+    const defaultRedirect = `${siteUrl}/auth/reset-password`;
+    return await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: options?.redirectTo || defaultRedirect,
+    });
   }
 
   static async getUser(token?: string | null) {

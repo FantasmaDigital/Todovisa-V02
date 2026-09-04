@@ -4643,18 +4643,26 @@ export default function PerfilUsuarioPage() {
                                     <td className="py-4 px-4 text-right">
                                       {isViproItem ? (
                                         <button
-                                          onClick={() => showToast("Generando PDF de factura...", "info")}
+                                          onClick={() => window.open(`/comprobante/${purchase.reference_id}`, '_blank')}
                                           className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans"
                                         >
                                           Descargar
                                         </button>
                                       ) : (
-                                        <button
-                                          onClick={() => handleTabChange("asesor")}
-                                          className="text-brand-primary hover:underline font-semibold"
-                                        >
-                                          Ver Chat
-                                        </button>
+                                        <div className="flex justify-end gap-3">
+                                          <button
+                                            onClick={() => handleTabChange("asesor")}
+                                            className="text-brand-primary hover:underline font-semibold text-xs"
+                                          >
+                                            Ver Chat
+                                          </button>
+                                          <button
+                                            onClick={() => window.open(`/comprobante/${purchase.reference_id}`, '_blank')}
+                                            className="text-brand-primary hover:underline hover:text-brand-hover font-semibold transition-colors font-sans text-xs"
+                                          >
+                                            Descargar
+                                          </button>
+                                        </div>
                                       )}
                                     </td>
                                   </tr>
@@ -6152,18 +6160,6 @@ export default function PerfilUsuarioPage() {
                         <h2 className="text-lg font-bold text-text-primary">Historial Global de Pagos y Transacciones</h2>
                         <p className="text-xs text-text-secondary mt-1">Cobros procesados vía PayPal SDK y asignación manual de comisiones B2B.</p>
                       </div>
-                      <button
-                        onClick={() => {
-                          setSelectedTxForCommission(null);
-                          setAdminCommissionGross("150.00");
-                          setAdminCommissionClientName("");
-                          setAdminCommissionRate("20");
-                          setIsAdminCommissionModalOpen(true);
-                        }}
-                        className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-sm border-none cursor-pointer flex items-center gap-1.5 shrink-0"
-                      >
-                        <span>+ Asignar Comisión a Empresa (20%)</span>
-                      </button>
                     </div>
 
                     <div className="w-full max-w-full overflow-x-auto rounded-xl border border-border-light table-scroll-container">
